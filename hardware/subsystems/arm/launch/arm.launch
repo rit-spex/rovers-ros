@@ -1,0 +1,10 @@
+<launch>
+    <!-- Launch the ArmRobot node -->
+    <node name="arm_robot_node"
+          pkg="arm"
+          type="ArmRobot.py"
+          output="screen"
+          respawn="false">
+        <!-- Add any necessary parameters here -->
+    </node>
+</launch>
