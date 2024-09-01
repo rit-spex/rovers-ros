@@ -1,6 +1,6 @@
 <launch>
     <!-- Set camera indices -->
-    <node name="set_camera_indices" pkg="your_package_name" type="set_camera_indices.py" output="screen" />
+    <node pkg="cameras" type="set_camera_indices.py" name="set_camera_indices" output="screen" />
 
     <!-- Launch node for the arm camera -->
     <node pkg="cameras" type="Camera.py" name="arm_camera" output="screen">

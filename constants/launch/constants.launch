@@ -1,0 +1,5 @@
+<launch>
+    <node pkg="constants" type="can_constants_node.py" name="can_constants_node" output="screen" />
+    <node pkg="constants" type="rover_constants_node.py" name="rover_constants_node" output="screen" />
+    <node pkg="constants" type="rover_pinout_node.py" name="rover_pinout_node" output="screen" />
+</launch>
