@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="gps" type="GPS.py" name="GPS" output="screen"></node>
+</launch>

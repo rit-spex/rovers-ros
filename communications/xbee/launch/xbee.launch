@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="xbee" type="xbee.py" name="xbee" output="screen"></node>
+</launch>

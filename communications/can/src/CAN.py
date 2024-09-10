@@ -2,16 +2,15 @@
 # from pydoc_data import topics
 import rospkg
 import sys
+
 rospack = rospkg.RosPack()
-package_path = rospack.get_path('constants')
-sys.path.append(package_path + '/src')
+package_path = rospack.get_path("constants")
+sys.path.append(package_path + "/src")
 
 import can
 import rospy
 from communications.msg import CAN_msg, CAN_FD_msg
 from CAN_Constants import CHANNEL, TOPICS
-import spidev
-
 
 
 class CAN:
@@ -28,7 +27,6 @@ class CAN:
                     f"/CAN/TX/{TOPICS[message_id]['name']}", CAN_msg, self.send_msg
                 )
             )
-
         self.run()
 
     def send_msg(self, msg):
@@ -53,12 +51,14 @@ class JETSON_LISTENER(can.Listener):
         ros_msg.id = msg.arbitration_id
         ros_msg.buf = msg.data
 
-        rospy.Publisher(f"/CAN/RX/{TOPICS[msg.arbitration_id]['name']}", CAN_msg).publish(
-            ros_msg
-        )
+        rospy.Publisher(
+            f"/CAN/RX/{TOPICS[msg.arbitration_id]['name']}", CAN_msg
+        ).publish(ros_msg)
+
 
 def main():
     can = CAN()
+
 
 if __name__ == "__main__":
     main()

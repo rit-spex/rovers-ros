@@ -1,0 +1,3 @@
+<launch>
+    <node pkg="can" type="CAN.py" name="CAN" output="screen"></node>
+</launch>

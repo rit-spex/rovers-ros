@@ -1,3 +1,0 @@
-<launch>
-    <node pkg="communications" type="can_node.py" name="can_node" output="screen"></node>
-</launch>
