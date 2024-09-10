@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "rovers"
+version = "0.0.0"
+description = ""
+authors = ["Joshua Yoder <me@jpfyoder.com>"]
+readme = "README.md"
+packages = [{include = "rovers"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# see https://python-semantic-release.readthedocs.io/en/latest/configuration.html
+[tool.semantic_release]
+branch = "main"
+version_variable = [
+    "pyproject.toml:version"
+]
+upload_to_pypi = false
+upload_to_release = false
+commit_subject = "chore(release): {version}"

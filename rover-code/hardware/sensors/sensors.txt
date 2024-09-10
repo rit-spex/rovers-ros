@@ -1,0 +1,14 @@
+temperature
+gps
+imu
+encoders
+lidar
+
+science:
+cameras
+heat block (temp sensors)
+"backpack" -- motor/encoder
+humidity sensors
+fluorometer
+
+battery health
