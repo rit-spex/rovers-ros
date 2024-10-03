@@ -1,0 +1,28 @@
+{
+	"python.autoComplete.extraPaths": [
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/xbee/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/main/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/gps/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/drive_base/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/custom_interfaces/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/constants/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/can_comms/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/cameras/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/arm/lib/python3.10/site-packages",
+		"/opt/ros/humble/lib/python3.10/site-packages",
+		"/opt/ros/humble/local/lib/python3.10/dist-packages"
+	],
+	"python.analysis.extraPaths": [
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/xbee/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/main/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/gps/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/drive_base/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/custom_interfaces/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/constants/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/can_comms/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/cameras/lib/python3.10/site-packages",
+		"/home/garrett/Coding/SPEX/rovers-ros2/install/arm/lib/python3.10/site-packages",
+		"/opt/ros/humble/lib/python3.10/site-packages",
+		"/opt/ros/humble/local/lib/python3.10/dist-packages"
+	]
+}
