@@ -1,3 +1,4 @@
 <launch>
-    
+	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
+	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
 </launch>

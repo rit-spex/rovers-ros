@@ -1,1 +1,3 @@
-<launch></launch>
+<launch>
+	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
+</launch>
