@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 
+from typing import Any
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
-import constants.CommanndCodes
+# import constants.CommanndCodes
 from constants.CommanndCodes import CONSTANTS
 
 import time
 
 # ros imports
 import rclpy
+import rclpy.logging
 from rclpy.node import Node
-from rclpy.publisher import Publisher
+# from rclpy.publisher import Publisher
 
 # from custom_interfaces.msg import CanFD, Can
 from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
-import xbee
-import xbee.xbee
-import xbee.xbee.xbee_node
+# import xbee
+# import xbee.xbee
+# import xbee.xbee.xbee_node
 
 XBEE_PORT = "/dev/ttyUSB0"
 XBEE_SPEED = 921600
@@ -113,55 +115,63 @@ class Xbee(Node):
     def send_msg(self):
         raise NotImplementedError
 
-    def on_message_received(self):
+    def on_message_received(self, var1):
         """
         callback function that is called when message is received
         """
+
+        # print(var1)
+
+        self.get_logger().debug(var1)
+
+        return
 
         # stop if xbee is disabed
         if self.__disabled:
             return
 
         # get message from the physical xbee
-        message = None
-        try:
-            message = self.__xbee_device.read_data(0.0004)
-        except TimeoutException:
-            return
-        except Exception as e:
-            print("\n\nBIG ISSUE\n")
-            print(e)
-            return
+        # message = None
+        # try:
+        #     message = self.__xbee_device.read_data(0.0004)
+        # except TimeoutException:
+        #     return
+        # except Exception as e:
+        #     print("\n\nBIG ISSUE\n")
+        #     print(e)
+        #     return
 
         # stop if message is none
-        if message is None:
+        if xbee_message is None:
             return
 
         # if start of message is not valid, stop
-        if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+        if list(xbee_message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
             return
 
         if not self.__is_first_connected:
             self.__is_first_connected = True
 
-        self.__parse_incoming_message(list(message.data)[1:])
+        self.__parse_incoming_message(list(xbee_message.data)[1:])
 
         self.__last_successful_message = time.time_ns()
 
     def run(self):
-        # rclpy.spin(self)
-        last_cycle_time = time.time_ns()
+        # last_cycle_time = time.time_ns()
+        self.__xbee_device.add_data_received_callback(self.on_message_received)
+        rclpy.spin(self)
 
-        while not self.__disabled:
-            if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
-                last_cycle_time = time.time_ns()
-                self.on_message_received()
+        # while not self.__disabled:
+        #     if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
+        #         last_cycle_time = time.time_ns()
 
-                if (
-                    time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
-                    and self.__is_first_connected
-                ):
-                    self.set_disabled(True)
+        #         if (
+        #             time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
+        #             and self.__is_first_connected
+        #         ):
+        #             self.set_disabled(True)
+
+        rclpy.shutdown()
 
 
 def main():
