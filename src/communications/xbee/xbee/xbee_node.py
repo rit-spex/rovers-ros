@@ -3,22 +3,23 @@
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
-import constants.CommanndCodes
+from constants.CAN_Constants import TOPICS
 from constants.CommanndCodes import CONSTANTS
 
 import time
 
 # ros imports
+from pyparsing import OnlyOnce
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-# from custom_interfaces.msg import CanFD, Can
+from custom_interfaces.msg import CanFD, Can
 from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
 
 XBEE_PORT = "/dev/ttyUSB0"
-XBEE_SPEED = 921600
+XBEE_SPEED = 230400
 XBEE_UPDATE_RATE = 40000000  # 40000 nano second -> 40 micro second
 XBEE_TIMEOUT = 1000000000  # 1,000,000 nano second -> 1 second
 
@@ -39,7 +40,7 @@ class Xbee(Node):
         self.__is_first_connected = False
 
         # all the current values from the xbee
-        # self.__button_values = [False] * CONSTANTS.NUM_BUTTONS
+        self.__button_values = [False] * CONSTANTS.NUM_BUTTONS
         self.__axis_values = [0.0] * CONSTANTS.NUM_AXES
 
         # open the port to the device
@@ -48,7 +49,6 @@ class Xbee(Node):
 
         # track when the last successful message was received
         self.__last_successful_message = time.time_ns()
-
 
     def __del__(self):
         """
@@ -63,23 +63,23 @@ class Xbee(Node):
     # :param input_trigger - Controller button or axis, value from CommandCodes
     # """
 
-    # def get_current_value(self, input_type: int, input_trigger: int) -> float | bool:
-    #     match input_type:
-    #         case CONSTANTS.INPUT_TYPE.IS_AXIS:
-    #             if input_trigger == CONSTANTS.JOYSTICK.AXIS_LY:
-    #                 return self.__axis_values[0]
-    #             else:
-    #                 return self.__axis_values[1]
-    #         case CONSTANTS.INPUT_TYPE.IS_AXIS:
-    #             return self.__button_values[input_trigger]
-    #         case CONSTANTS.INPUT_TYPE.IS_BUTTON:
-    #             return self.__button_values[
-    #                 CONSTANTS.NUM_BUTTONS
-    #                 - CONSTANTS.NUM_TRIGGER
-    #                 + (input_trigger - CONSTANTS.NUM_AXES)
-    #             ]
+    def get_current_value(self, input_type: int, input_trigger: int) -> float | bool:
+        match input_type:
+            case CONSTANTS.INPUT_TYPE.IS_AXIS:
+                if input_trigger == CONSTANTS.JOYSTICK.AXIS_LY:
+                    return self.__axis_values[0]
+                else:
+                    return self.__axis_values[1]
+            case CONSTANTS.INPUT_TYPE.IS_TRIGGER:
+                return self.__button_values[input_trigger]
+            case CONSTANTS.INPUT_TYPE.IS_BUTTON:
+                return self.__button_values[
+                    CONSTANTS.NUM_BUTTONS
+                    - CONSTANTS.NUM_TRIGGER
+                    + (input_trigger - CONSTANTS.NUM_AXES)
+                ]
 
-    #     return False
+        return False
 
     # print all the current values to terminal
     # def print_values(self) -> None:
@@ -162,7 +162,6 @@ class Xbee(Node):
     def disable_xbee(self) -> None:
         self.__is_disabled = True
 
-
     #
     def __parse_incoming_message(self, message: list[int]):
         """
@@ -191,23 +190,23 @@ class Xbee(Node):
             # check if section of byte is on or off
             print(message[byte_num])
 
-            button_value = (
-                (
-                    message[byte_num]
-                    // pow(
-                        2,
-                        (i % CONSTANTS.BUTTONS.NUM_BUTTONS_PER_BYTE)
-                        * CONSTANTS.BUTTONS.SIZE_BUTTON_IN_BITS,
-                    )
-                )
-                % 4
-            ) == CONSTANTS.BUTTONS.ON
+            # button_value = (
+            #     (
+            #         message[byte_num]
+            #         // pow(
+            #             2,
+            #             (i % CONSTANTS.BUTTONS.NUM_BUTTONS_PER_BYTE)
+            #             * CONSTANTS.BUTTONS.SIZE_BUTTON_IN_BITS,
+            #         )
+            #     )
+            #     % 4
+            # ) == CONSTANTS.BUTTONS.ON
 
-            self.create_publisher(
-                TOPICS_BUTTON[i]["val"],
-                f"/Xbee/Buttons/RX/{TOPICS_BUTTON[i]['name']}",
-                10
-            ).publish(button_value)
+            # self.create_publisher(
+            #     TOPICS_BUTTON[i]["val"],
+            #     f"/Xbee/Buttons/RX/{TOPICS_BUTTON[i]['name']}",
+            #     10,
+            # ).publish(button_value)
 
     def send_msg(self):
         pass
@@ -248,43 +247,43 @@ class Xbee(Node):
 
             self.__last_successful_message = time.time_ns()
 
-            # message_id = 3
+            message_id = 3
 
-            # ros_msg = Can()
-            # ros_msg.channel = TOPICS[message_id]["channel"]
-            # ros_msg.id = message_id
-            # ros_msg.buf = [
-            #     int(
-            #         (
-            #             self.get_current_value(
-            #                 CONSTANTS.JOYSTICK.AXIS_LY, CONSTANTS.INPUT_TYPE.IS_AXIS
-            #             )
-            #             * 100
-            #         )
-            #         + 100
-            #     ),
-            #     int(
-            #         (
-            #             self.get_current_value(
-            #                 CONSTANTS.JOYSTICK.AXIS_RY, CONSTANTS.INPUT_TYPE.IS_AXIS
-            #             )
-            #             * 100
-            #         )
-            #         + 100
-            #     ),
-            #     0,
-            #     0,
-            #     0,
-            #     0,
-            #     0,
-            #     0,
-            # ]
+            ros_msg = Can()
+            ros_msg.channel = TOPICS[message_id]["channel"]
+            ros_msg.id = message_id
+            ros_msg.buf = [
+                int(
+                    (
+                        self.get_current_value(
+                            CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_LY
+                        )
+                        * 100
+                    )
+                    + 100
+                ),
+                int(
+                    (
+                        self.get_current_value(
+                            CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_RY
+                        )
+                        * 100
+                    )
+                    + 100
+                ),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]
 
-            # self.create_publisher(
-            #     msg_type=Can,
-            #     topic=f"/CAN/TX/{TOPICS[message_id]['name']}",
-            #     qos_profile=10,
-            # ).publish(ros_msg)
+            self.create_publisher(
+                msg_type=Can,
+                topic=f"/CAN/TX/{TOPICS[message_id]['name']}",
+                qos_profile=10,
+            ).publish(ros_msg)
 
     def run(self):
         # rclpy.spin(self)
