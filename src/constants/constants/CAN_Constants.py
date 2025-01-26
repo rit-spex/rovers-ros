@@ -26,5 +26,5 @@ TOPICS = {
         "name": "CURRENT_VELOCITY",
         "buf": bytearray(8),
         "channel": CHANNEL.MAIN_BODY,
-    },
+    }
 }
