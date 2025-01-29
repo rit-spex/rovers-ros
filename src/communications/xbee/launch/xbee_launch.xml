@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
+</launch>
