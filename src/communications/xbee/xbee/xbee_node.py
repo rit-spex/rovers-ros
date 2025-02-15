@@ -286,7 +286,7 @@ class Xbee(Node):
             ).publish(ros_msg)
 
     def run(self):
-        # rclpy.spin(self)
+        rclpy.spin(self)
         last_cycle_time = time.time_ns()
 
         while not self.__is_disabled:
@@ -298,6 +298,7 @@ class Xbee(Node):
                     time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
                     and self.__is_first_connected
                 ):
+                    self.get_logger().info("disabling xbee")
                     self.disable_xbee()
 
 

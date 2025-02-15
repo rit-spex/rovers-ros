@@ -43,20 +43,21 @@ class CAN(Node):
         self.run()
 
     def reset_network(self):
-        print("resetting the can network...")
+        self.get_logger().info("resetting the can network...")
         # os.system("sudo ifconfig can0 down")
         # os.system("sudo ip link set can0 up type can bitrate 500000")
         # os.system("sudo ip link set can0 up")
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def send_msg(self, msg):
+        self.get_logger().info(f"sending: {msg}")
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )
         try:
             self.bus.send(bus_msg)
-        except:
-            self.get_logger().debug("Failed to send message")
+        except Exception as e:
+            self.get_logger().info(f"Failed to send message: {e}")
 
     def run(self):
         rclpy.spin(self)
@@ -70,14 +71,16 @@ class JETSON_LISTENER(can.Listener):
         self.__node = node
 
     def on_message_received(self, msg: can.Message) -> None:
-        ros_msg = Can()
-        ros_msg.channel = TOPICS[msg.arbitration_id]["channel"]
-        ros_msg.id = msg.arbitration_id
-        ros_msg.buf = msg.data
+        # uncomment if you're brave enough
+        # ros_msg = Can()
+        # ros_msg.channel = TOPICS[msg.arbitration_id]["channel"]
+        # ros_msg.id = msg.arbitration_id
+        # ros_msg.buf = msg.data
 
-        self.__node.create_publisher(
-            Can, f"/CAN/RX/{TOPICS[msg.arbitration_id]['name']}", 10
-        ).publish(ros_msg)
+        # self.__node.create_publisher(
+        #     Can, f"/CAN/RX/{TOPICS[msg.arbitration_id]['name']}", 10
+        # ).publish(ros_msg)
+        pass
 
 
 def main():
