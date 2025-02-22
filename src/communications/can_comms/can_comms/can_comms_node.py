@@ -30,7 +30,7 @@ class CAN(Node):
         )
         can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
-        for message_id in range(0, len(TOPICS)):
+        for message_id in TOPICS.keys():
             self.__subscriptions.append(
                 self.create_subscription(
                     msg_type=Can,
@@ -50,7 +50,7 @@ class CAN(Node):
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def send_msg(self, msg):
-        self.get_logger().info(f"sending: {msg}")
+        self.get_logger().info(f"sending: {msg.buf}")
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )

@@ -1,3 +1,5 @@
+from std_msgs.msg import Float32, Bool
+
 class CONSTANTS:
     # message to send to show start of new values
     START_MESSAGE = b"\xDE"
@@ -67,23 +69,23 @@ class CONSTANTS:
 TOPICS_JOYSTICK = {
     CONSTANTS.JOYSTICK.AXIS_LX: {
         "id": CONSTANTS.JOYSTICK.AXIS_LX,
-        "name": "AXIS_LX",
-        "val": float,
+        "name": "LX",
+        "val": Float32,
     },
     CONSTANTS.JOYSTICK.AXIS_LY: {
         "id": CONSTANTS.JOYSTICK.AXIS_LY,
-        "name": "AXIS_LY",
-        "val": float,
+        "name": "LY",
+        "val": Float32,
     },
     CONSTANTS.JOYSTICK.AXIS_RX: {
         "id": CONSTANTS.JOYSTICK.AXIS_RX,
-        "name": "AXIS_RX",
-        "val": float,
+        "name": "RX",
+        "val": Float32,
     },
     CONSTANTS.JOYSTICK.AXIS_RY: {
         "id": CONSTANTS.JOYSTICK.AXIS_RY,
-        "name": "AXIS_RY",
-        "val": float,
+        "name": "RY",
+        "val": Float32,
     },
 }
 
@@ -91,56 +93,56 @@ TOPICS_BUTTON = {
     CONSTANTS.BUTTONS.A: {
         "id": CONSTANTS.BUTTONS.A,
         "name": "A",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.B: {
         "id": CONSTANTS.BUTTONS.B,
         "name": "B",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.X: {
         "id": CONSTANTS.BUTTONS.X,
         "name": "X",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.Y: {
         "id": CONSTANTS.BUTTONS.Y,
         "name": "Y",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.LEFT_BUMPER: {
         "id": CONSTANTS.BUTTONS.LEFT_BUMPER,
         "name": "LEFT_BUMPER",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.RIGHT_BUMPER: {
         "id": CONSTANTS.BUTTONS.RIGHT_BUMPER,
         "name": "RIGHT_BUMPER",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.SELECT: {
         "id": CONSTANTS.BUTTONS.SELECT,
         "name": "SELECT",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.START: {
         "id": CONSTANTS.BUTTONS.START,
         "name": "START",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.LEFT_STICK: {
         "id": CONSTANTS.BUTTONS.LEFT_STICK,
         "name": "LEFT_STICK",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.RIGHT_STICK: {
         "id": CONSTANTS.BUTTONS.RIGHT_STICK,
         "name": "RIGHT_STICK",
-        "val": bool,
+        "val": Bool,
     },
     CONSTANTS.BUTTONS.HOME: {
         "id": CONSTANTS.BUTTONS.HOME,
         "name": "HOME",
-        "val": bool,
+        "val": Bool,
     },
 }

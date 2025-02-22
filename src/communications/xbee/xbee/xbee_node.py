@@ -27,7 +27,7 @@ XBEE_TIMEOUT = 1000000000  # 1,000,000 nano second -> 1 second
 class Xbee(Node):
     def __init__(self):
 
-        super().__init__("Xbee_node")
+        super().__init__("xbee_node")
 
         # the number of iterations without signal
         self.__num_no_signal = 0
@@ -81,74 +81,51 @@ class Xbee(Node):
 
         return False
 
-    # print all the current values to terminal
-    # def print_values(self) -> None:
+    def print_values(self) -> None:
+        """
+        print all the current values to terminal
+        """
+        # self.get_logger().info(self.__button_values)
 
-    #     print(self.__button_values)
+        self.get_logger().info(
+            f"Left Axis: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_LY)}"
+        )
 
-    #     print(
-    #         "Left Axis: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_LY
-    #         ),
-    #     )
+        self.get_logger().info(
+            f"Right Axis: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_RY)}"
+        )
 
-    #     print(
-    #         " Right Axis: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_RY
-    #         ),
-    #     )
+        self.get_logger().info(
+            f"A Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.A)}"
+        )
 
-    #     print(
-    #         " A Button: ",
-    #         self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.A),
-    #     )
+        self.get_logger().info(
+            f"B Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.B)}"
+        )
 
-    #     print(
-    #         " B Button: ",
-    #         self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.B),
-    #     )
+        self.get_logger().info(
+            f"X Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.X)}"
+        )
 
-    #     print(
-    #         " X Button: ",
-    #         self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.X),
-    #     )
+        self.get_logger().info(
+            f"Y Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.Y)}"
+        )
 
-    #     print(
-    #         " Y Button: ",
-    #         self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.Y),
-    #     )
+        self.get_logger().info(
+            f"LB Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.LEFT_BUMPER)}"
+        )
 
-    #     print(
-    #         " LB Button: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.LEFT_BUMPER
-    #         ),
-    #     )
+        self.get_logger().info(
+            f"RB Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.RIGHT_BUMPER)}"
+        )
 
-    #     print(
-    #         " RB Button: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_BUTTON, CONSTANTS.BUTTONS.RIGHT_BUMPER
-    #         ),
-    #     )
+        self.get_logger().info(
+            f"LT Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_TRIGGER, CONSTANTS.TRIGGER.AXIS_LT)}"
+        )
 
-    #     print(
-    #         " LT Button: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_TRIGGER, CONSTANTS.TRIGGER.AXIS_LT
-    #         ),
-    #     )
-
-    #     print(
-    #         " RT Button: ",
-    #         self.get_current_value(
-    #             CONSTANTS.INPUT_TYPE.IS_TRIGGER, CONSTANTS.TRIGGER.AXIS_RT
-    #         ),
-    #     )
-
-    #     print()
+        self.get_logger().info(
+            f"RT Button: {self.get_current_value(CONSTANTS.INPUT_TYPE.IS_TRIGGER, CONSTANTS.TRIGGER.AXIS_RT)}\n"
+        )
 
     # checks if the xbee is disabled
     def is_disabled(self) -> bool:
@@ -179,8 +156,27 @@ class Xbee(Node):
                 >= message[byte_num]
                 >= CONSTANTS.JOYSTICK.MIN_VALUE
             ):
-                self.__axis_values[i] = (message[byte_num] - 100.0) / (100.0)
+
+                # self.get_logger().info(f"i: {i+1}")
+                value = (message[byte_num] - 100.0) / (100.0)
+                self.__axis_values[i] = value
                 byte_num = byte_num + 1
+
+                ros_msg = TOPICS_JOYSTICK[i+1]["val"]()
+                ros_msg.data = value
+
+                # self.get_logger().info(f"0: {TOPICS_JOYSTICK[0]}")
+                # self.get_logger().info(f"1: {TOPICS_JOYSTICK[1]}")
+                # self.get_logger().info(f"2: {TOPICS_JOYSTICK[2]}")
+                # self.get_logger().info(f"3: {TOPICS_JOYSTICK[3]}")
+
+                # self.get_logger().info(f"{TOPICS_JOYSTICK[i+1]['name']}: {value}")
+
+                self.create_publisher(
+                    TOPICS_JOYSTICK[i+1]["val"],
+                    f"/Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i+1]['name']}",
+                    10,
+                ).publish(ros_msg)
 
         # parse for button values
         for i in range(0, CONSTANTS.NUM_BUTTONS, 1):
@@ -188,25 +184,30 @@ class Xbee(Node):
                 byte_num = byte_num + 1
 
             # check if section of byte is on or off
-            print(message[byte_num])
+            # self.get_logger().info(str(message[byte_num]))
 
-            # button_value = (
-            #     (
-            #         message[byte_num]
-            #         // pow(
-            #             2,
-            #             (i % CONSTANTS.BUTTONS.NUM_BUTTONS_PER_BYTE)
-            #             * CONSTANTS.BUTTONS.SIZE_BUTTON_IN_BITS,
-            #         )
-            #     )
-            #     % 4
-            # ) == CONSTANTS.BUTTONS.ON
+            button_value = (
+                (
+                    message[byte_num]
+                    // pow(
+                        2,
+                        (i % CONSTANTS.BUTTONS.NUM_BUTTONS_PER_BYTE)
+                        * CONSTANTS.BUTTONS.SIZE_BUTTON_IN_BITS,
+                    )
+                )
+                % 4
+            ) == CONSTANTS.BUTTONS.ON
 
-            # self.create_publisher(
-            #     TOPICS_BUTTON[i]["val"],
-            #     f"/Xbee/Buttons/RX/{TOPICS_BUTTON[i]['name']}",
-            #     10,
-            # ).publish(button_value)
+            ros_msg = TOPICS_BUTTON[i]["val"]()
+            ros_msg.data = button_value
+
+            # self.get_logger().info(f"{TOPICS_BUTTON[i]['name']}: {button_value}")
+
+            self.create_publisher(
+                TOPICS_BUTTON[i]["val"],
+                f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}",
+                10,
+            ).publish(ros_msg)
 
     def send_msg(self):
         pass
@@ -227,8 +228,8 @@ class Xbee(Node):
         except TimeoutException:
             return
         except Exception as e:
-            print("\n\nBIG ISSUE\n")
-            print(e)
+            self.get_logger().info("\n\nBIG ISSUE\n")
+            self.get_logger().info(str(e))
             return
 
         # message is invalid
@@ -238,56 +239,22 @@ class Xbee(Node):
         # check if message has a valid start message
         if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
             return
-        else:
-            if not self.__is_first_connected:
-                self.__is_first_connected = True
 
-            self.__parse_incoming_message(list(message.data)[1:])
-            # self.print_values()
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
 
-            self.__last_successful_message = time.time_ns()
+        self.get_logger().info(f"parsing {list(message.data)[1:]}")
+        self.__parse_incoming_message(list(message.data)[1:])
+        # self.print_values()
 
-            message_id = 3
+        self.__last_successful_message = time.time_ns()
 
-            ros_msg = Can()
-            ros_msg.channel = TOPICS[message_id]["channel"]
-            ros_msg.id = message_id
-            ros_msg.buf = [
-                int(
-                    (
-                        self.get_current_value(
-                            CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_LY
-                        )
-                        * 100
-                    )
-                    + 100
-                ),
-                int(
-                    (
-                        self.get_current_value(
-                            CONSTANTS.INPUT_TYPE.IS_AXIS, CONSTANTS.JOYSTICK.AXIS_RY
-                        )
-                        * 100
-                    )
-                    + 100
-                ),
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-            ]
-
-            self.create_publisher(
-                msg_type=Can,
-                topic=f"/CAN/TX/{TOPICS[message_id]['name']}",
-                qos_profile=10,
-            ).publish(ros_msg)
+        # message_id = 3
 
     def run(self):
-        rclpy.spin(self)
         last_cycle_time = time.time_ns()
+
+        self.get_logger().info("starting xbee...")
 
         while not self.__is_disabled:
             if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
@@ -331,7 +298,7 @@ if __name__ == "__main__":
 #         self.run()
 
 #     def send_gps(self, data: String):
-#         print(data)
+#         self.get_logger().info(data)
 
 #     def run(self):
 #         rclpy.spin(self)

@@ -21,7 +21,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'DriveBase = drive_base.DriveBase:main'
+            'drive_base_node = drive_base.drive_base_node:main'
         ],
     },
 )
