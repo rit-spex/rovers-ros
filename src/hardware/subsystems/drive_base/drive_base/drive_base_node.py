@@ -29,7 +29,7 @@ class DriveBase(Node):
             Float32, "Xbee/RX/Controller/Axis/LY", self.__LY_callback, 10
         )
         self.create_subscription(
-            Float32, "Xbee/RX/Controller/Axis/RX", self.__RX_callback, 10
+            Float32, "Xbee/RX/Controller/Axis/RY", self.__RY_callback, 10
         )
 
         self.__LY_value = 0
@@ -41,7 +41,7 @@ class DriveBase(Node):
         # self.get_logger().info(f"LY_callback message: {msg}")
         # self.get_logger().info(f"LY_value is now {self.__LY_value}")
 
-    def __RX_callback(self, msg: Float32):
+    def __RY_callback(self, msg: Float32):
         self.__RX_value = msg.data
         self.__send_controller_data()
         # self.get_logger().info(f"RX_callback message: {msg}")

@@ -147,44 +147,45 @@ class Xbee(Node):
         :param message - a full message that start with start message
         """
         # the current byte number
+
         byte_num: int = 0
 
         # parse for axis
-        for i in range(0, CONSTANTS.NUM_USED_AXES, 1):
-            if (
+        for i in CONSTANTS.JOYSTICK.LIST_OF_AXIS:
+            if not (
                 CONSTANTS.JOYSTICK.MAX_VALUE
                 >= message[byte_num]
                 >= CONSTANTS.JOYSTICK.MIN_VALUE
             ):
+                continue
+            # self.get_logger().info(f"i: {i+1}")
+            value = (message[byte_num] - 100.0) / (100.0)
+            # self.__axis_values[i] = value
+            byte_num = byte_num + 1
 
-                # self.get_logger().info(f"i: {i+1}")
-                value = (message[byte_num] - 100.0) / (100.0)
-                self.__axis_values[i] = value
-                byte_num = byte_num + 1
+            ros_msg = TOPICS_JOYSTICK[i]["val"]()
+            ros_msg.data = value
 
-                ros_msg = TOPICS_JOYSTICK[i+1]["val"]()
-                ros_msg.data = value
+            self.get_logger().info(f"publishing /Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
-                # self.get_logger().info(f"0: {TOPICS_JOYSTICK[0]}")
-                # self.get_logger().info(f"1: {TOPICS_JOYSTICK[1]}")
-                # self.get_logger().info(f"2: {TOPICS_JOYSTICK[2]}")
-                # self.get_logger().info(f"3: {TOPICS_JOYSTICK[3]}")
-
-                # self.get_logger().info(f"{TOPICS_JOYSTICK[i+1]['name']}: {value}")
-
-                self.create_publisher(
-                    TOPICS_JOYSTICK[i+1]["val"],
-                    f"/Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i+1]['name']}",
-                    10,
-                ).publish(ros_msg)
+            self.create_publisher(
+                TOPICS_JOYSTICK[i]["val"],
+                f"/Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i]['name']}",
+                10,
+            ).publish(ros_msg)
 
         # parse for button values
+
+        self.get_logger().info(f"first set: {bin(message[2])}")
+        self.get_logger().info(f"secon set: {bin(message[3])}")
         for i in range(0, CONSTANTS.NUM_BUTTONS, 1):
             if i != 0 and i % 4 == 0:
                 byte_num = byte_num + 1
 
             # check if section of byte is on or off
-            # self.get_logger().info(str(message[byte_num]))
+            self.get_logger().info(f"byte num: {byte_num}")
+            self.get_logger().info(f"message: {message}")
+            self.get_logger().info(f"together: {message[byte_num]}")
 
             button_value = (
                 (
@@ -201,7 +202,7 @@ class Xbee(Node):
             ros_msg = TOPICS_BUTTON[i]["val"]()
             ros_msg.data = button_value
 
-            # self.get_logger().info(f"{TOPICS_BUTTON[i]['name']}: {button_value}")
+            self.get_logger().info(f"publishing /Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}: {button_value}")
 
             self.create_publisher(
                 TOPICS_BUTTON[i]["val"],
@@ -261,12 +262,12 @@ class Xbee(Node):
                 last_cycle_time = time.time_ns()
                 self.on_message_received()
 
-                if (
-                    time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
-                    and self.__is_first_connected
-                ):
-                    self.get_logger().info("disabling xbee")
-                    self.disable_xbee()
+                # if (
+                #     time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
+                #     and self.__is_first_connected
+                # ):
+                #     self.get_logger().info("disabling xbee")
+                #     self.disable_xbee()
 
 
 def main():
