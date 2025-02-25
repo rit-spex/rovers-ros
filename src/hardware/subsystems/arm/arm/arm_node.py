@@ -16,11 +16,12 @@ class Arm(Node):
     # __solinoid_publsiher: Publisher
     __publishers: list[Publisher]
 
-    __engage_base: int
     __base_forward: int
     __base_backward: int
 
-    __engage_elbow: int
+    __shoulder_forward: int
+    __shoulder_backward: int
+
     __elbow_forward: int
     __elbow_backward: int
 
@@ -38,34 +39,53 @@ class Arm(Node):
         for i in range(11, 17): # change based on amount of IDs filled out
             self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
 
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/A", self.__elbow_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/B", self.__elbow_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LT", self.__base_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RT", self.__base_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LT", self.__shoulder_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RT", self.__shoulder_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LEFT_BUMPER", self.__elbow_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RIGHT_BUMPER", self.__elbow_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/X", self.__elbow_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/Y", self.__elbow_backward_callback, 10)
 
-        self.__engage_base = 0
         self.__base_forward = 0
         self.__base_backward = 0
 
-        self.__engage_elbow = 0
+        self.__shoulder_forward = 0
+        self.__shoulder_backward = 0
+
         self.__elbow_forward = 0
         self.__elbow_backward = 0
 
     def __base_forward_callback(self, msg: Bool):
-        self.__engage_base = msg.data
         self.__base_forward = int(msg.data)
         self.__send_controller_data(11)
 
     def __base_backward_callback(self, msg: Bool):
-        self.__engage_base = msg.data
         self.__base_backward = int(msg.data)
         self.__send_controller_data(11)
 
+    def __shoulder_forward_callback(self, msg: Bool):
+        self.__shoulder_forward = int(msg.data)
+        self.__send_controller_data(12)
+
+    def __shoulder_backward_callback(self, msg: Bool):
+        self.__shoulder_backward = int(msg.data)
+        self.__send_controller_data(12)
+
     def __elbow_forward_callback(self, msg: Bool):
-        self.__engage_elbow = msg.data
         self.__elbow_forward = int(msg.data)
         self.__send_controller_data(13)
 
     def __elbow_backward_callback(self, msg: Bool):
-        self.__engage_elbow = msg.data
+        self.__elbow_backward = int(msg.data)
+        self.__send_controller_data(13)
+
+    def __elbow_forward_callback(self, msg: Bool):
+        self.__elbow_forward = int(msg.data)
+        self.__send_controller_data(13)
+
+    def __elbow_backward_callback(self, msg: Bool):
         self.__elbow_backward = int(msg.data)
         self.__send_controller_data(13)
 
@@ -81,19 +101,27 @@ class Arm(Node):
         match ID:
             case 11:
                 self.get_logger().info("BASE")
+                engaged = self.__base_forward | self.__base_backward
                 direction = self.__base_forward - self.__base_backward
                 direction = 0 if direction == -1 else direction
-                ros_msg.buf[0] = self.__engage_base
+                ros_msg.buf[0] = engaged
                 ros_msg.buf[1] = direction
-                self.__engage_base = 0
+            case 12:
+                self.get_logger().info("SHOULDER")
+                engaged = self.__shoulder_forward | self.__shoulder_backward
+                direction = self.__shoulder_forward - self.__shoulder_backward
+                self.get_logger().info(f"engaged for elbow: {engaged}")
+                direction = 0 if direction == -1 else direction
+                ros_msg.buf[0] = engaged
+                ros_msg.buf[1] = direction
             case 13:
                 self.get_logger().info("ELBOW")
+                engaged = self.__elbow_forward | self.__elbow_backward
                 direction = self.__elbow_forward - self.__elbow_backward
-                self.get_logger().info(f"direction for elbow: {direction}")
+                self.get_logger().info(f"engaged for elbow: {engaged}")
                 direction = 0 if direction == -1 else direction
-                ros_msg.buf[0] = self.__engage_elbow
+                ros_msg.buf[0] = engaged
                 ros_msg.buf[1] = direction
-                self.__engage_elbow = 0
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
         self.get_logger().info(f"PUBLISHING TO {self.__publishers[ID - 11].topic_name}")

@@ -3,7 +3,7 @@
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
-from constants.CAN_Constants import TOPICS
+from constants.CAN_Constants import CHANNEL, TOPICS
 from constants.CommanndCodes import CONSTANTS
 
 import time
@@ -49,6 +49,29 @@ class Xbee(Node):
 
         # track when the last successful message was received
         self.__last_successful_message = time.time_ns()
+
+        # creates publishers for all the different buttons
+        self.__joystick_publishers: dict[int, Publisher] = {}
+        for joystick in CONSTANTS.JOYSTICK.LIST_OF_AXIS:
+            self.__joystick_publishers[joystick] = self.create_publisher(
+                TOPICS_JOYSTICK[joystick]["val"],
+                f"/Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[joystick]['name']}",
+                10,
+            )
+        # self.__trigger_publishers: dict[int, Publisher] = {}
+        # for trigger in CONSTANTS.TRIGGER.LIST_OF_TRIGGERS:
+        #     self.__trigger_publishers[trigger] = self.create_publisher(
+        #         TOPICS_BUTTON[trigger]["val"],
+        #         f"/Xbee/Controller/{TOPICS_TRIGGER[trigger]['name']}",
+        #         10,
+        #     )
+        self.__button_publishers: dict[int, Publisher] = {}
+        for button in CONSTANTS.BUTTONS.LIST_OF_BUTTONS:
+            self.__button_publishers[button] = self.create_publisher(
+                TOPICS_BUTTON[button]["val"],
+                f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[button]['name']}",
+                10,
+            )
 
     def __del__(self):
         """
@@ -168,24 +191,20 @@ class Xbee(Node):
 
             self.get_logger().info(f"publishing /Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
-            self.create_publisher(
-                TOPICS_JOYSTICK[i]["val"],
-                f"/Xbee/RX/Controller/Axis/{TOPICS_JOYSTICK[i]['name']}",
-                10,
-            ).publish(ros_msg)
+            self.__joystick_publishers[i].publish(ros_msg)
 
         # parse for button values
 
-        self.get_logger().info(f"first set: {bin(message[2])}")
-        self.get_logger().info(f"secon set: {bin(message[3])}")
+        # self.get_logger().info(f"first set: {bin(message[2])}")
+        # self.get_logger().info(f"secon set: {bin(message[3])}")
         for i in range(0, CONSTANTS.NUM_BUTTONS, 1):
             if i != 0 and i % 4 == 0:
                 byte_num = byte_num + 1
 
             # check if section of byte is on or off
-            self.get_logger().info(f"byte num: {byte_num}")
-            self.get_logger().info(f"message: {message}")
-            self.get_logger().info(f"together: {message[byte_num]}")
+            # self.get_logger().info(f"byte num: {byte_num}")
+            # self.get_logger().info(f"message: {message}")
+            # self.get_logger().info(f"together: {message[byte_num]}")
 
             button_value = (
                 (
@@ -204,11 +223,12 @@ class Xbee(Node):
 
             self.get_logger().info(f"publishing /Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}: {button_value}")
 
-            self.create_publisher(
-                TOPICS_BUTTON[i]["val"],
-                f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}",
-                10,
-            ).publish(ros_msg)
+            # self.create_publisher(
+            #     TOPICS_BUTTON[i]["val"],
+            #     f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}",
+            #     10,
+            # ).publish(ros_msg)
+            self.__button_publishers[i].publish(ros_msg)
 
     def send_msg(self):
         pass
@@ -217,8 +237,11 @@ class Xbee(Node):
         """
         callback function that is called when message is received
         """
+        # self.get_logger().info("starting message received")
+
         # xbee is disabled
         if self.__is_disabled:
+            self.get_logger().info(f"xbee is disabled, returning...")
             return
 
         message = None
@@ -227,6 +250,7 @@ class Xbee(Node):
         try:
             message = self.__xbee_device.read_data(0.0004)
         except TimeoutException:
+            # self.get_logger().info("timed out")
             return
         except Exception as e:
             self.get_logger().info("\n\nBIG ISSUE\n")
@@ -235,17 +259,26 @@ class Xbee(Node):
 
         # message is invalid
         if message is None:
+            self.get_logger().info(f"message was none")
             return
 
+        # split the message data into a list
+        data = list(message.data)
+        # self.get_logger().info(f"got data: {data}")
+
         # check if message has a valid start message
-        if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+        if data[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            self.get_logger().info(f"not valid start message")
+            return
+        elif data[0] == int.from_bytes(CONSTANTS.QUIT_MESSAGE, "big"):
+            self.disable_xbee()
             return
 
         if not self.__is_first_connected:
             self.__is_first_connected = True
 
-        self.get_logger().info(f"parsing {list(message.data)[1:]}")
-        self.__parse_incoming_message(list(message.data)[1:])
+        self.get_logger().info(f"parsing {data[1:]}")
+        self.__parse_incoming_message(data[1:])
         # self.print_values()
 
         self.__last_successful_message = time.time_ns()
@@ -268,6 +301,13 @@ class Xbee(Node):
                 # ):
                 #     self.get_logger().info("disabling xbee")
                 #     self.disable_xbee()
+
+        # Signalling E-STOP
+        ros_msg = Can()
+        ros_msg.id = 0
+        ros_msg.channel = CHANNEL.MAIN_BODY
+        ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
+        self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
 
 
 def main():

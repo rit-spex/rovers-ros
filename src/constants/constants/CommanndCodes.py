@@ -1,8 +1,10 @@
 from std_msgs.msg import Float32, Bool
 
+
 class CONSTANTS:
     # message to send to show start of new values
     START_MESSAGE = b"\xDE"
+    QUIT_MESSAGE = b"\xFE"
 
     # message order:
     # byte Axis
@@ -39,6 +41,8 @@ class CONSTANTS:
         AXIS_LT = 2
         AXIS_RT = 5
 
+        LIST_OF_TRIGGERS = [AXIS_LT, AXIS_RT]
+
     class BUTTONS:
         SIZE_BUTTON_IN_BITS = 2
         NUM_BUTTONS_PER_BYTE = 8 / SIZE_BUTTON_IN_BITS
@@ -61,11 +65,15 @@ class CONSTANTS:
         RIGHT_STICK = 10
         HOME = 8
 
+        LIST_OF_BUTTONS = [A, B, X, Y, LEFT_BUMPER, RIGHT_BUMPER, START, SELECT]
+
     class JOYPAD:
         UP = (0, 1)
         DOWN = (0, -1)
         LEFT = (1, 0)  # Needs to be checked
         RIGHT = (-1, 0)  # Needs to be checked
+
+        LIST_OF_JOYPAD = [UP, DOWN, LEFT, RIGHT]
 
 
 TOPICS_JOYSTICK = {
@@ -89,7 +97,30 @@ TOPICS_JOYSTICK = {
         "name": "RY",
         "val": Float32,
     },
+    CONSTANTS.TRIGGER.AXIS_LT: {
+        "id": CONSTANTS.TRIGGER.AXIS_LT,
+        "name": "LT",
+        "val": Bool,
+    },
+    CONSTANTS.TRIGGER.AXIS_RT: {
+        "id": CONSTANTS.TRIGGER.AXIS_RT,
+        "name": "RT",
+        "val": Bool,
+    },
 }
+
+# TOPICS_TRIGGER = {
+#     CONSTANTS.TRIGGER.AXIS_LT: {
+#         "id": CONSTANTS.TRIGGER.AXIS_LT,
+#         "name": "LT",
+#         "val": Float32
+#     },
+#     CONSTANTS.TRIGGER.AXIS_RT: {
+#         "id": CONSTANTS.TRIGGER.AXIS_RT,
+#         "name": "RT",
+#         "val": Float32
+#     }
+# }
 
 TOPICS_BUTTON = {
     CONSTANTS.BUTTONS.A: {
@@ -124,12 +155,12 @@ TOPICS_BUTTON = {
     },
     CONSTANTS.BUTTONS.SELECT: {
         "id": CONSTANTS.BUTTONS.SELECT,
-        "name": "AXIS_LT",
+        "name": "LT",
         "val": Bool,
     },
     CONSTANTS.BUTTONS.START: {
         "id": CONSTANTS.BUTTONS.START,
-        "name": "AXIS_RT",
+        "name": "RT",
         "val": Bool,
     },
     CONSTANTS.BUTTONS.LEFT_STICK: {

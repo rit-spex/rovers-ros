@@ -59,23 +59,23 @@ TOPICS = {
     },
     14: {
         "id": 14,
-        "name": "MOVE_WRIST",
+        "name": "BEND_WRIST",
         "buf": bytearray(8),
         "channel": CHANNEL.ARM_BOARD,
     },
-    # 15: {
-    #     "id": 15,
-    #     "name": "TWIST_WRIST",
-    #     "buf": bytearray(8),
-    #     "channel": CHANNEL.ARM_BOARD,
-    # },
     15: {
+        "id": 15,
+        "name": "TWIST_WRIST",
+        "buf": bytearray(8),
+        "channel": CHANNEL.ARM_BOARD,
+    },
+    16: {
         "id": 15,
         "name": "MOVE_CLAW",
         "buf": bytearray(8),
         "channel": CHANNEL.ARM_BOARD,
     },
-    16: {
+    17: {
         "id": 16,
         "name": "MOVE_SOLINOID",
         "buf": bytearray(8),
