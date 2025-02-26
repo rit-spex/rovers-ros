@@ -19,6 +19,8 @@ import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool
 
+import numpy as np
+
 XBEE_PORT = "/dev/ttyUSB0"
 XBEE_SPEED = 230400
 XBEE_UPDATE_RATE = 40000000  # 40000 nano second -> 40 micro second
@@ -89,6 +91,8 @@ class Xbee(Node):
         self.__dl_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DL", 10)
         self.__dr_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DR", 10)
 
+        self.__z_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/Z", 10)
+
     def __del__(self):
         """
         have the device port be closed
@@ -143,8 +147,13 @@ class Xbee(Node):
 
         byte_num: int = 0
 
-        n64_message = message[6:]
-        message = message[:5]
+        # self.get_logger().info("parse:")
+        # for i, byte in enumerate(message):
+        #     self.get_logger().info(f"{i}, {bin(byte)}")
+        # self.get_logger().info("")
+
+        n64_message: list[np.uint8] = [np.uint8(m) for m in message[6:]]
+        message = message[1:5]
 
         # parse for axis
         for i in CONSTANTS.XBOX.JOYSTICK.LIST_OF_AXIS:
@@ -162,7 +171,7 @@ class Xbee(Node):
             ros_msg = TOPICS_JOYSTICK[i]["val"]()
             ros_msg.data = value
 
-            self.get_logger().info(f"publishing /Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
+            # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
             self.__joystick_publishers[i].publish(ros_msg)
 
@@ -194,7 +203,7 @@ class Xbee(Node):
             ros_msg = TOPICS_BUTTON[i]["val"]()
             ros_msg.data = button_value
 
-            self.get_logger().info(f"publishing /Xbee/RX/Xbox/Buttons/{TOPICS_BUTTON[i]['name']}: {button_value}")
+            # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Buttons/{TOPICS_BUTTON[i]['name']}: {button_value}")
 
             # self.create_publisher(
             #     TOPICS_BUTTON[i]["val"],
@@ -209,70 +218,48 @@ class Xbee(Node):
         # DU DD DL DR
         # Z
 
-        self.get_logger().info(f"\n\nbinary: {bin(n64_message[0])}\n\n")
-
         a_value = Bool()
-        a_value.data = n64_message[0] >> 6 == CONSTANTS.N64.BUTTONS.ON
+        a_value.data = bool((n64_message[0] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
         self.__a_value_publisher.publish(a_value)
         b_value = Bool()
-        b_value.data = (n64_message[0] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON
+        b_value.data = bool((n64_message[0] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
         self.__b_value_publisher.publish(b_value)
         l_value = Bool()
-        l_value.data = (n64_message[0] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON
+        l_value.data = bool((n64_message[0] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
         self.__l_value_publisher.publish(l_value)
         r_value = Bool()
-        r_value.data = (n64_message[0] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON
+        r_value.data = bool((n64_message[0] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
         self.__r_value_publisher.publish(r_value)
 
-        cu_valu = Bool()
-        t = n64_message[1] >> 6
-        # self.get_logger().info(f"cu_valu: {t}")
-        cu_valu.data = t == CONSTANTS.N64.BUTTONS.ON
+        cu_value = Bool()
+        cu_value.data = bool((n64_message[1] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__cu_value_publisher.publish(cu_value)
+        cd_value = Bool()
+        cd_value.data = bool((n64_message[1] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__cd_value_publisher.publish(cd_value)
+        cl_value = Bool()
+        cl_value.data = bool((n64_message[1] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__cl_value_publisher.publish(cl_value)
+        cr_value = Bool()
+        cr_value.data = bool((n64_message[1] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__cr_value_publisher.publish(cr_value)
 
-        self.__cu_value_publisher.publish(cu_valu)
-        cd_valu = Bool()
-        t = (n64_message[1] << 2) >> 6
-        # self.get_logger().info(f"cd_valu: {t}")
-        cd_valu.data = t == CONSTANTS.N64.BUTTONS.ON
+        du_value = Bool()
+        du_value.data = bool((n64_message[2] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__du_value_publisher.publish(du_value)
+        dd_value = Bool()
+        dd_value.data = bool((n64_message[2] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__dd_value_publisher.publish(dd_value)
+        dl_value = Bool()
+        dl_value.data = bool((n64_message[2] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__dl_value_publisher.publish(dl_value)
+        dr_value = Bool()
+        dr_value.data = bool((n64_message[2] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__dr_value_publisher.publish(dr_value)
 
-        self.__cd_value_publisher.publish(cd_valu)
-        cl_valu = Bool()
-        t = (n64_message[1] << 4) >> 6
-        # self.get_logger().info(f"cl_valu: {t}")
-        cl_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__cl_value_publisher.publish(cl_valu)
-        cr_valu = Bool()
-        t = (n64_message[1] << 6) >> 6
-        # self.get_logger().info(f"cr_valu: {t}")
-        cr_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__cr_value_publisher.publish(cr_valu)
-
-        du_valu = Bool()
-        t = n64_message[2] >> 6
-        # self.get_logger().info(f"du_valu: {t}")
-        du_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__du_value_publisher.publish(du_valu)
-        dd_valu = Bool()
-        t = (n64_message[2] << 2) >> 6
-        # self.get_logger().info(f"dd_valu: {t}")
-        dd_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__dd_value_publisher.publish(dd_valu)
-        dl_valu = Bool()
-        t = (n64_message[2] << 4) >> 6
-        # self.get_logger().info(f"dl_valu: {t}")
-        dl_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__dl_value_publisher.publish(dl_valu)
-        dr_valu = Bool()
-        t = (n64_message[2] << 6) >> 6
-        # self.get_logger().info(f"dr_valu: {t}")
-        dr_valu.data = t == CONSTANTS.N64.BUTTONS.ON
-
-        self.__dr_value_publisher.publish(dr_valu)
+        z_value = Bool()
+        z_value.data = bool(n64_message[3] == CONSTANTS.N64.BUTTONS.ON)
+        self.__z_value_publisher.publish(z_value)
 
     def send_msg(self):
         pass
@@ -321,8 +308,12 @@ class Xbee(Node):
         if not self.__is_first_connected:
             self.__is_first_connected = True
 
-        self.get_logger().info(f"parsing {data[1:]}")
-        self.__parse_incoming_message(data[1:])
+        self.get_logger().info("receive:")
+        for i, byte in enumerate(data):
+            self.get_logger().info(f"{i}, {bin(byte)}")
+        self.get_logger().info("")
+
+        self.__parse_incoming_message(data)
         # self.print_values()
 
         self.__last_successful_message = time.time_ns()
