@@ -39,14 +39,27 @@ class Arm(Node):
         for i in range(11, 17): # change based on amount of IDs filled out
             self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
 
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LT", self.__base_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RT", self.__base_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LT", self.__shoulder_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RT", self.__shoulder_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/LEFT_BUMPER", self.__elbow_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/RIGHT_BUMPER", self.__elbow_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/X", self.__elbow_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/Controller/Buttons/Y", self.__elbow_backward_callback, 10)
+        """
+        N64 Controller
+        Bumpers: Base
+        Camera (top, left): Shoulder
+        Camera (bottom, right): Elbow
+        A and B: Gripper
+        D-Pad (up, down): Bend Wrist
+        D-Pad (left, right): Twist Wrist
+        Z: Solenoid
+        """
+
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/L", self.__base_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/R", self.__base_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CU", self.__shoulder_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CL", self.__shoulder_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CB", self.__elbow_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CR", self.__elbow_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DL", self.__twist_wrist_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DR", self.__twist_wrist_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DU", self.__bend_wrist_forward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DD", self.__bend_wrist_backward_callback, 10)
 
         self.__base_forward = 0
         self.__base_backward = 0
@@ -81,13 +94,25 @@ class Arm(Node):
         self.__elbow_backward = int(msg.data)
         self.__send_controller_data(13)
 
-    def __elbow_forward_callback(self, msg: Bool):
-        self.__elbow_forward = int(msg.data)
-        self.__send_controller_data(13)
+    def __twist_wrist_forward_callback(self, msg: Bool):
+        self.get_logger().info(f"__twist_wrist_forward: {msg.data}")
+        self.__twist_wrist_forward = int(msg.data)
+        self.__send_controller_data(15)
 
-    def __elbow_backward_callback(self, msg: Bool):
-        self.__elbow_backward = int(msg.data)
-        self.__send_controller_data(13)
+    def __twist_wrist_backward_callback(self, msg: Bool):
+        self.get_logger().info(f"__twist_wrist_backward: {msg.data}")
+        self.__twist_wrist_backward = int(msg.data)
+        self.__send_controller_data(15)
+
+    def __bend_wrist_forward_callback(self, msg: Bool):
+        self.get_logger().info(f"__bend_wrist_forward: {msg.data}")
+        self.__bend_wrist_forward = int(msg.data)
+        self.__send_controller_data(14)
+
+    def __bend_wrist_backward_callback(self, msg: Bool):
+        self.get_logger().info(f"__bend_wrist_backward: {msg.data}")
+        self.__bend_wrist_backward = int(msg.data)
+        self.__send_controller_data(14)
 
     def __send_controller_data(self, ID: int):
         # self.get_logger().info(f"base_forward: {self.__base_forward}")

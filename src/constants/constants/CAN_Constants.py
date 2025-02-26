@@ -69,13 +69,13 @@ TOPICS = {
         "buf": bytearray(8),
         "channel": CHANNEL.ARM_BOARD,
     },
+    # 16: {
+    #     "id": 15,
+    #     "name": "MOVE_CLAW",
+    #     "buf": bytearray(8),
+    #     "channel": CHANNEL.ARM_BOARD,
+    # },
     16: {
-        "id": 15,
-        "name": "MOVE_CLAW",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    17: {
         "id": 16,
         "name": "MOVE_SOLINOID",
         "buf": bytearray(8),
