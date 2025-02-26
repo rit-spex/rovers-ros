@@ -26,10 +26,16 @@ class DriveBase(Node):
         )
 
         self.create_subscription(
-            Float32, "Xbee/RX/Controller/Axis/LY", self.__LY_callback, 10
+            Float32,
+            "/auto/Axis/LY",
+            self.__LY_callback,
+            10,  # Change to "Xbee/RX/Controller/Axis/LY" for remote control operation
         )
         self.create_subscription(
-            Float32, "Xbee/RX/Controller/Axis/RY", self.__RY_callback, 10
+            Float32,
+            "/auto/Axis/RY",
+            self.__RY_callback,
+            10,  # Change to "Xbee/RX/Controller/Axis/RY" for remote control operation
         )
 
         self.__LY_value = 0
@@ -48,9 +54,9 @@ class DriveBase(Node):
         # self.get_logger().info(f"RX_value is now {self.__RX_value}")
 
     def __send_controller_data(self):
-        # self.get_logger().info(f"LY: {self.__LY_value}")
-        # self.get_logger().info(f"RX: {self.__RX_value}")
-        # self.get_logger().info(f"")
+        self.get_logger().info(f"LY: {self.__LY_value}")
+        self.get_logger().info(f"RX: {self.__RX_value}")
+        self.get_logger().info(f"")
 
         ros_msg = Can()
         ros_msg.channel = self.__topic["channel"]
