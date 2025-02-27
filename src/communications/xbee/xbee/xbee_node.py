@@ -53,6 +53,13 @@ class Xbee(Node):
         # track when the last successful message was received
         self.__last_successful_message = time.time_ns()
 
+        self.__value_state = {
+            "xbox": {},
+            "n64": {}
+        }
+
+        self.__name_to_ID_XBOX = {}
+
         # creates publishers for all the different buttons
         self.__joystick_publishers: dict[int, Publisher] = {}
         for joystick in CONSTANTS.XBOX.JOYSTICK.LIST_OF_AXIS:
@@ -61,6 +68,8 @@ class Xbee(Node):
                 f"/Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[joystick]['name']}",
                 10,
             )
+            self.__name_to_ID_XBOX[TOPICS_JOYSTICK[joystick]['name']] = joystick
+            self.__value_state["xbox"][TOPICS_JOYSTICK[joystick]['name']] = CONSTANTS.XBOX.JOYSTICK.NEUTRAL_HEX
         # self.__trigger_publishers: dict[int, Publisher] = {}
         # for trigger in CONSTANTS.TRIGGER.LIST_OF_TRIGGERS:
         #     self.__trigger_publishers[trigger] = self.create_publisher(
@@ -75,23 +84,43 @@ class Xbee(Node):
                 f"/Xbee/RX/Xbox/Buttons/{TOPICS_BUTTON[button]['name']}",
                 10,
             )
+            self.__name_to_ID_XBOX[TOPICS_BUTTON[button]['name']] = button
+            self.__value_state['xbox'][TOPICS_BUTTON[button]['name']] = 0
 
-        self.__a_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/A", 10)
-        self.__b_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/B", 10)
-        self.__l_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/L", 10)
-        self.__r_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/R", 10)
+        self.__n64_publishers = {
+            "A": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/A", 10),
+            "N": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/B", 10),
+            "L": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/L", 10),
+            "R": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/R", 10),
 
-        self.__cu_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CU", 10)
-        self.__cd_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CD", 10)
-        self.__cl_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CL", 10)
-        self.__cr_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CR", 10)
+            "CU": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CU", 10),
+            "CD": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CD", 10),
+            "CL": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CL", 10),
+            "CR": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CR", 10),
 
-        self.__du_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DU", 10)
-        self.__dd_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DD", 10)
-        self.__dl_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DL", 10)
-        self.__dr_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DR", 10)
+            "DU": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DU", 10),
+            "DD": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DD", 10),
+            "DL": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DL", 10),
+            "DR": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DR", 10),
 
-        self.__z_value_publisher = self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/Z", 10)
+            "Z": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/Z", 10)
+        }
+
+        self.__value_state['n64'] = {
+            "A": CONSTANTS.N64.BUTTONS.OFF,
+            "B": CONSTANTS.N64.BUTTONS.OFF,
+            "L": CONSTANTS.N64.BUTTONS.OFF,
+            "R": CONSTANTS.N64.BUTTONS.OFF,
+            "CU": CONSTANTS.N64.BUTTONS.OFF,
+            "CD": CONSTANTS.N64.BUTTONS.OFF,
+            "CL": CONSTANTS.N64.BUTTONS.OFF,
+            "CR": CONSTANTS.N64.BUTTONS.OFF,
+            "DU": CONSTANTS.N64.BUTTONS.OFF,
+            "DD": CONSTANTS.N64.BUTTONS.OFF,
+            "DL": CONSTANTS.N64.BUTTONS.OFF,
+            "DR": CONSTANTS.N64.BUTTONS.OFF,
+            "Z": CONSTANTS.N64.BUTTONS.OFF,
+        }
 
     def __del__(self):
         """
@@ -136,13 +165,33 @@ class Xbee(Node):
     def disable_xbee(self) -> None:
         self.__is_disabled = True
 
-    #
+    def __publish_new_controls(self, controller: str, button: str, value) -> None:
+        """Helper function to only publish updated information
+
+        Args:
+            controller (str): the name of the controller this value is for ('xbox', 'n64')
+            button (str): the name of the button this value this for
+            value (Any): the value to publish
+        """
+
+        if self.__value_state[controller][button] == value:
+            return
+
+        if controller == "n64":
+            self.__n64_publishers[button].publish(value)
+
+        if "axis" in button.lower():
+            self.__joystick_publishers[self.__name_to_ID_XBOX[button]].publish(value)
+        self.__button_publishers[self.__name_to_ID_XBOX[button]].publish(value)
+
     def __parse_incoming_message(self, message: list[int]):
         """
-        helper function that is called when message is received, to parse to get values
+        Helper function that is called when message is received, to parse to get values
 
-        :param message - a full message that start with start message
+        Args:
+            message (list[int]): a full message that start with start message
         """
+
         # the current byte number
 
         byte_num: int = 0
@@ -173,6 +222,7 @@ class Xbee(Node):
 
             # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
+            self.__publish_new_controls('xbox',TOPICS_JOYSTICK[i]['name'] , ros_msg)
             self.__joystick_publishers[i].publish(ros_msg)
 
         # parse for button values
@@ -210,7 +260,9 @@ class Xbee(Node):
             #     f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}",
             #     10,
             # ).publish(ros_msg)
-            self.__button_publishers[i].publish(ros_msg)
+
+            # self.__button_publishers[i].publish(ros_msg)
+            self.__publish_new_controls('xbox',TOPICS_BUTTON[i]['name'] , ros_msg)
 
         # parsing N64 controller
         # A B L R
