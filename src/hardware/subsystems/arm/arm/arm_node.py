@@ -176,7 +176,7 @@ class Arm(Node):
                 ros_msg.buf[0] = engaged
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
-        self.get_logger().info(f"PUBLISHING TO {self.__publishers[ID - 10].topic_name}")
+        # self.get_logger().info(f"PUBLISHING TO {self.__publishers[ID - 10].topic_name}")
         self.__publishers[ID - 10].publish(ros_msg)
 
     def run(self):
