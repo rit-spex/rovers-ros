@@ -4,7 +4,8 @@
     <joint name="laser_joint" type="fixed">
         <parent link="chassis"/>
         <child link="laser_frame"/>
-        <origin xyz="0.3175 0 0.12" rpy="0 1.5707 0"/>
+        <origin xyz="0.3175 0 0.12" rpy="0 1.5708 0"/>
+		<!-- <origin xyz="0.3175 0 0.12" rpy="0 1.5707 0"/>-->
     </joint>
 
     <link name="laser_frame">
@@ -66,5 +67,5 @@
             </plugin>
         </sensor>
     </gazebo>
-    
+
 </robot>

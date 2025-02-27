@@ -23,11 +23,11 @@ class GeneratePath(Node):
         self.outputVelRight = Float32()
         self.idCheck = Bool()
         self.measPoint = Point()
-        self.MAX_LINEAR_VELOCITY = 2.0  # Maximum wheel linear velocity in m/s
-        self.MAX_ANGULAR_VELOCITY = 5  # Maximum robot turn velocity in rad/s
+        self.MAX_LINEAR_VELOCITY = 2.8527  # Maximum wheel linear velocity in m/s
+        self.MAX_ANGULAR_VELOCITY = 100  # Maximum robot turn velocity in rad/s
         self.WHEEL_RADIUS = 0.08255  # Wheel radius in m (3.25 in)
         self.WHEEL_SEPERATION = 0.5715  # Wheel seperation distance (22.5 in)
-        self.MAX_WHEEL_ANGULAR_VELOCITY = 34.557  # maximum wheel velocty on the teensy with modifier: 1100 RPM * 70% converted to rad/s
+        self.MAX_WHEEL_ANGULAR_VELOCITY = 34.5575  # maximum wheel velocty on the teensy with modifier: 1100 RPM * 70% converted to rad/s
 
     def CheckData(self, msg):
         self.idCheck.data = msg.data
@@ -43,20 +43,15 @@ class GeneratePath(Node):
 
         self.measPoint.x = x
         self.measPoint.y = y
-        speedMultLeft = 0.75
-        speedMultRight = 0.75
 
         dP = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
-        dPhi = math.atan(y / x) * 20
+        dPhi = math.atan(y / x)
         self.measPoint.z = dPhi
         print(dPhi)
         if self.idCheck.data == True:
             if dP > 1.4:
                 # Try to get to point as fast as possible.
                 dt = dP / self.MAX_LINEAR_VELOCITY
-                # Ensure max angular velocity isn't violated, if it is, slow down the robot
-                if abs(dPhi / dt) > self.MAX_ANGULAR_VELOCITY:
-                    dt = dPhi / self.MAX_ANGULAR_VELOCITY
 
                 angularVel = dPhi / dt
                 linearVel = dP / dt
@@ -78,9 +73,6 @@ class GeneratePath(Node):
             leftVel = 0.0
             dt = 0.0
 
-        # rightVel = rightVel * speedMultRight
-        # leftVel = leftVel * speedMultLeft
-
         if rightVel > 1.0:
             rightVel = 1.0
         elif rightVel < -1.0:
@@ -91,8 +83,8 @@ class GeneratePath(Node):
         elif leftVel < -1.0:
             leftVel = -1.0
 
-        self.outputVelRight.data = 0.1  # -rightVel
-        self.outputVelLeft.data = -0.1  # -leftVel
+        self.outputVelRight.data = -leftVel
+        self.outputVelLeft.data = -rightVel
 
         self.pointPub.publish(self.measPoint)
         self.velPubRight.publish(self.outputVelRight)
@@ -101,7 +93,7 @@ class GeneratePath(Node):
         # for i in range(10):
         #     self.velPubRight.publish(self.outputVelRight)
         #     self.velPubLeft.publish(self.outputVelLeft)
-        time.sleep(5)
+        # time.sleep(1)
 
 
 def main(args=None):
