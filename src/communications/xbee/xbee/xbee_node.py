@@ -17,7 +17,7 @@ from custom_interfaces.msg import CanFD, Can
 from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 
 import numpy as np
 
@@ -53,10 +53,7 @@ class Xbee(Node):
         # track when the last successful message was received
         self.__last_successful_message = time.time_ns()
 
-        self.__value_state = {
-            "xbox": {},
-            "n64": {}
-        }
+        self.__value_state = {"xbox": {}, "n64": {}}
 
         self.__name_to_ID_XBOX = {}
 
@@ -68,8 +65,10 @@ class Xbee(Node):
                 f"/Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[joystick]['name']}",
                 10,
             )
-            self.__name_to_ID_XBOX[TOPICS_JOYSTICK[joystick]['name']] = joystick
-            self.__value_state["xbox"][TOPICS_JOYSTICK[joystick]['name']] = CONSTANTS.XBOX.JOYSTICK.NEUTRAL_HEX
+            self.__name_to_ID_XBOX[TOPICS_JOYSTICK[joystick]["name"]] = joystick
+            self.__value_state["xbox"][
+                TOPICS_JOYSTICK[joystick]["name"]
+            ] = CONSTANTS.XBOX.JOYSTICK.NEUTRAL_HEX
         # self.__trigger_publishers: dict[int, Publisher] = {}
         # for trigger in CONSTANTS.TRIGGER.LIST_OF_TRIGGERS:
         #     self.__trigger_publishers[trigger] = self.create_publisher(
@@ -84,29 +83,26 @@ class Xbee(Node):
                 f"/Xbee/RX/Xbox/Buttons/{TOPICS_BUTTON[button]['name']}",
                 10,
             )
-            self.__name_to_ID_XBOX[TOPICS_BUTTON[button]['name']] = button
-            self.__value_state['xbox'][TOPICS_BUTTON[button]['name']] = 0
+            self.__name_to_ID_XBOX[TOPICS_BUTTON[button]["name"]] = button
+            self.__value_state["xbox"][TOPICS_BUTTON[button]["name"]] = 0
 
         self.__n64_publishers = {
             "A": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/A", 10),
-            "N": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/B", 10),
+            "B": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/B", 10),
             "L": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/L", 10),
             "R": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/R", 10),
-
             "CU": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CU", 10),
             "CD": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CD", 10),
             "CL": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CL", 10),
             "CR": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/CR", 10),
-
             "DU": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DU", 10),
             "DD": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DD", 10),
             "DL": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DL", 10),
             "DR": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/DR", 10),
-
-            "Z": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/Z", 10)
+            "Z": self.create_publisher(Bool, "/Xbee/RX/N64/Buttons/Z", 10),
         }
 
-        self.__value_state['n64'] = {
+        self.__value_state["n64"] = {
             "A": CONSTANTS.N64.BUTTONS.OFF,
             "B": CONSTANTS.N64.BUTTONS.OFF,
             "L": CONSTANTS.N64.BUTTONS.OFF,
@@ -165,7 +161,9 @@ class Xbee(Node):
     def disable_xbee(self) -> None:
         self.__is_disabled = True
 
-    def __publish_new_controls(self, controller: str, button: str, value) -> None:
+    def __publish_new_controls(
+        self, controller: str, button: str, value: Float32 | Bool
+    ) -> None:
         """Helper function to only publish updated information
 
         Args:
@@ -176,12 +174,15 @@ class Xbee(Node):
 
         if self.__value_state[controller][button] == value:
             return
+        self.__value_state[controller][button] = value
 
         if controller == "n64":
             self.__n64_publishers[button].publish(value)
+            return
 
-        if "axis" in button.lower():
+        if button.upper() in ["LY", "LX", "RY", "RX"]:
             self.__joystick_publishers[self.__name_to_ID_XBOX[button]].publish(value)
+            return
         self.__button_publishers[self.__name_to_ID_XBOX[button]].publish(value)
 
     def __parse_incoming_message(self, message: list[int]):
@@ -219,10 +220,9 @@ class Xbee(Node):
 
             ros_msg = TOPICS_JOYSTICK[i]["val"]()
             ros_msg.data = value
-
             # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
-            self.__publish_new_controls('xbox',TOPICS_JOYSTICK[i]['name'] , ros_msg)
+            self.__publish_new_controls("xbox", TOPICS_JOYSTICK[i]["name"], ros_msg)
             self.__joystick_publishers[i].publish(ros_msg)
 
         # parse for button values
@@ -262,7 +262,7 @@ class Xbee(Node):
             # ).publish(ros_msg)
 
             # self.__button_publishers[i].publish(ros_msg)
-            self.__publish_new_controls('xbox',TOPICS_BUTTON[i]['name'] , ros_msg)
+            self.__publish_new_controls("xbox", TOPICS_BUTTON[i]["name"], ros_msg)
 
         # parsing N64 controller
         # A B L R
@@ -272,46 +272,46 @@ class Xbee(Node):
 
         a_value = Bool()
         a_value.data = bool((n64_message[0] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "a", a_value)
+        self.__publish_new_controls("n64", "A", a_value)
         b_value = Bool()
         b_value.data = bool((n64_message[0] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "b", b_value)
+        self.__publish_new_controls("n64", "B", b_value)
         l_value = Bool()
         l_value.data = bool((n64_message[0] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "l", l_value)
+        self.__publish_new_controls("n64", "L", l_value)
         r_value = Bool()
         r_value.data = bool((n64_message[0] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "r", r_value)
+        self.__publish_new_controls("n64", "R", r_value)
 
         cu_value = Bool()
         cu_value.data = bool((n64_message[1] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "cu", cu_value)
+        self.__publish_new_controls("n64", "CU", cu_value)
         cd_value = Bool()
         cd_value.data = bool((n64_message[1] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "cd", cd_value)
+        self.__publish_new_controls("n64", "CD", cd_value)
         cl_value = Bool()
         cl_value.data = bool((n64_message[1] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "cl", cl_value)
+        self.__publish_new_controls("n64", "CL", cl_value)
         cr_value = Bool()
         cr_value.data = bool((n64_message[1] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "cr", cr_value)
+        self.__publish_new_controls("n64", "CR", cr_value)
 
         du_value = Bool()
         du_value.data = bool((n64_message[2] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "du", du_value)
+        self.__publish_new_controls("n64", "DU", du_value)
         dd_value = Bool()
         dd_value.data = bool((n64_message[2] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "dd", dd_value)
+        self.__publish_new_controls("n64", "DD", dd_value)
         dl_value = Bool()
         dl_value.data = bool((n64_message[2] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "dl", dl_value)
+        self.__publish_new_controls("n64", "DL", dl_value)
         dr_value = Bool()
         dr_value.data = bool((n64_message[2] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "dr", dr_value)
+        self.__publish_new_controls("n64", "DR", dr_value)
 
         z_value = Bool()
         z_value.data = bool(n64_message[3] == CONSTANTS.N64.BUTTONS.ON)
-        self.__publish_new_controls('n64', "z", z_value)
+        self.__publish_new_controls("n64", "Z", z_value)
 
     def send_msg(self):
         pass

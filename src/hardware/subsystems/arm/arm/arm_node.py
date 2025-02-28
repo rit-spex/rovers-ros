@@ -1,4 +1,5 @@
 from constants.CAN_Constants import CHANNEL, TOPICS, TOPIC_RANGES
+from numpy import uint8
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
@@ -28,27 +29,9 @@ class Arm(Node):
     def __init__(self):
         super().__init__("arm_node")
 
-        # self.__base_publisher = self.create_publisher(Can, TOPICS[11]["name"], 10)
-        # self.__shoulder_publisher = self.create_publisher(Can, TOPICS[12]["name"], 10)
-        # self.__elbow_publsiher = self.create_publisher(Can, TOPICS[13]["name"], 10)
-        # self.__wrist_publsiher = self.create_publisher(Can, TOPICS[14]["name"], 10)
-        # self.__claw_publsiher = self.create_publisher(Can, TOPICS[15]["name"], 10)
-        # self.__solinoid_publsiher = self.create_publisher(Can, TOPICS[16]["name"], 10)
-
         self.__publishers = []
         for i in range(TOPIC_RANGES[CHANNEL.ARM_BOARD][0], TOPIC_RANGES[CHANNEL.ARM_BOARD][1]): # change based on amount of IDs filled out
             self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
-
-        """
-        N64 Controller
-        Bumpers: Base
-        Camera (top, left): Shoulder
-        Camera (bottom, right): Elbow
-        A and B: Gripper
-        D-Pad (up, down): Bend Wrist
-        D-Pad (left, right): Twist Wrist
-        Z: Solenoid
-        """
 
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/L", self.__base_forward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/R", self.__base_backward_callback, 10)
@@ -56,10 +39,10 @@ class Arm(Node):
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CL", self.__shoulder_backward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CB", self.__elbow_forward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CR", self.__elbow_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DU", self.__bend_wrist_backward_callback, 10)
+        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DD", self.__bend_wrist_forward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DL", self.__twist_wrist_forward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DR", self.__twist_wrist_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DU", self.__bend_wrist_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DD", self.__bend_wrist_backward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/A", self.__gripper_forward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/B", self.__gripper_backward_callback, 10)
         self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/Z", self.__solenoid_callback, 10)
@@ -73,14 +56,20 @@ class Arm(Node):
         self.__elbow_forward = 0
         self.__elbow_backward = 0
 
-        self.__twist_wrist_forward = 0
-        self.__twist_wrist_backward = 0
-
         self.__bend_wrist_forward = 0
         self.__bend_wrist_backward = 0
 
+        self.__twist_wrist_forward = 0
+        self.__twist_wrist_backward = 0
+
+        # Dyna
         self.__gripper_forward = 0
         self.__gripper_backward = 0
+        # SAR
+        # self.__gripper_pos: uint8 = uint8(90)
+        # self.__gripper_speed = 1
+        # self.__gripper_max_pos = 110
+        # self.__gripper_min_pos = 90
 
         self.__solenoid = 0
 
@@ -108,14 +97,6 @@ class Arm(Node):
         self.__elbow_backward = int(msg.data)
         self.__send_controller_data(13)
 
-    def __twist_wrist_forward_callback(self, msg: Bool):
-        self.__twist_wrist_forward = int(msg.data)
-        self.__send_controller_data(15)
-
-    def __twist_wrist_backward_callback(self, msg: Bool):
-        self.__twist_wrist_backward = int(msg.data)
-        self.__send_controller_data(15)
-
     def __bend_wrist_forward_callback(self, msg: Bool):
         self.__bend_wrist_forward = int(msg.data)
         self.__send_controller_data(14)
@@ -124,12 +105,26 @@ class Arm(Node):
         self.__bend_wrist_backward = int(msg.data)
         self.__send_controller_data(14)
 
+    def __twist_wrist_forward_callback(self, msg: Bool):
+        self.__twist_wrist_forward = int(msg.data)
+        self.__send_controller_data(15)
+
+    def __twist_wrist_backward_callback(self, msg: Bool):
+        self.__twist_wrist_backward = int(msg.data)
+        self.__send_controller_data(15)
+
     def __gripper_forward_callback(self, msg: Bool):
+        # Dyna
         self.__gripper_forward = int(msg.data)
+        # SAR
+        # self.__gripper_pos += self.__gripper_speed if self.__gripper_pos < self.__gripper_max_pos else 0
         self.__send_controller_data(16)
 
     def __gripper_backward_callback(self, msg: Bool):
+        # Dyna
         self.__gripper_backward = int(msg.data)
+        # SAR
+        # self.__gripper_pos -= self.__gripper_speed if self.__gripper_pos > self.__gripper_min_pos else 0
         self.__send_controller_data(16)
 
     def __solenoid_callback(self, msg: Bool):
@@ -162,15 +157,22 @@ class Arm(Node):
             case 13: # ELBOW
                 ros_msg.buf[0] = self.__elbow_forward | self.__elbow_backward
                 ros_msg.buf[1] = self.__base_number(self.__elbow_forward - self.__elbow_backward, 0)
-            case 14: # TWIST WRIST
-                ros_msg.buf[0] = self.__twist_wrist_forward | self.__twist_wrist_backward
-                ros_msg.buf[1] = self.__base_number(self.__twist_wrist_forward - self.__twist_wrist_backward, 0)
-            case 15: # BEND WRIST
+            case 14: # BEND WRIST
                 ros_msg.buf[0] = self.__bend_wrist_forward | self.__bend_wrist_backward
                 ros_msg.buf[1] = self.__base_number(self.__bend_wrist_forward - self.__bend_wrist_backward, 0)
+            case 15: # TWIST WRIST
+                ros_msg.buf[0] = self.__twist_wrist_forward | self.__twist_wrist_backward
+                ros_msg.buf[1] = self.__base_number(self.__twist_wrist_forward - self.__twist_wrist_backward, 0)
             case 16: # GRIPPER
+                # Dyna
                 ros_msg.buf[0] = self.__gripper_forward | self.__gripper_backward
                 ros_msg.buf[1] = self.__base_number(self.__gripper_forward - self.__gripper_backward, 0)
+                # SAR
+                # buf = []
+                # for x in bin(self.__gripper_pos)[2:]:
+                #     buf.append(int(x))
+                # self.get_logger().info(f"buf: {buf}")
+                # ros_msg.buf = buf
             case 17: # SOLENOID
                 engaged = self.__solenoid
                 ros_msg.buf[0] = engaged
