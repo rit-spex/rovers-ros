@@ -27,7 +27,7 @@ class GeneratePath(Node):
         self.prevVelRight.data = 0.0
         self.idCheck = Bool()
         self.measPoint = Point()
-        self.MAX_LINEAR_VELOCITY = 0.6  # Maximum wheel linear velocity in m/s
+        self.MAX_LINEAR_VELOCITY = 0.5  # Maximum wheel linear velocity in m/s
         self.MAX_ANGULAR_VELOCITY = 100  # Maximum robot turn velocity in rad/s
         self.WHEEL_RADIUS = 0.0775  # Wheel radius in m (3.25 in)
         self.WHEEL_SEPERATION = 0.56  # Wheel seperation distance (22.5 in)
@@ -42,16 +42,16 @@ class GeneratePath(Node):
             msg.z - 0.223
         )  # Math derived uses x as distance infront of robot but camera publishes it as z
         y = (
-            msg.x + 0.183
+            -msg.x + 0.183
         )  # The math derived uses y as distance left of robot but camera publisher publishes it a x and direction needs to flip
 
         self.measPoint.x = x
         self.measPoint.y = y
 
         dP = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
-        dPhi = math.atan(y / x)
+        dPhi = math.atan(y / x) * 10
         self.measPoint.z = dPhi
-        if self.idCheck.data == True:
+        if True == True:  # self.idCheck.data == True:
             if dP > 1.4:
                 # Try to get to point as fast as possible.
                 dt = dP / self.MAX_LINEAR_VELOCITY
@@ -98,7 +98,7 @@ class GeneratePath(Node):
         # for i in range(10):
         #     self.velPubRight.publish(self.outputVelRight)
         #     self.velPubLeft.publish(self.outputVelLeft)
-        time.sleep(1)
+        time.sleep(3)
 
 
 def main(args=None):

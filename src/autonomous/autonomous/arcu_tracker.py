@@ -14,6 +14,9 @@ from cv_bridge import CvBridge
 import time
 
 
+# Varibles for buffer
+
+
 class ArucoTracker(Node):
     def __init__(self):
         super().__init__("aruco_tracker")
@@ -30,14 +33,26 @@ class ArucoTracker(Node):
         # Camera calibration parameters
         self.camera_matrix = np.array(
             [
-                [1.387175980e03, 0, 2.95126234e02],
-                [0, 1.65364677e03, 2.7632291215e02],
-                [0, 0, 1],
-            ]
-        )  # Replace with actual values
-        self.dist_coeffs = np.zeros(
-            (5, 1)
-        )  # If calibrated, this is for distortion values
+                [1114.4638331, 0.00, 352.24603902],
+                [0.00, 1040.32652878, 205.15271065],
+                [0.00, 0.00, 1.00],
+            ],
+            dtype=np.float32,
+        )
+
+        # Define Distortion Coefficients (1x5)
+        self.dist_coeffs = np.array(
+            [
+                [
+                    -4.07243548e-01,
+                    2.38916974e-01,
+                    3.29860476e-03,
+                    -4.12199759e-03,
+                    -4.05068312e00,
+                ]
+            ],
+            dtype=np.float32,
+        )
 
         # ArUco marker size (in meters)
         self.marker_size = 0.1
@@ -54,12 +69,11 @@ class ArucoTracker(Node):
         self.id_pub = self.create_publisher(Bool, "/tracking/id_out", 10)
 
     def image_callback(self, msg):
-        # Varibles for buffer
         avg_dist = []
-        num_frames = 60  # Number of frames to average
-        update_interval: float = 1.5  # Update distance value every 2 seconds
-        display_distance: float  # Last computed average distance
+        num_frames = 20  # Number of frames to average
+        update_interval: float = 1.35  # Update distance value every 2 seconds
         last_update_time = time.time()  # Track last update time
+        display_distance: float = 0.00  # Last computed average distance
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -84,8 +98,8 @@ class ArucoTracker(Node):
                     x = tvec[i][0][0]
                     y = tvec[i][0][1]
                     z = tvec[i][0][2]
-                    self.frame_location.x = y
-                    self.frame_location.y = x
+                    self.frame_location.x = x
+                    self.frame_location.y = y
                     self.frame_location.z = z
                 # print(f"Maker ID: {ids[i][0]}")
                 # print(f"X: {x: .2f}, Y: {y: .2f}, Z: {z: .2f}")
@@ -109,7 +123,7 @@ class ArucoTracker(Node):
             # rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             cv2.putText(
                 frame,
-                f"Distance: {distance:.2f}m",
+                f"Distance: {display_distance:.2f}m",
                 (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -119,7 +133,7 @@ class ArucoTracker(Node):
 
             cv2.putText(
                 frame,
-                f"X: {y:.2f}m",
+                f"X: {x:.2f}m",
                 (250, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.7,
@@ -148,20 +162,6 @@ class ArucoTracker(Node):
                 2,
             )
 
-            # Always display distance, but only update value every 2 seconds
-            if time.time() - last_update_time >= update_interval:
-                last_update_time = time.time()  # Reset timer
-
-                cv2.putText(
-                    frame,
-                    f"Distance: {display_distance:.2f}m",
-                    (10, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 255, 0),
-                    2,
-                )
-
         else:
             isFound = False
             cv2.putText(
@@ -175,6 +175,20 @@ class ArucoTracker(Node):
             )
             display_distance = 0.0
             avg_dist.clear()  # Clear for next cycle
+
+        # Always display distance, but only update value every 2 seconds
+        if time.time() - last_update_time >= update_interval:
+            last_update_time = time.time()  # Reset timer
+
+        cv2.putText(
+            frame,
+            f"Distance: {display_distance:.2f}m",
+            (10, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+        )
 
         cv2.imshow("ArUco Tracking", frame)
 
