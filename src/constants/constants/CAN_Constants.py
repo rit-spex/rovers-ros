@@ -75,7 +75,7 @@ TOPICS = {
         "channel": CHANNEL.ARM_BOARD,
     },
     16: {
-        "id": 15,
+        "id": 16,
         "name": "MOVE_CLAW",
         "buf": bytearray(8),
         "channel": CHANNEL.ARM_BOARD,
