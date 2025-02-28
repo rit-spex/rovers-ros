@@ -21,12 +21,16 @@ class GeneratePath(Node):
         self.pointPub = self.create_publisher(Point, "/auto/measured_point", 10)
         self.outputVelLeft = Float32()
         self.outputVelRight = Float32()
+        self.prevVelLeft = Float32()
+        self.prevVelRight = Float32()
+        self.prevVelLeft.data = 0.0
+        self.prevVelRight.data = 0.0
         self.idCheck = Bool()
         self.measPoint = Point()
-        self.MAX_LINEAR_VELOCITY = 2.8527  # Maximum wheel linear velocity in m/s
+        self.MAX_LINEAR_VELOCITY = 0.6  # Maximum wheel linear velocity in m/s
         self.MAX_ANGULAR_VELOCITY = 100  # Maximum robot turn velocity in rad/s
-        self.WHEEL_RADIUS = 0.08255  # Wheel radius in m (3.25 in)
-        self.WHEEL_SEPERATION = 0.5715  # Wheel seperation distance (22.5 in)
+        self.WHEEL_RADIUS = 0.0775  # Wheel radius in m (3.25 in)
+        self.WHEEL_SEPERATION = 0.56  # Wheel seperation distance (22.5 in)
         self.MAX_WHEEL_ANGULAR_VELOCITY = 34.5575  # maximum wheel velocty on the teensy with modifier: 1100 RPM * 70% converted to rad/s
 
     def CheckData(self, msg):
@@ -47,7 +51,6 @@ class GeneratePath(Node):
         dP = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
         dPhi = math.atan(y / x)
         self.measPoint.z = dPhi
-        print(dPhi)
         if self.idCheck.data == True:
             if dP > 1.4:
                 # Try to get to point as fast as possible.
@@ -83,8 +86,10 @@ class GeneratePath(Node):
         elif leftVel < -1.0:
             leftVel = -1.0
 
-        self.outputVelRight.data = -leftVel
-        self.outputVelLeft.data = -rightVel
+        self.outputVelRight.data = -rightVel  # + self.prevVelRight.data) / 2
+        self.outputVelLeft.data = -leftVel  # + self.prevVelLeft.data) / 2
+        self.prevVelRight.data = self.outputVelRight.data
+        self.prevVelLeft.data = self.outputVelLeft.data
 
         self.pointPub.publish(self.measPoint)
         self.velPubRight.publish(self.outputVelRight)
@@ -93,7 +98,7 @@ class GeneratePath(Node):
         # for i in range(10):
         #     self.velPubRight.publish(self.outputVelRight)
         #     self.velPubLeft.publish(self.outputVelLeft)
-        # time.sleep(1)
+        time.sleep(1)
 
 
 def main(args=None):

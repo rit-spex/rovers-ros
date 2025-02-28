@@ -11,6 +11,7 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import Point
 from std_msgs.msg import Bool
 from cv_bridge import CvBridge
+import time
 
 
 class ArucoTracker(Node):
@@ -29,8 +30,8 @@ class ArucoTracker(Node):
         # Camera calibration parameters
         self.camera_matrix = np.array(
             [
-                [1.166475980e03, 0, 2.95126234e02],
-                [0, 1.35364677e03, 2.7632291215e02],
+                [1.387175980e03, 0, 2.95126234e02],
+                [0, 1.65364677e03, 2.7632291215e02],
                 [0, 0, 1],
             ]
         )  # Replace with actual values
@@ -53,6 +54,12 @@ class ArucoTracker(Node):
         self.id_pub = self.create_publisher(Bool, "/tracking/id_out", 10)
 
     def image_callback(self, msg):
+        # Varibles for buffer
+        avg_dist = []
+        num_frames = 60  # Number of frames to average
+        update_interval: float = 1.5  # Update distance value every 2 seconds
+        display_distance: float  # Last computed average distance
+        last_update_time = time.time()  # Track last update time
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -62,7 +69,7 @@ class ArucoTracker(Node):
         )
 
         # Rotate
-        rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        # rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
         if ids is not None:
             isFound = True
@@ -89,10 +96,19 @@ class ArucoTracker(Node):
                 # Distance to marker
             distance = np.linalg.norm(tvec[i])
 
+            # Add current frame's distance to the list
+            avg_dist.append(distance)
+
+            # If enough frames are collected, compute average distance
+            if len(avg_dist) == num_frames:
+                display_distance = sum(avg_dist) / len(avg_dist)  # Compute average
+                avg_dist.clear()  # Clear for next cycle
+                last_update_time = time.time()  # Reset update timer
+
             # Frame Disp
-            rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            # rotated_frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             cv2.putText(
-                rotated_frame,
+                frame,
                 f"Distance: {distance:.2f}m",
                 (10, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -102,7 +118,7 @@ class ArucoTracker(Node):
             )  # Display UI
 
             cv2.putText(
-                rotated_frame,
+                frame,
                 f"X: {y:.2f}m",
                 (250, 50),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -112,7 +128,7 @@ class ArucoTracker(Node):
             )  # Display UI
 
             cv2.putText(
-                rotated_frame,
+                frame,
                 f"Z: {z:.2f}m",
                 (250, 70),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -123,7 +139,7 @@ class ArucoTracker(Node):
 
             # Display Tracking Status
             cv2.putText(
-                rotated_frame,
+                frame,
                 "Tracking ArUco ID: {}".format(ids[0][0]),
                 (250, 100),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -132,10 +148,24 @@ class ArucoTracker(Node):
                 2,
             )
 
+            # Always display distance, but only update value every 2 seconds
+            if time.time() - last_update_time >= update_interval:
+                last_update_time = time.time()  # Reset timer
+
+                cv2.putText(
+                    frame,
+                    f"Distance: {display_distance:.2f}m",
+                    (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
+
         else:
             isFound = False
             cv2.putText(
-                rotated_frame,
+                frame,
                 f"Lost Tracking",
                 (250, 125),
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -143,10 +173,14 @@ class ArucoTracker(Node):
                 (0, 255, 0),
                 2,
             )
+            display_distance = 0.0
+            avg_dist.clear()  # Clear for next cycle
 
-        cv2.imshow("ArUco Tracking", rotated_frame)
-        rotated_frame_image = self.bridge.cv2_to_imgmsg(rotated_frame, encoding="bgr8")
-        self.image_pub.publish(rotated_frame_image)
+        cv2.imshow("ArUco Tracking", frame)
+
+        # Ros Bridge
+        frame_image = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+        self.image_pub.publish(frame_image)
         self.pointFound.data = isFound
 
         self.point_pub.publish(self.frame_location)
