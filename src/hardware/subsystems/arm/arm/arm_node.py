@@ -9,12 +9,6 @@ from std_msgs.msg import Bool
 
 
 class Arm(Node):
-    # __base_publisher: Publisher
-    # __shoulder_publisher: Publisher
-    # __elbow_publsiher: Publisher
-    # __wrist_publsiher: Publisher
-    # __claw_publsiher: Publisher
-    # __solinoid_publsiher: Publisher
     __publishers: list[Publisher]
 
     __base_forward: int
@@ -62,14 +56,8 @@ class Arm(Node):
         self.__twist_wrist_forward = 0
         self.__twist_wrist_backward = 0
 
-        # Dyna
         self.__gripper_forward = 0
         self.__gripper_backward = 0
-        # SAR
-        # self.__gripper_pos: uint8 = uint8(90)
-        # self.__gripper_speed = 1
-        # self.__gripper_max_pos = 110
-        # self.__gripper_min_pos = 90
 
         self.__solenoid = 0
 
@@ -114,17 +102,11 @@ class Arm(Node):
         self.__send_controller_data(15)
 
     def __gripper_forward_callback(self, msg: Bool):
-        # Dyna
         self.__gripper_forward = int(msg.data)
-        # SAR
-        # self.__gripper_pos += self.__gripper_speed if self.__gripper_pos < self.__gripper_max_pos else 0
         self.__send_controller_data(16)
 
     def __gripper_backward_callback(self, msg: Bool):
-        # Dyna
         self.__gripper_backward = int(msg.data)
-        # SAR
-        # self.__gripper_pos -= self.__gripper_speed if self.__gripper_pos > self.__gripper_min_pos else 0
         self.__send_controller_data(16)
 
     def __solenoid_callback(self, msg: Bool):
@@ -164,21 +146,13 @@ class Arm(Node):
                 ros_msg.buf[0] = self.__twist_wrist_forward | self.__twist_wrist_backward
                 ros_msg.buf[1] = self.__base_number(self.__twist_wrist_forward - self.__twist_wrist_backward, 0)
             case 16: # GRIPPER
-                # Dyna
                 ros_msg.buf[0] = self.__gripper_forward | self.__gripper_backward
                 ros_msg.buf[1] = self.__base_number(self.__gripper_forward - self.__gripper_backward, 0)
-                # SAR
-                # buf = []
-                # for x in bin(self.__gripper_pos)[2:]:
-                #     buf.append(int(x))
-                # self.get_logger().info(f"buf: {buf}")
-                # ros_msg.buf = buf
             case 17: # SOLENOID
                 engaged = self.__solenoid
                 ros_msg.buf[0] = engaged
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
-        # self.get_logger().info(f"PUBLISHING TO {self.__publishers[ID - 10].topic_name}")
         self.__publishers[ID - 10].publish(ros_msg)
 
     def run(self):
