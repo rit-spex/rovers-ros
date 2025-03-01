@@ -1,6 +1,6 @@
 <launch>
 	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
 	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
-	<!-- <node pkg="drive_base" exec="drive_base_node" name="drive_base"></node> -->
+	<node pkg="drive_base" exec="drive_base_node" name="drive_base"></node>
 	<node pkg="arm" exec="arm_node" name = "arm"></node>
 </launch>
