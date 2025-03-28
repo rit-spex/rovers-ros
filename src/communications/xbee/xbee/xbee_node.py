@@ -349,6 +349,8 @@ class Xbee(Node):
         data = list(message.data)
         # self.get_logger().info(f"got data: {data}")
 
+        self.get_logger().info(str(data))
+
         # check if message has a valid start message
         if data[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
             self.get_logger().info(f"not valid start message")
