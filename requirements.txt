@@ -15,21 +15,15 @@ ament-pep257==0.12.14
 ament-uncrustify==0.12.14
 ament-xmllint==0.12.14
 angles==1.15.0
-arm==0.0.0
 builtin-interfaces==1.2.2
-cameras==0.0.0
-can-comms==0.0.0
 catkin-pkg==1.0.0
 composition-interfaces==1.2.2
-constants==0.0.0
-custom-interfaces==0.0.0
 cv-bridge==3.2.1
 demo-nodes-py==0.20.5
 diagnostic-msgs==4.9.0
 digi-xbee==1.5.0
 docutils==0.21.2
 domain-coordinator==0.10.0
-drive-base==0.0.0
 empy==4.2
 example-interfaces==0.9.3
 examples-rclpy-executors==0.15.4
@@ -41,7 +35,6 @@ examples-rclpy-minimal-service==0.15.4
 examples-rclpy-minimal-subscriber==0.15.4
 future==1.0.0
 geometry-msgs==4.9.0
-gps==0.0.0
 image-geometry==3.2.1
 interactive-markers==2.3.2
 iso8601==2.1.0
@@ -55,7 +48,6 @@ launch-xml==1.0.10
 launch-yaml==1.0.10
 lifecycle-msgs==1.2.2
 logging-demo==0.20.5
-main==0.0.0
 map-msgs==2.1.0
 message-filters==4.3.8
 msgpack==1.1.1
@@ -158,4 +150,3 @@ typing_extensions==4.14.1
 unique-identifier-msgs==2.2.1
 visualization-msgs==4.9.0
 wrapt==1.17.2
-xbee==0.0.0
