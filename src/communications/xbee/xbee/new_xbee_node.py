@@ -1,4 +1,5 @@
-from rclpy import Node
+import rclpy
+from rclpy.node import Node
 from rclpy.publisher import Publisher
 from std_msgs.msg import Int8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
@@ -6,8 +7,6 @@ from typing import Optional
 
 from custom_interfaces.msg import Can
 from constants.constants.CAN_Constants import CHANNEL, TOPICS
-
-# from constants.CAN_Constants import CHANNEL, TOPICS
 
 
 class Xbee(Node):
@@ -28,8 +27,6 @@ class Xbee(Node):
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
         self.__publisher = self.create_publisher(Int8MultiArray, "XBEE/MESSAGES", 10)
 
-        self.run()
-
     def signal_estop(self) -> None:
         ros_msg = Can()
         ros_msg.id = 0
@@ -41,10 +38,10 @@ class Xbee(Node):
         message = None
         try:
             message = self.__xbee_device.read_data(0.0004)
-        except TimeoutException as e:
+        except TimeoutException:
             pass
             # self.get_logger().info("timed out")
-        except Exception as e:
+        except Exception:
             self.get_logger().info("failed to read data")
 
         if message is None:
@@ -68,3 +65,13 @@ class Xbee(Node):
             self.publish_data(data)
 
         self.signal_estop()
+
+
+def main() -> None:
+    rclpy.init()
+    xbee = Xbee()
+    xbee.run()
+
+
+if __name__ == "__main__":
+    main()
