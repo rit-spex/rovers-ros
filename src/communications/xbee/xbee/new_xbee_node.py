@@ -1,19 +1,20 @@
 from rclpy import Node
 from rclpy.publisher import Publisher
-from std_msgs.msg import ByteMultiArray
-
+from std_msgs.msg import Int8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
-from custom_interfaces.msg import Can
-from constants.CAN_Constants import CHANNEL, TOPICS
-
 from typing import Optional
+
+from custom_interfaces.msg import Can
+from constants.constants.CAN_Constants import CHANNEL, TOPICS
+
+# from constants.CAN_Constants import CHANNEL, TOPICS
 
 
 class Xbee(Node):
     __port: str
     __baud_rate: int
-    __update_rate: int
-    __timeout: int
+    # __update_rate: int
+    # __timeout: int
     __xbee_device: XBeeDevice
     __publisher: Publisher
 
@@ -22,10 +23,10 @@ class Xbee(Node):
 
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
-        self.__update_rate = 40000000  # nano seconds
-        self.__timeout = 1000000000  # nano seconds
+        # self.__update_rate = 40000000  # nano seconds
+        # self.__timeout = 1000000000  # nano seconds
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(ByteMultiArray, "XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(Int8MultiArray, "XBEE/MESSAGES", 10)
 
         self.run()
 
@@ -36,7 +37,7 @@ class Xbee(Node):
         ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
         self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
 
-    def read_data(self) -> Optional[list[bytes]]:
+    def read_data(self) -> Optional[list[int]]:
         message = None
         try:
             message = self.__xbee_device.read_data(0.0004)
@@ -50,6 +51,11 @@ class Xbee(Node):
             return None
         return list(message.data)
 
+    def publish_data(self, data: list[int]) -> None:
+        msg = Int8MultiArray()
+        msg.data = data
+        self.__publisher.publish(msg)
+
     def run(self) -> None:
         self.get_logger().info("starting xbee...")
         self.__xbee_device.open()
@@ -58,7 +64,7 @@ class Xbee(Node):
             data = self.read_data()
             if data is None:
                 self.get_logger().info("message was none")
-                return
-            msg = ByteMultiArray()
-            msg.data = data
-            self.__publisher.publish(msg)
+                continue
+            self.publish_data(data)
+
+        self.signal_estop()

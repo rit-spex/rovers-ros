@@ -1,0 +1,6 @@
+<launch>
+	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
+	<node pkg="udp" exec="udp_node" name="udp"></node>
+	<!-- <node pkg="chassis" exec="chassis_node" name="chassis"></node> -->
+	<!-- <node pkg="arm" exec="arm_node" name="arm"></node> -->
+</launch>

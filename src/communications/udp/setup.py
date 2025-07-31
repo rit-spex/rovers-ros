@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'socket'
+package_name = 'udp'
 
 setup(
     name=package_name,
@@ -13,8 +13,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='gamer',
-    maintainer_email='garrett59100@gmail.com',
+    maintainer='garrett',
+    maintainer_email='garrett@todo.todo',
     description='TODO: Package description',
     license='TODO: License declaration',
     tests_require=['pytest'],
