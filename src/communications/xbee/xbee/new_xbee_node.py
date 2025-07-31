@@ -1,0 +1,64 @@
+from rclpy import Node
+from rclpy.publisher import Publisher
+from std_msgs.msg import ByteMultiArray
+
+from digi.xbee.devices import XBeeDevice, TimeoutException
+from custom_interfaces.msg import Can
+from constants.CAN_Constants import CHANNEL, TOPICS
+
+from typing import Optional
+
+
+class Xbee(Node):
+    __port: str
+    __baud_rate: int
+    __update_rate: int
+    __timeout: int
+    __xbee_device: XBeeDevice
+    __publisher: Publisher
+
+    def __init__(self) -> None:
+        super().__init__("xbee_node")
+
+        self.__port = "/dev/ttyUSB0"
+        self.__baud_rate = 230400
+        self.__update_rate = 40000000  # nano seconds
+        self.__timeout = 1000000000  # nano seconds
+        self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
+        self.__publisher = self.create_publisher(ByteMultiArray, "XBEE/MESSAGES", 10)
+
+        self.run()
+
+    def signal_estop(self) -> None:
+        ros_msg = Can()
+        ros_msg.id = 0
+        ros_msg.channel = CHANNEL.MAIN_BODY
+        ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
+        self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
+
+    def read_data(self) -> Optional[list[bytes]]:
+        message = None
+        try:
+            message = self.__xbee_device.read_data(0.0004)
+        except TimeoutException as e:
+            pass
+            # self.get_logger().info("timed out")
+        except Exception as e:
+            self.get_logger().info("failed to read data")
+
+        if message is None:
+            return None
+        return list(message.data)
+
+    def run(self) -> None:
+        self.get_logger().info("starting xbee...")
+        self.__xbee_device.open()
+
+        while True:
+            data = self.read_data()
+            if data is None:
+                self.get_logger().info("message was none")
+                return
+            msg = ByteMultiArray()
+            msg.data = data
+            self.__publisher.publish(msg)
