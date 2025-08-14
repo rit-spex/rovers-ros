@@ -1,13 +1,17 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from std_msgs.msg import Int8MultiArray
 
+# TODO: change to custom type to use unsigned ints
+from std_msgs.msg import Int16MultiArray
+# from custom_interfaces.msg import UDPPacket
+
+import socket as skt
 from socket import socket
 
 
 class Udp(Node):
-    __ip: str
+    __address: str
     __port: int
     __socket: socket
     __buffer_size: int
@@ -16,37 +20,38 @@ class Udp(Node):
     def __init__(self) -> None:
         super().__init__("udp")
 
-        self.__ip = "127.0.0.1"
+        self.__address = "127.0.0.1"
         self.__port = 5005
-        self.__socket = socket()
+        self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(Int8MultiArray, "/UDP/MESSAGES", 10)
+        self.__publisher = self.create_publisher(Int16MultiArray, "/UDP/MESSAGES", 10)
 
         self.run()
 
-    def read_data(self) -> list[int]:
-        data = self.__socket.recv(self.__buffer_size)
-        return list(data)
+    def read_data(self, buffer_size: int) -> list[int] | None:
+        try:
+            data = self.__socket.recvfrom(buffer_size)
+        except Exception as e:
+            self.get_logger().info(f"failed to receive data: {e}")
+            return []
+        if len(data[0]) == 0:
+            return None
+        return list(data[0])
 
     def publish_data(self, data: list[int]) -> None:
-        msg = Int8MultiArray()
+        msg = Int16MultiArray()
         msg.data = data
         self.__publisher.publish(msg)
 
     def run(self) -> None:
         self.get_logger().info("starting socket connection...")
+        self.__socket.bind((self.__address, self.__port))
 
-        self.get_logger().info("waiting for connection...")
         while True:
-            try:
-                self.__socket.connect((self.__ip, self.__port))
+            data = self.read_data(self.__buffer_size)
+            if data is None:
+                self.get_logger().info("client disconnected")
                 break
-            except Exception:
-                continue
-        self.get_logger().info("connected")
-
-        while True:
-            data = self.read_data()
             if len(data) == 0:
                 continue
             self.publish_data(data)
