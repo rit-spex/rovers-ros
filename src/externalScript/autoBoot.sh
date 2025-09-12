@@ -5,7 +5,7 @@
 # Purpose  : Autorun ROS on startup
 # ------------------------------------------------------------------
 
-# Source ROS 2 setup (adjust 'humble' if needed)
+# Source ROS 2 setup (adjust 'humble' if needed
 source /opt/ros/humble/setup.bash
 
 # Source your workspace setup
