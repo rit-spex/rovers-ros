@@ -149,4 +149,5 @@ turtlesim==1.4.2
 typing_extensions==4.14.1
 unique-identifier-msgs==2.2.1
 visualization-msgs==4.9.0
-wrapt==1.17.2
+wrapt==1.17.
+
