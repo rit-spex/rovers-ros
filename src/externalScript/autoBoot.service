@@ -1,0 +1,32 @@
+[Unit]
+Description=Run autoBoot.sh on start up
+After=network.target
+
+[Service]
+# Run as your user
+
+#sudo systemctl start autoBoot.service
+#sudo systemctl enable autoBoot.service
+
+#to check if the service is working
+#sudo systemctl daemon-reload
+#systemctl status autoBoot.service
+
+#todo change username to robot name
+User=savage22
+WorkingDirectory=/home/savage22/SPEX/rovers-ros
+
+# Run your script with Bash
+ExecStart=/bin/bash /home/savage22/SPEX/rovers-ros/externalScript/autoBoot.sh
+
+# Make sure environment paths are available
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/ros/humble/bin"
+
+# Restart if it crashes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
+
