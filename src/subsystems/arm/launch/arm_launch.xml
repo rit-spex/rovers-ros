@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="arm" exec="arm_node" name = "arm"></node>
+</launch>
