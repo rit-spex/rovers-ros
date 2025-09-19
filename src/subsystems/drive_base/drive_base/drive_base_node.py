@@ -26,10 +26,10 @@ class DriveBase(Node):
         )
 
         self.create_subscription(
-            Float32, "Xbee/RX/Controller/Axis/LY", self.__LY_callback, 10
+            Float32, "Xbee/RX/Xbox/Axis/LY", self.__LY_callback, 10
         )
         self.create_subscription(
-            Float32, "Xbee/RX/Controller/Axis/RY", self.__RY_callback, 10
+            Float32, "Xbee/RX/Xbox/Axis/RY", self.__RY_callback, 10
         )
 
         self.__LY_value = 0

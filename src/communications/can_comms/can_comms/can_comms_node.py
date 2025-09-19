@@ -50,7 +50,7 @@ class CAN(Node):
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def send_msg(self, msg):
-        self.get_logger().info(f"sending {msg}")
+        self.get_logger().info(f"ID {msg.id} ({TOPICS[msg.id]['name']}): {msg.buf}")
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )
