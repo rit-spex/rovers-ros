@@ -8,7 +8,7 @@ from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
 
 
-class DriveBase(Node):
+class Chassis(Node):
     __topic: dict[str, Any]
     __can_publisher: Publisher
 
@@ -76,7 +76,7 @@ class DriveBase(Node):
 
 def main():
     rclpy.init()
-    chassis = DriveBase()
+    chassis = Chassis()
     chassis.run()
 
 

@@ -4,9 +4,8 @@ from typing import Any
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
-# import constants.CommanndCodes
 from constants.CAN_Constants import CHANNEL, TOPICS
-from constants.CommanndCodes import CONSTANTS
+from constants.CommandCodes import CONSTANTS
 
 import time
 
@@ -14,15 +13,11 @@ import time
 import rclpy
 import rclpy.logging
 from rclpy.node import Node
-# from rclpy.publisher import Publisher
-
-# from custom_interfaces.msg import CanFD, Can
-from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
+from rclpy.publisher import Publisher
+from custom_interfaces.msg import CanFD, Can
+from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
-# import xbee
-# import xbee.xbee
-# import xbee.xbee.xbee_node
 from std_msgs.msg import Bool, Float32
 
 import numpy as np
@@ -55,7 +50,6 @@ class Xbee(Node):
 
         self.__disabled = False
         self.__is_first_connected = False
-        self.__axis_values = [0.0] * CONSTANTS.NUM_AXES
 
         # all the current values from the xbee
         self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
@@ -82,13 +76,6 @@ class Xbee(Node):
             self.__value_state["xbox"][
                 TOPICS_JOYSTICK[joystick]["name"]
             ] = CONSTANTS.XBOX.JOYSTICK.NEUTRAL_HEX
-        # self.__trigger_publishers: dict[int, Publisher] = {}
-        # for trigger in CONSTANTS.TRIGGER.LIST_OF_TRIGGERS:
-        #     self.__trigger_publishers[trigger] = self.create_publisher(
-        #         TOPICS_BUTTON[trigger]["val"],
-        #         f"/Xbee/Xbox/{TOPICS_TRIGGER[trigger]['name']}",
-        #         10,
-        #     )
         self.__button_publishers: dict[int, Publisher] = {}
         for button in CONSTANTS.XBOX.BUTTONS.LIST_OF_BUTTONS:
             self.__button_publishers[button] = self.create_publisher(
@@ -135,14 +122,14 @@ class Xbee(Node):
         # close device on deletion
         self.__xbee_device.close()
 
-    # """
-    # get the current value of selected input
-
-    # :param input_type - Specifies what type of input
-    # :param input_trigger - Controller button or axis, value from CommandCodes
-    # """
-
     def get_current_value(self, input_type: int, input_trigger: int) -> float | bool:
+        """Get the current value of selected input
+
+        Args:
+            input_type (int): specifies what type of input
+            input_trigger (int): controller button or axis, value from CommandCodes
+        """
+
         match input_type:
             case CONSTANTS.INPUT_TYPE.IS_AXIS:
                 if input_trigger == CONSTANTS.XBOX.JOYSTICK.AXIS_LY:
@@ -209,13 +196,7 @@ class Xbee(Node):
 
 
         # the current byte number
-
         byte_num: int = 0
-
-        # self.get_logger().info("parse:")
-        # for i, byte in enumerate(message):
-        #     self.get_logger().info(f"{i}, {bin(byte)}")
-        # self.get_logger().info("")
 
         n64_message: list[np.uint8] = [np.uint8(m) for m in message[6:]]
         message = message[1:5]
@@ -228,30 +209,20 @@ class Xbee(Node):
                 >= CONSTANTS.XBOX.JOYSTICK.MIN_VALUE
             ):
                 continue
-            # self.get_logger().info(f"i: {i+1}")
+
             value = (message[byte_num] - 100.0) / (100.0)
-            # self.__axis_values[i] = value
             byte_num = byte_num + 1
 
             ros_msg = TOPICS_JOYSTICK[i]["val"]()
             ros_msg.data = value
-            # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Axis/{TOPICS_JOYSTICK[i]['name']}: {value}")
 
             self.__publish_new_controls("xbox", TOPICS_JOYSTICK[i]["name"], ros_msg)
             self.__joystick_publishers[i].publish(ros_msg)
 
         # parse for button values
-
-        # self.get_logger().info(f"first set: {bin(message[2])}")
-        # self.get_logger().info(f"secon set: {bin(message[3])}")
         for i in range(0, CONSTANTS.XBOX.NUM_BUTTONS, 1):
             if i != 0 and i % 4 == 0:
                 byte_num = byte_num + 1
-
-            # check if section of byte is on or off
-            # self.get_logger().info(f"byte num: {byte_num}")
-            # self.get_logger().info(f"message: {message}")
-            # self.get_logger().info(f"together: {message[byte_num]}")
 
             button_value = (
                 (
@@ -265,23 +236,9 @@ class Xbee(Node):
                 % 4
             ) == CONSTANTS.XBOX.BUTTONS.ON
 
-            self.create_publisher(
-                TOPICS_BUTTON[i]["val"],
-                f"/Xbee/Buttons/RX/{TOPICS_BUTTON[i]['name']}",
-                10,
-            ).publish(button_value)
             ros_msg = TOPICS_BUTTON[i]["val"]()
             ros_msg.data = button_value
 
-            # self.get_logger().info(f"publishing /Xbee/RX/Xbox/Buttons/{TOPICS_BUTTON[i]['name']}: {button_value}")
-
-            # self.create_publisher(
-            #     TOPICS_BUTTON[i]["val"],
-            #     f"/Xbee/RX/Controller/Buttons/{TOPICS_BUTTON[i]['name']}",
-            #     10,
-            # ).publish(ros_msg)
-
-            # self.__button_publishers[i].publish(ros_msg)
             self.__publish_new_controls("xbox", TOPICS_BUTTON[i]["name"], ros_msg)
 
         # parsing N64 controller
@@ -341,34 +298,14 @@ class Xbee(Node):
         callback function that is called when message is received
         """
 
-        # print(var1)
-
-        self.get_logger().debug(var1)
-
-        return
-
-        # stop if xbee is disabed
-        if self.__disabled:
-        # self.get_logger().info("starting message received")
-
         # xbee is disabled
         if self.__is_disabled:
             self.get_logger().info(f"xbee is disabled, returning...")
             return
 
-        # get message from the physical xbee
-        # message = None
-        # try:
-        #     message = self.__xbee_device.read_data(0.0004)
-        # except TimeoutException:
-        #     return
-        # except Exception as e:
-        #     print("\n\nBIG ISSUE\n")
-        #     print(e)
-        #     return
+        self.get_logger().debug(var1)
 
-        # stop if message is none
-        if xbee_message is None:
+        # get message from the physical xbee
         try:
             message = self.__xbee_device.read_data(0.0004)
         except TimeoutException:
@@ -381,6 +318,8 @@ class Xbee(Node):
 
         # if start of message is not valid, stop
         if list(xbee_message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            return
+
         # message is invalid
         if message is None:
             self.get_logger().info(f"message was none")
@@ -390,7 +329,6 @@ class Xbee(Node):
             self.__is_first_connected = True
         # split the message data into a list
         data = list(message.data)
-        # self.get_logger().info(f"got data: {data}")
 
         self.get_logger().info(str(data))
 
@@ -412,12 +350,9 @@ class Xbee(Node):
         self.get_logger().info("")
 
         self.__parse_incoming_message(data)
-        # self.print_values()
 
         self.__last_successful_message = time.time_ns()
         self.__last_successful_message = time.time_ns()
-
-        # message_id = 3
 
     def run(self):
         # last_cycle_time = time.time_ns()
@@ -427,23 +362,9 @@ class Xbee(Node):
 
         self.get_logger().info("starting xbee...")
 
-        # while not self.__disabled:
-        #     if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
-        #         last_cycle_time = time.time_ns()
-
-        #         if (
-        #             time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
-        #             and self.__is_first_connected
-        #         ):
-        #             self.set_disabled(True)
-
-        rclpy.shutdown()
-                # if (
-                #     time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
-                #     and self.__is_first_connected
-                # ):
-                #     self.get_logger().info("disabling xbee")
-                #     self.disable_xbee()
+        while not self.__disabled:
+            if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
+                last_cycle_time = time.time_ns()
 
         # Signalling E-STOP
         ros_msg = Can()
@@ -461,36 +382,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-# import rclpy
-# import serial
-# from rclpy import Node
-# from std_msgs.msg import String
-# from constants.RoverConstants import PORT, BAUD_RATE
-
-
-# class XBee(Node):
-#     #__xbee: serial.Serial
-
-#     def __init__(self):
-#         super().__init__("XBee")
-#         # self.__xbee = serial.Serial(PORT, BAUD_RATE)
-
-#         # self.create_subscription(String, "/sensors/GPS/TX", self.send_gps, 10)
-
-#         self.run()
-
-#     def send_gps(self, data: String):
-#         self.get_logger().info(data)
-
-#     def run(self):
-#         rclpy.spin(self)
-
-
-# def main():
-#     xbee = XBee()
-
-
-# if __name__ == "__main__":
-#     main()
