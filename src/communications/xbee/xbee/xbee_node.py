@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 
+from typing import Any
 from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
+# import constants.CommanndCodes
 from constants.CAN_Constants import CHANNEL, TOPICS
 from constants.CommanndCodes import CONSTANTS
 
 import time
 
 # ros imports
-from pyparsing import OnlyOnce
 import rclpy
+import rclpy.logging
 from rclpy.node import Node
-from rclpy.publisher import Publisher
-from custom_interfaces.msg import CanFD, Can
+# from rclpy.publisher import Publisher
+
+# from custom_interfaces.msg import CanFD, Can
 from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
+# import xbee
+# import xbee.xbee
+# import xbee.xbee.xbee_node
 from std_msgs.msg import Bool, Float32
 
 import numpy as np
@@ -28,19 +34,28 @@ XBEE_TIMEOUT = 1000000000  # 1,000,000 nano second -> 1 second
 
 
 class Xbee(Node):
+    # flag to determine if the xbee should be disabled based on no signal
+    __disabled: bool
+
+    # flag to be triggered once the xbee has received any data
+    __is_first_connected: bool
+
+    # all the current values from the xbee
+    # self.__button_values = [False] * CONSTANTS.NUM_BUTTONS
+    __axis_values: list[float]
+
+    # open the port to the device
+    __xbee_device: XBeeDevice
+
+    # track when the last successful message was received
+    __last_successful_message: int
+
     def __init__(self):
+        super().__init__("Xbee_node")
 
-        super().__init__("xbee_node")
-
-        # the number of iterations without signal
-        self.__num_no_signal = 0
-
-        # flag to determine if the xbee should be disabled based
-        # on no signal
-        self.__is_disabled = False
-
-        # flag to be triggered once the xbee has received any data
+        self.__disabled = False
         self.__is_first_connected = False
+        self.__axis_values = [0.0] * CONSTANTS.NUM_AXES
 
         # all the current values from the xbee
         self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
@@ -49,8 +64,6 @@ class Xbee(Node):
         # open the port to the device
         self.__xbee_device = XBeeDevice(XBEE_PORT, XBEE_SPEED)
         self.__xbee_device.open()
-
-        # track when the last successful message was received
         self.__last_successful_message = time.time_ns()
 
         self.__value_state = {"xbox": {}, "n64": {}}
@@ -119,9 +132,7 @@ class Xbee(Node):
         }
 
     def __del__(self):
-        """
-        have the device port be closed
-        """
+        # close device on deletion
         self.__xbee_device.close()
 
     # """
@@ -151,7 +162,10 @@ class Xbee(Node):
 
     # checks if the xbee is disabled
     def is_disabled(self) -> bool:
-        return self.__is_disabled
+        return self.__disabled
+
+    def set_disabled(self, disabled: bool):
+        self.__disabled = disabled
 
     # clears the disable flag to allow the xbee to continue normal function
     def clear_disable(self) -> None:
@@ -192,6 +206,7 @@ class Xbee(Node):
         Args:
             message (list[int]): a full message that start with start message
         """
+
 
         # the current byte number
 
@@ -250,6 +265,11 @@ class Xbee(Node):
                 % 4
             ) == CONSTANTS.XBOX.BUTTONS.ON
 
+            self.create_publisher(
+                TOPICS_BUTTON[i]["val"],
+                f"/Xbee/Buttons/RX/{TOPICS_BUTTON[i]['name']}",
+                10,
+            ).publish(button_value)
             ros_msg = TOPICS_BUTTON[i]["val"]()
             ros_msg.data = button_value
 
@@ -314,12 +334,21 @@ class Xbee(Node):
         self.__publish_new_controls("n64", "Z", z_value)
 
     def send_msg(self):
-        pass
+        raise NotImplementedError
 
-    def on_message_received(self):
+    def on_message_received(self, var1):
         """
         callback function that is called when message is received
         """
+
+        # print(var1)
+
+        self.get_logger().debug(var1)
+
+        return
+
+        # stop if xbee is disabed
+        if self.__disabled:
         # self.get_logger().info("starting message received")
 
         # xbee is disabled
@@ -327,9 +356,19 @@ class Xbee(Node):
             self.get_logger().info(f"xbee is disabled, returning...")
             return
 
-        message = None
-
         # get message from the physical xbee
+        # message = None
+        # try:
+        #     message = self.__xbee_device.read_data(0.0004)
+        # except TimeoutException:
+        #     return
+        # except Exception as e:
+        #     print("\n\nBIG ISSUE\n")
+        #     print(e)
+        #     return
+
+        # stop if message is none
+        if xbee_message is None:
         try:
             message = self.__xbee_device.read_data(0.0004)
         except TimeoutException:
@@ -340,11 +379,15 @@ class Xbee(Node):
             self.get_logger().info(str(e))
             return
 
+        # if start of message is not valid, stop
+        if list(xbee_message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
         # message is invalid
         if message is None:
             self.get_logger().info(f"message was none")
             return
 
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
         # split the message data into a list
         data = list(message.data)
         # self.get_logger().info(f"got data: {data}")
@@ -362,6 +405,7 @@ class Xbee(Node):
         if not self.__is_first_connected:
             self.__is_first_connected = True
 
+        self.__parse_incoming_message(list(xbee_message.data)[1:])
         self.get_logger().info("receive:")
         for i, byte in enumerate(data):
             self.get_logger().info(f"{i}, {bin(byte)}")
@@ -371,19 +415,29 @@ class Xbee(Node):
         # self.print_values()
 
         self.__last_successful_message = time.time_ns()
+        self.__last_successful_message = time.time_ns()
 
         # message_id = 3
 
     def run(self):
+        # last_cycle_time = time.time_ns()
+        self.__xbee_device.add_data_received_callback(self.on_message_received)
+        rclpy.spin(self)
         last_cycle_time = time.time_ns()
 
         self.get_logger().info("starting xbee...")
 
-        while not self.__is_disabled:
-            if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
-                last_cycle_time = time.time_ns()
-                self.on_message_received()
+        # while not self.__disabled:
+        #     if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
+        #         last_cycle_time = time.time_ns()
 
+        #         if (
+        #             time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
+        #             and self.__is_first_connected
+        #         ):
+        #             self.set_disabled(True)
+
+        rclpy.shutdown()
                 # if (
                 #     time.time_ns() - self.__last_successful_message > XBEE_TIMEOUT
                 #     and self.__is_first_connected
