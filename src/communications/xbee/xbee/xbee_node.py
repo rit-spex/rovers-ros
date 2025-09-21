@@ -5,7 +5,7 @@ from digi.xbee.devices import XBeeDevice
 from digi.xbee.exception import TimeoutException
 
 from constants.CAN_Constants import CHANNEL, TOPICS
-from constants.CommandCodes import CONSTANTS
+from constants.CommanndCodes import CONSTANTS
 
 import time
 
@@ -16,7 +16,7 @@ import rclpy.logging
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
-from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
+from constants.CommanndCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32
@@ -31,11 +31,11 @@ XBEE_TIMEOUT = 1000000000  # 1,000,000 nano second -> 1 second
 
 class Xbee(Node):
     # flag to determine if the xbee should be disabled based on no signal
-    __disabled: bool
 
+    def __init__(self):
         super().__init__("xbee_node")
 
-        self.__disabled = False
+        self.__is_disabled = False
         self.__is_first_connected = False
 
         # all the current values from the xbee
@@ -110,12 +110,13 @@ class Xbee(Node):
         self.__xbee_device.close()
 
     def get_current_value(self, input_type: int, input_trigger: int) -> float | bool:
-    """Get the current value of selected input
+        """Get the current value of selected input
 
-    Args:
-        input_type (int): specifies what type of input
-        input_trigger (int): controller button or axis, value from CommandCodes
-    """
+        Args:
+            input_type (int): specifies what type of input
+            input_trigger (int): controller button or axis, value from CommandCodes
+        """
+
         match input_type:
             case CONSTANTS.INPUT_TYPE.IS_AXIS:
                 if input_trigger == CONSTANTS.XBOX.JOYSTICK.AXIS_LY:
@@ -135,10 +136,10 @@ class Xbee(Node):
 
     # checks if the xbee is disabled
     def is_disabled(self) -> bool:
-        return self.__disabled
+        return self.__is_disabled
 
     def set_disabled(self, disabled: bool):
-        self.__disabled = disabled
+        self.__is_disabled = disabled
 
     # disable the xbee
     def disable_xbee(self) -> None:
@@ -286,10 +287,8 @@ class Xbee(Node):
 
         self.get_logger().debug(var1)
 
-        return
-
         # stop if xbee is disabed
-        if self.__disabled:
+        if self.__is_disabled:
             return
 
         # get message from the physical xbee
@@ -341,7 +340,7 @@ class Xbee(Node):
         while not self.__is_disabled:
             if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
                 last_cycle_time = time.time_ns()
-                self.on_message_received()
+                self.on_message_received("hehehehaw")
 
         # Signalling E-STOP
         ros_msg = Can()
