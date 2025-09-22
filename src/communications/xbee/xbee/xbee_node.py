@@ -295,7 +295,7 @@ class Xbee(Node):
         try:
             message = self.__xbee_device.read_data(0.0004)
         except TimeoutException:
-            self.get_logger().info("timed out")
+            # self.get_logger().info("timed out")
             return
         except Exception as e:
             self.get_logger().info("\n\nBIG ISSUE\n")
@@ -340,6 +340,7 @@ class Xbee(Node):
         while True:
             if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
                 last_cycle_time = time.time_ns()
+                self.on_message_received("hehehehaw")
 
         # Signalling E-STOP
         ros_msg = Can()
