@@ -13,11 +13,11 @@ After=network.target
 #systemctl status autoBoot.service
 
 #todo change username to robot name
-User=savage22
-WorkingDirectory=/home/savage22/SPEX/rovers-ros
+User=rovers
+WorkingDirectory=/home/rovers/ros/rovers-ros
 
 # Run your script with Bash
-ExecStart=/bin/bash /home/savage22/SPEX/rovers-ros/externalScript/autoBoot.sh
+ExecStart=/bin/bash /home/rovers/ros/rovers-ros/externalScript/autoBoot.sh
 
 # Make sure environment paths are available
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/ros/humble/bin"
@@ -28,5 +28,3 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-
-
