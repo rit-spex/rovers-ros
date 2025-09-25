@@ -14,10 +14,10 @@ After=network.target
 
 #todo change username to robot name
 User=rovers
-WorkingDirectory=/home/rovers/ros/rovers-ros/src
+WorkingDirectory=/home/rovers/ros/rovers-ros
 
 # Run your script with Bash
-ExecStart=/bin/bash /home/rovers/ros/rovers-ros/src/externalScript/autoBoot.sh
+ExecStart=/bin/bash /home/rovers/ros/rovers-ros/externalScript/autoBoot.sh
 
 # Make sure environment paths are available
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/ros/humble/bin"

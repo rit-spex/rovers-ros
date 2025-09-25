@@ -25,3 +25,13 @@ To run the project, launch the main package with the command:
 ```bash
 ros2 launch main main_launch.xml
 ```
+
+How to launch the rover:
+
+Open a new terminal and enter the following commands
+
+cd ~/ros/rovers-ros
+source source.zsh
+ros2 launch main main_launch.xml
+
+After you see "starting xbee..." enter the password rovers
