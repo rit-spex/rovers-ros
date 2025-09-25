@@ -6,11 +6,11 @@
 # ------------------------------------------------------------------
 
 # Source ROS 2 setup (adjust 'humble' if needed
-source /opt/ros/humble/setup.bash
+#source /opt/ros/humble/setup.bash
 #source /home/rovers/ros/rovers-ros/install/setup.bash
-echo "here"
-source home/rovers/ros/rovers-ros/source.zsh
-echo "here"
+#echo "here"
+#source home/rovers/ros/rovers-ros/source.zsh
+#echo "here"
 #source source.zsh
 #echo "here"
 
@@ -18,4 +18,4 @@ echo "here"
 #source ./source.sh
 
 # Launch ROS 2
-ros2 launch main main_launch.xml
+#ros2 launch main main_launch.xml
