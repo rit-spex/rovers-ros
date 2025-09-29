@@ -5,15 +5,38 @@ import sys
 
 print("Before:", os.getcwd())
 
-home_dir = os.path.expanduser("~")
-print(home_dir)
-
 try:
-    os.chdir(home_dir+"/SPEX/rovers-ros/src/externalScript/")
+    os.chdir("/home/savage22/ros/rovers-ros/")
 except FileNotFoundError as e:
     print(f"Error: {e}")
 finally:
     print("Current Directory:", os.getcwd())
+
+
+try:
+    scriptLine = ['bash', 'source.sh']#, 'ros2', 'launch', 'main', 'main_launch.xml']
+    result = subprocess.run(scriptLine, capture_output=True, text=True, check=True)
+    print(scriptLine)
+    print("Script output:")
+    print(result.stdout)
+    if result.stderr:
+        print("Script errors:")
+        print(result.stderr)
+except subprocess.CalledProcessError as e:
+    print(f"Error executing script: {e}")
+    print(f"Stderr: {e.stderr}")
+
+
+#try:
+#    result = subprocess.run(['ros2','launch', 'main', 'main_launch.xml'])
+#    print("Script output:")
+#    print(result.stdout)
+#    if result.stderr:
+#        print("Script errors:")
+#        print(result.stderr)
+#except subprocess.CalledProcessError as e:
+#    print(f"Error executing script: {e}")
+#    print(f"Stderr: {e.stderr}")
 
 
 

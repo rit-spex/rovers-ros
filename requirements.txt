@@ -59,7 +59,7 @@ packaging
 pcl-msgs
 pendulum-msgs
 pyparsing
-pyserial
+pySerial
 python-can
 python-dateutil
 python-qt-binding
@@ -127,7 +127,7 @@ rqt-srv
 rqt-topic
 sensor-msgs
 sensor-msgs-py
-serial
+
 shape-msgs
 six
 sros2
