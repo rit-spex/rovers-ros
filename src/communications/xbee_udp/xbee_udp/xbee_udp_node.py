@@ -19,7 +19,7 @@ class xbee_udp(Node):
     __publisher: Publisher
 
     def __init__(self) -> None:
-        super().__init__("udp_node")
+        super().__init__("udp_xbee_node")
 
         self.__address = "127.0.0.1"
         self.__port = 5005

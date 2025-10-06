@@ -13,9 +13,8 @@ import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, Int16MultiArray
 
-from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
+from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
 from constants.CAN_Constants import CHANNEL, TOPICS
-from constants.CommandCodes import CONSTANTS
 
 import numpy as np
 
@@ -45,7 +44,6 @@ class Basestation(Node):
 
         self.__disabled = False
         self.__is_first_connected = False
-        self.__last_successful_message = time.time_ns()
 
         # create the subscriber
         self.__subscription = self.create_subscription(
@@ -54,6 +52,8 @@ class Basestation(Node):
             callback=self.on_message_received,
             qos_profile=10,
         )
+
+
 
         # TODO: remove when updating basestation code
         self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
@@ -254,9 +254,6 @@ class Basestation(Node):
         #     self.get_logger().info(f"xbee is disabled, returning...")
         #     return
 
-        # get message from the physical xbee
-        # message = self.__xbee_device.read_data(0.0004)
-
         # message is invalid
         if message is None:
             self.get_logger().info(f"message was none")
@@ -266,8 +263,6 @@ class Basestation(Node):
         if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
             return
 
-        if not self.__is_first_connected:
-            self.__is_first_connected = True
         # split the message data into a list
         data = list(message.data)
 
@@ -280,9 +275,6 @@ class Basestation(Node):
         elif data[0] == int.from_bytes(CONSTANTS.QUIT_MESSAGE, "big"):
             return
 
-        if not self.__is_first_connected:
-            self.__is_first_connected = True
-
         self.__parse_incoming_message(list(message.data)[1:])
         self.get_logger().info("receive:")
         for i, byte in enumerate(data):
@@ -290,6 +282,10 @@ class Basestation(Node):
         self.get_logger().info("")
 
         self.__parse_incoming_message(data)
+
+        # flag to make so it won't error out immeadately
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
 
         self.__last_successful_message = time.time_ns()
     def run(self):
