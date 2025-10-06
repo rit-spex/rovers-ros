@@ -10,7 +10,7 @@ import socket as skt
 from socket import socket
 import errno
 
-class Udp(Node):
+class xbee_udp(Node):
     __address: str
     __port: int
     __socket: socket
@@ -47,11 +47,13 @@ class Udp(Node):
         self.__publisher.publish(msg)
 
     def run(self) -> None:
-        self.get_logger().info("starting socket connection...")
+        rclpy.spin(self)
+        self.get_logger().info("starting xbee udp socket connection...")
         self.__socket.bind((self.__address, self.__port))
 
-        # make it so it will return immeadiately
+        # make it so it will not stop the code when requesting a read
         self.__socket.setblocking(False)
+        
         while True:
             data = self.read_data(self.__buffer_size)
             if data is None:
@@ -66,7 +68,7 @@ class Udp(Node):
 
 def main():
     rclpy.init()
-    udp = Udp()
+    udp = xbee_udp()
     udp.run()
 
 

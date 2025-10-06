@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp"></node>
+</launch>

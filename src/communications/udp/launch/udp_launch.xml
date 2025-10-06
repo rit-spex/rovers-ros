@@ -1,3 +1,0 @@
-<launch>
-	<node pkg="udp" exec="udp_node" name="udp"></node>
-</launch>

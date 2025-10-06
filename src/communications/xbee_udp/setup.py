@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = "udp"
+package_name = "xbee_udp"
 
 setup(
     name=package_name,
@@ -19,6 +19,6 @@ setup(
     license="TODO: License declaration",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": ["udp_node = udp.udp_node:main"],
+        "console_scripts": ["xbee_udp_node = xbee_udp.xbee_udp_node:main"],
     },
 )
