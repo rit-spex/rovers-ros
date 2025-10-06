@@ -1,3 +1,0 @@
-<launch>
-	<node pkg="joy_parser" exec="joy_parser_node" name="joy_parser"></node>
-</launch>

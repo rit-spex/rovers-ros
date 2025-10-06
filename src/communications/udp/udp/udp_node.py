@@ -8,7 +8,7 @@ from std_msgs.msg import Int16MultiArray
 
 import socket as skt
 from socket import socket
-
+import errno
 
 class Udp(Node):
     __address: str
@@ -18,35 +18,40 @@ class Udp(Node):
     __publisher: Publisher
 
     def __init__(self) -> None:
-        super().__init__("udp")
+        super().__init__("udp_node")
 
         self.__address = "127.0.0.1"
         self.__port = 5005
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(Int16MultiArray, "/UDP/MESSAGES", 10)
-
-        self.run()
+        self.__publisher = self.create_publisher(Int16MultiArray, "/BASESTATION/MESSAGES", 10)
 
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
             data = self.__socket.recvfrom(buffer_size)
         except Exception as e:
-            self.get_logger().info(f"failed to receive data: {e}")
-            return []
-        if len(data[0]) == 0:
-            return None
+            err = e.args
+            # only error out if it wasn't from non-blocking
+            if(err[0] == errno.EWOULDBLOCK):
+                return []
+            else:
+                self.get_logger().info(f"failed to receive data: {e}")
+                return []
         return list(data[0])
 
     def publish_data(self, data: list[int]) -> None:
         msg = Int16MultiArray()
         msg.data = data
+        self.get_logger().info("client published")
+
         self.__publisher.publish(msg)
 
     def run(self) -> None:
         self.get_logger().info("starting socket connection...")
         self.__socket.bind((self.__address, self.__port))
 
+        # make it so it will return immeadiately
+        self.__socket.setblocking(False)
         while True:
             data = self.read_data(self.__buffer_size)
             if data is None:
@@ -55,6 +60,8 @@ class Udp(Node):
             if len(data) == 0:
                 continue
             self.publish_data(data)
+
+        # self.signal_estop()
 
 
 def main():

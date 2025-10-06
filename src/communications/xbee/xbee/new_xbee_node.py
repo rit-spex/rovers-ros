@@ -3,10 +3,9 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from std_msgs.msg import Int8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
-from typing import Optional
 
-from custom_interfaces.msg import Can
-from constants.constants.CAN_Constants import CHANNEL, TOPICS
+#from custom_interfaces.msg import Can
+# from constants.constants.CAN_Constants import CHANNEL, TOPICS
 
 
 class Xbee(Node):
@@ -25,28 +24,28 @@ class Xbee(Node):
         # self.__update_rate = 40000000  # nano seconds
         # self.__timeout = 1000000000  # nano seconds
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(Int8MultiArray, "XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(Int8MultiArray, "BASESTATION/MESSAGES", 10)
 
-    def signal_estop(self) -> None:
-        ros_msg = Can()
-        ros_msg.id = 0
-        ros_msg.channel = CHANNEL.MAIN_BODY
-        ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
-        self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
+    # def signal_estop(self) -> None:
+    #     ros_msg = Can()
+    #     ros_msg.id = 0
+    #     ros_msg.channel = CHANNEL.MAIN_BODY
+    #     ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
+    #     self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
 
-    def read_data(self) -> Optional[list[int]]:
+    def read_data(self) -> list[int] | None:
         message = None
         try:
             message = self.__xbee_device.read_data(0.0004)
+            if message is None:
+                return None
+            return list(message.data)
         except TimeoutException:
-            pass
+            return []
             # self.get_logger().info("timed out")
         except Exception:
             self.get_logger().info("failed to read data")
-
-        if message is None:
             return None
-        return list(message.data)
 
     def publish_data(self, data: list[int]) -> None:
         msg = Int8MultiArray()
@@ -61,10 +60,12 @@ class Xbee(Node):
             data = self.read_data()
             if data is None:
                 self.get_logger().info("message was none")
+                break
+            if len(data) == 0:
                 continue
             self.publish_data(data)
 
-        self.signal_estop()
+        # self.signal_estop()
 
 
 def main() -> None:
