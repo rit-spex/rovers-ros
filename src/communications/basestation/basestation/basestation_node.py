@@ -11,7 +11,11 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool, Float32, Int16MultiArray
+
+from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON
+from constants.CAN_Constants import CHANNEL, TOPICS
+from constants.CommandCodes import CONSTANTS
 
 import numpy as np
 
@@ -25,13 +29,37 @@ class Basestation(Node):
     # flag to be triggered once the xbee has received any data
     __is_first_connected: bool
 
+    # track when the last successful message was received
+    __last_successful_message: int
+
+    # all the current values from the xbee
+    # self.__button_values = [False] * CONSTANTS.NUM_BUTTONS
+    __axis_values: list[float]
+
+    # this will call be an interrupt to process the message
+    __subscription: rclpy.subscription.Subscription
+
+
     def __init__(self):
         super().__init__("Basestation_node")
 
         self.__disabled = False
         self.__is_first_connected = False
+        self.__last_successful_message = time.time_ns()
 
-        # set all of the topics to default state
+        # create the subscriber
+        self.__subscription = self.create_subscription(
+            msg_type=Int16MultiArray,
+            topic=f"/BASESTATION/MESSAGES",
+            callback=self.on_message_received,
+            qos_profile=10,
+        )
+
+        # TODO: remove when updating basestation code
+        self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
+        self.__axis_values = [0.0] * CONSTANTS.XBOX.NUM_AXES
+        self.__value_state = {"xbox": {}, "n64": {}}
+        self.__name_to_ID_XBOX = {}
 
         # creates publishers for all the different buttons
         self.__joystick_publishers: dict[int, Publisher] = {}
@@ -119,21 +147,158 @@ class Basestation(Node):
             message (list[int]): a full message that start with start message
         """
 
+        # the current byte number
+        byte_num: int = 0
+
+        n64_message: list[np.uint8] = [np.uint8(m) for m in message[6:]]
+        message = message[1:5]
+
+        # parse for axis
+        for i in CONSTANTS.XBOX.JOYSTICK.LIST_OF_AXIS:
+            if not (
+                CONSTANTS.XBOX.JOYSTICK.MAX_VALUE
+                >= message[byte_num]
+                >= CONSTANTS.XBOX.JOYSTICK.MIN_VALUE
+            ):
+                continue
+
+            value = (message[byte_num] - 100.0) / (100.0)
+            byte_num = byte_num + 1
+
+            ros_msg = TOPICS_JOYSTICK[i]["val"]()
+            ros_msg.data = value
+
+            self.__publish_new_controls("xbox", TOPICS_JOYSTICK[i]["name"], ros_msg)
+            self.__joystick_publishers[i].publish(ros_msg)
+
+        # parse for button values
+        for i in range(0, CONSTANTS.XBOX.NUM_BUTTONS, 1):
+            if i != 0 and i % 4 == 0:
+                byte_num = byte_num + 1
+
+            button_value = (
+                (
+                    message[byte_num]
+                    // pow(
+                        2,
+                        (i % CONSTANTS.XBOX.BUTTONS.NUM_BUTTONS_PER_BYTE)
+                        * CONSTANTS.XBOX.BUTTONS.SIZE_BUTTON_IN_BITS,
+                    )
+                )
+                % 4
+            ) == CONSTANTS.XBOX.BUTTONS.ON
+
+            ros_msg = TOPICS_BUTTON[i]["val"]()
+            ros_msg.data = button_value
+
+            self.__publish_new_controls("xbox", TOPICS_BUTTON[i]["name"], ros_msg)
+
+        # parsing N64 controller
+        # A B L R
+        # CU CD CL CR
+        # DU DD DL DR
+        # Z
+
+        a_value = Bool()
+        a_value.data = bool((n64_message[0] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "A", a_value)
+        b_value = Bool()
+        b_value.data = bool((n64_message[0] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "B", b_value)
+        l_value = Bool()
+        l_value.data = bool((n64_message[0] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "L", l_value)
+        r_value = Bool()
+        r_value.data = bool((n64_message[0] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "R", r_value)
+
+        cu_value = Bool()
+        cu_value.data = bool((n64_message[1] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "CU", cu_value)
+        cd_value = Bool()
+        cd_value.data = bool((n64_message[1] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "CD", cd_value)
+        cl_value = Bool()
+        cl_value.data = bool((n64_message[1] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "CL", cl_value)
+        cr_value = Bool()
+        cr_value.data = bool((n64_message[1] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "CR", cr_value)
+
+        du_value = Bool()
+        du_value.data = bool((n64_message[2] << 6) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "DU", du_value)
+        dd_value = Bool()
+        dd_value.data = bool((n64_message[2] << 4) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "DD", dd_value)
+        dl_value = Bool()
+        dl_value.data = bool((n64_message[2] << 2) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "DL", dl_value)
+        dr_value = Bool()
+        dr_value.data = bool((n64_message[2] << 0) >> 6 == CONSTANTS.N64.BUTTONS.ON)
+        self.__publish_new_controls("n64", "DR", dr_value)
+
+        # z_value = Bool()
+        # z_value.data = bool(n64_message[3] == CONSTANTS.N64.BUTTONS.ON)
+        # self.__publish_new_controls("n64", "Z", z_value)
+
     def send_msg(self):
         raise NotImplementedError
 
-    def on_message_received(self, var1):
+    def on_message_received(self, message):
         """
         callback function that is called when message is received
         """
+        # xbee is disabled
+        # if self.__is_disabled:
+        #     self.get_logger().info(f"xbee is disabled, returning...")
+        #     return
 
+        # get message from the physical xbee
+        # message = self.__xbee_device.read_data(0.0004)
+
+        # message is invalid
+        if message is None:
+            self.get_logger().info(f"message was none")
+            return
+
+        # if start of message is not valid, stop
+        if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            return
+
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
+        # split the message data into a list
+        data = list(message.data)
+
+        self.get_logger().info(str(data))
+
+        # check if message has a valid start message
+        if data[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            self.get_logger().info(f"not valid start message")
+            return
+        elif data[0] == int.from_bytes(CONSTANTS.QUIT_MESSAGE, "big"):
+            return
+
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
+
+        self.__parse_incoming_message(list(message.data)[1:])
+        self.get_logger().info("receive:")
+        for i, byte in enumerate(data):
+            self.get_logger().info(f"{i}, {bin(byte)}")
+        self.get_logger().info("")
+
+        self.__parse_incoming_message(data)
+
+        self.__last_successful_message = time.time_ns()
     def run(self):
+        self.get_logger().info("starting basestation ...")
+
         # last_cycle_time = time.time_ns()
         # self.__xbee_device.add_data_received_callback(self.on_message_received)
         rclpy.spin(self)
         # last_cycle_time = time.time_ns()
-
-        # self.get_logger().info("starting xbee...")
 
         # while not self.__disabled:
         #     if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:

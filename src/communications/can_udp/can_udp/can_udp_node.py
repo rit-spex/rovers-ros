@@ -24,7 +24,7 @@ class CAN_UDP(Node):
         super().__init__("CAN_udp_node")
 
         self.__address = "127.0.0.1"
-        self.__recv_port = 8001
+        self.__recv_port = 8010
         self.__send_port = 8000
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024

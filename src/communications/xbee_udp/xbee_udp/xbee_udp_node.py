@@ -1,3 +1,4 @@
+# ros imports
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
@@ -29,6 +30,8 @@ class xbee_udp(Node):
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
             data = self.__socket.recvfrom(buffer_size)
+            self.get_logger().info(f"got data :)")
+
         except Exception as e:
             err = e.args
             # only error out if it wasn't from non-blocking
@@ -47,7 +50,6 @@ class xbee_udp(Node):
         self.__publisher.publish(msg)
 
     def run(self) -> None:
-        rclpy.spin(self)
         self.get_logger().info("starting xbee udp socket connection...")
         self.__socket.bind((self.__address, self.__port))
 
@@ -62,6 +64,7 @@ class xbee_udp(Node):
             if len(data) == 0:
                 continue
             self.publish_data(data)
+        rclpy.spin(self)
 
         # self.signal_estop()
 

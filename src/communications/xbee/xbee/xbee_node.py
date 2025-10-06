@@ -122,46 +122,6 @@ class Xbee(Node):
         # close device on deletion
         self.__xbee_device.close()
 
-    def get_current_value(self, input_type: int, input_trigger: int) -> float | bool:
-        """Get the current value of selected input
-
-        Args:
-            input_type (int): specifies what type of input
-            input_trigger (int): controller button or axis, value from CommandCodes
-        """
-
-        match input_type:
-            case CONSTANTS.INPUT_TYPE.IS_AXIS:
-                if input_trigger == CONSTANTS.XBOX.JOYSTICK.AXIS_LY:
-                    return self.__axis_values[0]
-                else:
-                    return self.__axis_values[1]
-            case CONSTANTS.INPUT_TYPE.IS_TRIGGER:
-                return self.__button_values[input_trigger]
-            case CONSTANTS.INPUT_TYPE.IS_BUTTON:
-                return self.__button_values[
-                    CONSTANTS.XBOX.NUM_BUTTONS
-                    - CONSTANTS.XBOX.NUM_TRIGGER
-                    + (input_trigger - CONSTANTS.XBOX.NUM_AXES)
-                ]
-
-        return False
-
-    # checks if the xbee is disabled
-    def is_disabled(self) -> bool:
-        return self.__disabled
-
-    def set_disabled(self, disabled: bool):
-        self.__disabled = disabled
-
-    # clears the disable flag to allow the xbee to continue normal function
-    def clear_disable(self) -> None:
-        self.__is_disabled = False
-
-    # disable the xbee
-    def disable_xbee(self) -> None:
-        self.__is_disabled = True
-
     def __publish_new_controls(
         self, controller: str, button: str, value: Float32 | Bool
     ) -> None:
@@ -299,12 +259,12 @@ class Xbee(Node):
         """
 
         # xbee is disabled
-        if self.__is_disabled:
-            self.get_logger().info(f"xbee is disabled, returning...")
-            return
+        # if self.__is_disabled:
+        #     self.get_logger().info(f"xbee is disabled, returning...")
+        #     return
 
         self.get_logger().debug(var1)
-
+        message = None
         # get message from the physical xbee
         try:
             message = self.__xbee_device.read_data(0.0004)
@@ -316,13 +276,13 @@ class Xbee(Node):
             self.get_logger().info(str(e))
             return
 
-        # if start of message is not valid, stop
-        if list(xbee_message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
-            return
-
         # message is invalid
         if message is None:
             self.get_logger().info(f"message was none")
+            return
+
+        # if start of message is not valid, stop
+        if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
             return
 
         if not self.__is_first_connected:
@@ -337,13 +297,12 @@ class Xbee(Node):
             self.get_logger().info(f"not valid start message")
             return
         elif data[0] == int.from_bytes(CONSTANTS.QUIT_MESSAGE, "big"):
-            self.disable_xbee()
             return
 
         if not self.__is_first_connected:
             self.__is_first_connected = True
 
-        self.__parse_incoming_message(list(xbee_message.data)[1:])
+        self.__parse_incoming_message(list(message.data)[1:])
         self.get_logger().info("receive:")
         for i, byte in enumerate(data):
             self.get_logger().info(f"{i}, {bin(byte)}")
@@ -351,7 +310,6 @@ class Xbee(Node):
 
         self.__parse_incoming_message(data)
 
-        self.__last_successful_message = time.time_ns()
         self.__last_successful_message = time.time_ns()
 
     def run(self):
