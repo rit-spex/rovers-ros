@@ -3,8 +3,9 @@ Description=autoBoot systemd service
 
 [Service]
 Type=simple
-#ExecStart=/bin/bash /home/savage22/SPEX/rovers-ros/src/externalScript/autoBoot.sh
-ExecStart=/usr/bin/python3 /home/savage22/ros/rovers-ros/src/externalScript/autoBoot.py
-
+Environment=HOME=/home/rover
+WorkingDirectory=/home/rover/SPEX/rovers-ros/
+ExecStart= /bin/bash /home/rover/SPEX/rovers-ros/src/externalScript/autoBoot.sh
+#ExecStart=/usr/bin/python3 /home/savage22/ros/rovers-ros/src/externalScript/autoBoot.py
 [Install]
 WantedBy=multi-user.target
