@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'drive_base'
+package_name = 'chassis'
 
 setup(
     name=package_name,
@@ -21,7 +21,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'drive_base_node = drive_base.drive_base_node:main'
+            'chassis_node = chassis.chassis_node:main'
         ],
     },
 )

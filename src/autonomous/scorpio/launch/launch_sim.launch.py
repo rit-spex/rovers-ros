@@ -18,7 +18,7 @@ def generate_launch_description():
     # Include the robot_state_publisher launch file, provided by our own package. Force sim time to be enabled
     # !!! MAKE SURE YOU SET THE PACKAGE NAME CORRECTLY !!!
 
-    package_name='scorpio' #<--- CHANGE ME
+    package_name='pathfinding' #<--- CHANGE ME
 
     rsp = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([os.path.join(
@@ -37,7 +37,7 @@ def generate_launch_description():
     # Run the spawner node from the gazebo_ros package. The entity name doesn't really matter if you only have a single robot.
     spawn_entity = Node(package='gazebo_ros', executable='spawn_entity.py',
                         arguments=['-topic', 'robot_description',
-                                   '-entity', 'scorpio'],
+                                   '-entity', 'pathfinding'],
                         output='screen')
 
     diff_drive_spawner = Node(
@@ -68,8 +68,8 @@ def generate_launch_description():
             'transform_tolerance': 0.01,
             'min_height': 0.0508,
             'max_height': 1.3208,
-            'angle_min': -3.1415,  
-            'angle_max': 3.1415,  
+            'angle_min': -3.1415,
+            'angle_max': 3.1415,
             'angle_increment': 0.0087,  # M_PI/360.0
             'scan_time': 0.3333,
             'range_min': 0.45,

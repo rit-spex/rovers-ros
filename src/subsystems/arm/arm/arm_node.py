@@ -20,6 +20,8 @@ class Arm(Node):
     __elbow_forward: int
     __elbow_backward: int
 
+    #heres a change
+
     def __init__(self):
         super().__init__("arm_node")
 

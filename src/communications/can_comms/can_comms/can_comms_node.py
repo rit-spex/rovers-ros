@@ -23,7 +23,6 @@ class CAN(Node):
 
         can.rc["interface"] = "socketcan"
         can.rc["bitrate"] = 500000
-        # can.rc['poll_interval'] = 0.01
 
         self.bus = can.Bus(
             CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True
@@ -44,9 +43,6 @@ class CAN(Node):
 
     def reset_network(self):
         self.get_logger().info("resetting the can network...")
-        # os.system("sudo ifconfig can0 down")
-        # os.system("sudo ip link set can0 up type can bitrate 500000")
-        # os.system("sudo ip link set can0 up")
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def send_msg(self, msg):
@@ -71,32 +67,12 @@ class JETSON_LISTENER(can.Listener):
         self.__node = node
 
     def on_message_received(self, msg: can.Message) -> None:
-        # uncomment if you're brave enough
-        # ros_msg = Can()
-        # ros_msg.channel = TOPICS[msg.arbitration_id]["channel"]
-        # ros_msg.id = msg.arbitration_id
-        # ros_msg.buf = msg.data
-
-        # self.__node.create_publisher(
-        #     Can, f"/CAN/RX/{TOPICS[msg.arbitration_id]['name']}", 10
-        # ).publish(ros_msg)
         pass
 
 
 def main():
-    # can.rc['baudrate'] = 500
-
     rclpy.init()
     can = CAN()
-    # can.run()
-    # bus = can.Bus(channel="can0", interface="socketcan")
-    # for i in range(255):
-    #     msg = can.Message(arbitration_id=0xc0ffee, data=[1, i, 0, 1, 3, 1, 4, 1], is_extended_id=False)
-    #     bus.send(msg)
-
-    # time.sleep(1)
-    # bus.shutdown()
-
 
 if __name__ == "__main__":
     main()
