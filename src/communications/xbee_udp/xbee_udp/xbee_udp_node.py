@@ -4,12 +4,14 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 
 # TODO: change to custom type to use unsigned ints
-from std_msgs.msg import Int16MultiArray
+from std_msgs.msg import UInt8MultiArray
+
 # from custom_interfaces.msg import UDPPacket
 
 import socket as skt
 from socket import socket
 import errno
+
 
 class xbee_udp(Node):
     __address: str
@@ -25,7 +27,9 @@ class xbee_udp(Node):
         self.__port = 5005
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(Int16MultiArray, "/BASESTATION/MESSAGES", 10)
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/BASESTATION/MESSAGES", 10
+        )
 
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
@@ -35,7 +39,7 @@ class xbee_udp(Node):
         except Exception as e:
             err = e.args
             # only error out if it wasn't from non-blocking
-            if(err[0] == errno.EWOULDBLOCK):
+            if err[0] == errno.EWOULDBLOCK:
                 return []
             else:
                 self.get_logger().info(f"failed to receive data: {e}")
@@ -43,7 +47,7 @@ class xbee_udp(Node):
         return list(data[0])
 
     def publish_data(self, data: list[int]) -> None:
-        msg = Int16MultiArray()
+        msg = UInt8MultiArray()
         msg.data = data
         self.get_logger().info("client published")
 
@@ -55,7 +59,7 @@ class xbee_udp(Node):
 
         # make it so it will not stop the code when requesting a read
         self.__socket.setblocking(False)
-        
+
         while True:
             data = self.read_data(self.__buffer_size)
             if data is None:

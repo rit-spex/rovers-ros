@@ -11,7 +11,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, Float32, Int16MultiArray
+from std_msgs.msg import Bool, Float32, UInt8MultiArray
 
 from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
 from constants.CAN_Constants import CHANNEL, TOPICS
@@ -38,7 +38,6 @@ class Basestation(Node):
     # this will call be an interrupt to process the message
     __subscription: rclpy.subscription.Subscription
 
-
     def __init__(self):
         super().__init__("Basestation_node")
 
@@ -47,13 +46,11 @@ class Basestation(Node):
 
         # create the subscriber
         self.__subscription = self.create_subscription(
-            msg_type=Int16MultiArray,
+            msg_type=UInt8MultiArray,
             topic=f"/BASESTATION/MESSAGES",
             callback=self.on_message_received,
             qos_profile=10,
         )
-
-
 
         # TODO: remove when updating basestation code
         self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
@@ -114,7 +111,7 @@ class Basestation(Node):
             "DR": CONSTANTS.N64.BUTTONS.OFF,
             "Z": CONSTANTS.N64.BUTTONS.OFF,
         }
-    
+
     def __publish_new_controls(
         self, controller: str, button: str, value: Float32 | Bool
     ) -> None:
@@ -288,6 +285,7 @@ class Basestation(Node):
             self.__is_first_connected = True
 
         self.__last_successful_message = time.time_ns()
+
     def run(self):
         self.get_logger().info("starting basestation ...")
 
@@ -312,6 +310,7 @@ def main():
     rclpy.init()
     basestation = Basestation()
     basestation.run()
+
 
 if __name__ == "__main__":
     main()
