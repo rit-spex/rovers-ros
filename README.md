@@ -4,7 +4,14 @@ This is the ROS package for our 2024 - 2025 rover, Scorpio. This runs on our Nvi
 
 ## Building
 
-To build the project, first source the environment:
+To build the project, first make sure you have ROS2 installed.
+
+Next, build the workspace with:
+```bash
+colcon build
+```
+
+Finally, source the environment:
 ```bash
 source source.sh
 ```
@@ -13,11 +20,6 @@ or
 source source.zsh
 ```
 depending on your shell.
-
-Then you can run:
-```bash
-colcon build
-```
 
 ## Running
 

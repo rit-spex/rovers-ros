@@ -8,7 +8,7 @@ from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
 
 
-class DriveBase(Node):
+class Chassis(Node):
     __topic: dict[str, Any]
     __can_publisher: Publisher
 
@@ -16,7 +16,7 @@ class DriveBase(Node):
     __RX_value: float
 
     def __init__(self):
-        super().__init__("drive_base_node")
+        super().__init__("chassis_node")
 
         self.__topic = TOPICS[3]
         self.__can_publisher = self.create_publisher(
@@ -69,15 +69,15 @@ class DriveBase(Node):
         self.__can_publisher.publish(ros_msg)
 
     def run(self):
-        self.get_logger().info("starting drive_base...")
+        self.get_logger().info("starting chassis...")
         rclpy.spin(self)
-        self.get_logger().info("stopping drive_base")
+        self.get_logger().info("stopping chassis")
 
 
 def main():
     rclpy.init()
-    drive_base = DriveBase()
-    drive_base.run()
+    chassis = Chassis()
+    chassis.run()
 
 
 if __name__ == "__main__":
