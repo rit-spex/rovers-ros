@@ -1,3 +1,5 @@
+This will show you how to set up the start up software.
+
 To use autoBoot we will need to move the .service file. Before doing this ensure that all of the path are correct.
 First move the .service file to /etc/systemd/system directory
 sudo cp autoBoot.service /etc/systemd/system/autoBoot.service
