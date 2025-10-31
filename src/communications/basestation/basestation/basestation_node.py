@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-from typing import Any
-
 import time
 
 # ros imports
@@ -13,12 +11,81 @@ import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, Int16MultiArray
 
+from basestation_communication import BaseStationCommunications
+
 from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
 from constants.CAN_Constants import CHANNEL, TOPICS
 
 import numpy as np
 
 XBEE_TIMEOUT = 1000000000  # 1,000,000 nano second -> 1 second
+
+
+
+class Basestation(Node):
+    __basestation_communications: BaseStationCommunications
+
+    __publishers: list[list[rclpy.publisher.Publisher]]
+
+    __subscription: rclpy.subscription.Subscription
+
+    def __init__(self):
+        super().__init__("Basestation")
+
+        self.__basestation_communications = BaseStationCommunications()
+
+        self.__publishers = [
+            [
+                self.create_publisher(self.__basestation_communications.python_to_interface(value_type), f"/BASESTATION/{message.name}/{value_name}", 10)
+                for (value_name, value_type) in message.values
+            ]
+            for message in self.__basestation_communications.get_message()
+        ]
+
+        self.__subscription = self.create_subscription(
+            msg_type=Int16MultiArray,
+            topic="/XBEE/MESSAGES",
+            callback=self.on_message_received,
+            qos_profile=10,
+        )
+
+    def __on_message_received(self, message: Int16MultiArray):
+        """
+        callback function that is called when message is received
+        """
+
+        # if start of message is not valid, stop
+        if list(message.data)[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            return
+
+        # split the message data into a list
+        data = list(message.data)
+
+        self.get_logger().info(str(data))
+
+        # check if message has a valid start message
+        if data[0] != int.from_bytes(CONSTANTS.START_MESSAGE, "big"):
+            self.get_logger().info(f"not valid start message")
+            return
+        elif data[0] == int.from_bytes(CONSTANTS.QUIT_MESSAGE, "big"):
+            return
+
+        self.__parse_incoming_message(list(message.data)[1:])
+        self.get_logger().info("receive:")
+        for i, byte in enumerate(data):
+            self.get_logger().info(f"{i}, {bin(byte)}")
+        self.get_logger().info("")
+
+        self.__parse_incoming_message(data)
+
+        # flag to make so it won't error out immeadately
+        if not self.__is_first_connected:
+            self.__is_first_connected = True
+
+        self.__last_successful_message = time.time_ns()
+
+
+
 
 
 class Basestation(Node):
@@ -48,12 +115,10 @@ class Basestation(Node):
         # create the subscriber
         self.__subscription = self.create_subscription(
             msg_type=Int16MultiArray,
-            topic=f"/BASESTATION/MESSAGES",
+            topic="/XBEE/MESSAGES",
             callback=self.on_message_received,
             qos_profile=10,
         )
-
-
 
         # TODO: remove when updating basestation code
         self.__button_values = [False] * CONSTANTS.XBOX.NUM_BUTTONS
@@ -114,7 +179,7 @@ class Basestation(Node):
             "DR": CONSTANTS.N64.BUTTONS.OFF,
             "Z": CONSTANTS.N64.BUTTONS.OFF,
         }
-    
+
     def __publish_new_controls(
         self, controller: str, button: str, value: Float32 | Bool
     ) -> None:
@@ -249,6 +314,7 @@ class Basestation(Node):
         """
         callback function that is called when message is received
         """
+
         # xbee is disabled
         # if self.__is_disabled:
         #     self.get_logger().info(f"xbee is disabled, returning...")
@@ -288,24 +354,10 @@ class Basestation(Node):
             self.__is_first_connected = True
 
         self.__last_successful_message = time.time_ns()
+
     def run(self):
         self.get_logger().info("starting basestation ...")
-
-        # last_cycle_time = time.time_ns()
-        # self.__xbee_device.add_data_received_callback(self.on_message_received)
         rclpy.spin(self)
-        # last_cycle_time = time.time_ns()
-
-        # while not self.__disabled:
-        #     if time.time_ns() - last_cycle_time > XBEE_UPDATE_RATE:
-        #         last_cycle_time = time.time_ns()
-
-        # Signalling E-STOP
-        # ros_msg = Can()
-        # ros_msg.id = 0
-        # ros_msg.channel = CHANNEL.MAIN_BODY
-        # ros_msg.buf = [0, 0, 0, 0, 0, 0, 0, 0]
-        # self.create_publisher(Can, "/CAN/TX/E_STOP", 10).publish(ros_msg)
 
 
 def main():

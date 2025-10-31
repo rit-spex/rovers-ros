@@ -19,13 +19,13 @@ class xbee_udp(Node):
     __publisher: Publisher
 
     def __init__(self) -> None:
-        super().__init__("udp_xbee_node")
+        super().__init__("xbee_udp_node")
 
         self.__address = "127.0.0.1"
         self.__port = 5005
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(Int16MultiArray, "/BASESTATION/MESSAGES", 10)
+        self.__publisher = self.create_publisher(Int16MultiArray, "/XBEE/MESSAGES", 10)
 
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
@@ -55,7 +55,7 @@ class xbee_udp(Node):
 
         # make it so it will not stop the code when requesting a read
         self.__socket.setblocking(False)
-        
+
         while True:
             data = self.read_data(self.__buffer_size)
             if data is None:
