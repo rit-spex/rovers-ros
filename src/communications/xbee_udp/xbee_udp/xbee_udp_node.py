@@ -4,7 +4,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 
 # TODO: change to custom type to use unsigned ints
-from std_msgs.msg import Int16MultiArray
+from std_msgs.msg import UInt8MultiArray
 # from custom_interfaces.msg import UDPPacket
 
 import socket as skt
@@ -25,7 +25,7 @@ class xbee_udp(Node):
         self.__port = 5005
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(Int16MultiArray, "/XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
 
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
@@ -43,7 +43,7 @@ class xbee_udp(Node):
         return list(data[0])
 
     def publish_data(self, data: list[int]) -> None:
-        msg = Int16MultiArray()
+        msg = UInt8MultiArray()
         msg.data = data
         self.get_logger().info("client published")
 

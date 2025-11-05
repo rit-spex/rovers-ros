@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from std_msgs.msg import Int8MultiArray
+from std_msgs.msg import UInt8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
 
 #from custom_interfaces.msg import Can
@@ -20,7 +20,7 @@ class Xbee(Node):
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(Int8MultiArray, "/XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
 
     def read_data(self) -> list[int] | None:
         message = None
@@ -37,7 +37,7 @@ class Xbee(Node):
             return None
 
     def publish_data(self, data: list[int]) -> None:
-        msg = Int8MultiArray()
+        msg = UInt8MultiArray()
         msg.data = data
         self.__publisher.publish(msg)
 
