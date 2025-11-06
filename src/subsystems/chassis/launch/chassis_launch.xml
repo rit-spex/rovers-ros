@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
+</launch>

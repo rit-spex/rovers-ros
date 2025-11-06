@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
+</launch>
