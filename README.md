@@ -16,6 +16,9 @@ Finally, source the environment:
 source source.sh
 ```
 
+Note if you change folder paths then first delete the build and install folder
+Then rerun colcon build. MAKE sure to do this before source source.sh
+
 ## Running
 
 To run the project, launch the main package with the command:
