@@ -26,6 +26,7 @@ class Master(Node):
     __heartbeat_subscription: rclpy.subscription.Subscription
     __heartbeat_timer: Timer
 
+    # heartbeat tracking
     __last_heartbeat_time: UInt16
     __current_heartbeat_time: UInt16
     __recieved_heartbeat: bool
@@ -33,10 +34,13 @@ class Master(Node):
     def __init__(self):
         super().__init__("Master")
 
+        self.__led_status = False
+
         self.__last_heartbeat_time = UInt16()
         self.__current_heartbeat_time = UInt16()
         self.__recieved_heartbeat = False
 
+        # create publishers and subscriptions for e-stop and heartbeat
         self.__estop_publisher = self.create_publisher(
             msg_type=Bool,
             topic="/ESTOP",
@@ -89,6 +93,7 @@ class Master(Node):
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-Stop message received, shutting down ...")
+
         rclpy.shutdown()
 
     def run(self):
