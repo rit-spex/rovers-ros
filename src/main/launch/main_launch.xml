@@ -4,4 +4,5 @@
 	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
 	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
 	<node pkg="arm" exec="arm_node" name="arm"></node>
+	<node pkg="main" exec="master_node" name="master_node"></node>
 </launch>

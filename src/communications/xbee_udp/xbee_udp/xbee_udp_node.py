@@ -45,8 +45,6 @@ class xbee_udp(Node):
     def publish_data(self, data: list[int]) -> None:
         msg = UInt8MultiArray()
         msg.data = data
-        self.get_logger().info("client published")
-
         self.__publisher.publish(msg)
 
     def run(self) -> None:

@@ -1,11 +1,13 @@
 from typing import Any
 from constants.CAN_Constants import TOPICS
+from constants.CommandCodes import CONSTANTS
 
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
+from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 
 class Chassis(Node):
@@ -26,10 +28,16 @@ class Chassis(Node):
         )
 
         self.create_subscription(
-            Float32, "Xbee/RX/Xbox/Axis/LY", self.__LY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, 10
         )
         self.create_subscription(
-            Float32, "Xbee/RX/Xbox/Axis/RY", self.__RY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, 10
+        )
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/ESTOP",
+            callback=self.__on_estop_received,
+            qos_profile=10,
         )
 
         self.__LY_value = 0
@@ -67,6 +75,13 @@ class Chassis(Node):
         ]
 
         self.__can_publisher.publish(ros_msg)
+
+    def __on_estop_received(self, msg: Bool):
+        self.get_logger().info("E-STOP received, stopping chassis...")
+        self.__LY_value = 0
+        self.__RX_value = 0
+        self.__send_controller_data()
+        rclpy.shutdown()
 
     def run(self):
         self.get_logger().info("starting chassis...")

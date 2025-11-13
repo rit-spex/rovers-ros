@@ -8,6 +8,7 @@ from custom_interfaces.msg import CanFD, Can
 from constants.CAN_Constants import TOPICS
 import rclpy.publisher
 import rclpy.subscription
+from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
@@ -38,8 +39,6 @@ class CAN(Node):
                     qos_profile=10,
                 )
             )
-
-        self.run()
 
     def reset_network(self):
         self.get_logger().info("resetting the can network...")
@@ -73,6 +72,7 @@ class JETSON_LISTENER(can.Listener):
 def main():
     rclpy.init()
     can = CAN()
+    can.run()
 
 if __name__ == "__main__":
     main()
