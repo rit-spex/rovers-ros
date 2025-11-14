@@ -14,15 +14,16 @@ from constants.CommandCodes import CONSTANTS
 # from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
 # from constants.CAN_Constants import CHANNEL, TOPICS
 
-timeout_duration = 1 # seconds
+timeout_duration = 1  # seconds
+
 
 class Master(Node):
 
-    __estop_publisher:  rclpy.publisher.Publisher
+    __estop_publisher: rclpy.publisher.Publisher
 
     __quit_subscription: rclpy.subscription.Subscription
     __estop_subscription: rclpy.subscription.Subscription
-    
+
     __heartbeat_subscription: rclpy.subscription.Subscription
     __heartbeat_timer: Timer
 
@@ -54,7 +55,10 @@ class Master(Node):
         )
         self.__heartbeat_subscription = self.create_subscription(
             msg_type=UInt16,
-            topic="/BASESTATION/" + CONSTANTS.HEARTBEAT.NAME + "/" + CONSTANTS.HEARTBEAT.TIMESTAMP_MESSAGE,
+            topic="/BASESTATION/"
+            + CONSTANTS.HEARTBEAT.NAME
+            + "/"
+            + CONSTANTS.HEARTBEAT.TIMESTAMP_MESSAGE,
             callback=self.__on_heartbeat_received,
             qos_profile=10,
         )
@@ -70,7 +74,7 @@ class Master(Node):
         )
 
     def __check_timeout(self) -> None:
-        self.get_logger().info("Checking for heartbeat timeout...")
+        # self.get_logger().info("Checking for heartbeat timeout...")
         if self.__recieved_heartbeat:
             if self.__current_heartbeat_time == self.__last_heartbeat_time:
                 self.get_logger().info("Heartbeat timeout detected")
@@ -100,10 +104,12 @@ class Master(Node):
         self.get_logger().info("starting master node ...")
         rclpy.spin(self)
 
+
 def main():
     rclpy.init()
     master = Master()
     master.run()
+
 
 if __name__ == "__main__":
     main()

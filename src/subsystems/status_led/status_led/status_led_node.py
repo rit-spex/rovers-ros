@@ -12,6 +12,7 @@ import Jetson.GPIO as GPIO
 LED_flicker_sec = 1.0
 LED_PIN = 7
 
+
 class StatusLED(Node):
 
     LED_flicker_timer: Timer
@@ -23,9 +24,12 @@ class StatusLED(Node):
         super().__init__("status_led_node")
 
         # GPIO setup to have led indicate heartbeat status
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(LED_PIN, GPIO.OUT)
-        GPIO.output(LED_PIN, GPIO.LOW)
+        GPIO.setmode(GPIO.BOARD)
+        GPIO.setup(LED_PIN, GPIO.OUT, initial=GPIO.LOW)
+        # GPIO.output(LED_PIN, GPIO.LOW)
+
+        # requires some default value
+        self.__led_status = False
 
         self.create_subscription(
             msg_type=Bool,
@@ -40,6 +44,7 @@ class StatusLED(Node):
         )
 
     def __flicker_led(self):
+        # self.get_logger().info("flicker_led")
         if self.__led_status == True:
             self.__led_status = False
             GPIO.output(LED_PIN, GPIO.LOW)  # Turn off LED to indicate live jetson
