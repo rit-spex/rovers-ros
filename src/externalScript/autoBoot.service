@@ -1,0 +1,10 @@
+[Unit]
+Description=autoBoot systemd service
+
+[Service]
+Type=simple
+Environment=HOME=/home/rovers
+WorkingDirectory=/home/rovers/ros/rovers-ros/
+ExecStart= /bin/bash /home/rovers/ros/rovers-ros/src/externalScript/autoBoot.sh
+[Install]
+WantedBy=multi-user.target
