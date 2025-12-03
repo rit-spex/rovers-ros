@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="status_led" exec="status_led_node" name="status_led"></node>
+</launch>

@@ -1,13 +1,10 @@
-from std_msgs.msg import Float32, Bool
-
-
 class CONSTANTS:
     # Set to True to run simulator with UDP, False for actual XBee communication
-    # SIMULATION_MODE = True  # Change this to False when trying to communicate with real rover
+    SIMULATION_MODE = True  # Change this to False when trying to communicate with real rover
     
     # message to send to show start of new values
-    # START_MESSAGE = b'\xDE'
-    # QUIT_MESSAGE = b'\xFE'
+    START_MESSAGE = b'\xDE'
+    QUIT_MESSAGE = b'\xFE'
 
     # message order:
     # byte Axis
@@ -234,108 +231,3 @@ class CONSTANTS:
             LEFT = (-1, 0)
             RIGHT = (1, 0)
 
-
-
-# TOPICS_JOYSTICK = {
-#     CONSTANTS.XBOX.JOYSTICK.AXIS_LX: {
-#         "id": CONSTANTS.XBOX.JOYSTICK.AXIS_LX,
-#         "name": "LX",
-#         "val": Float32,
-#     },
-#     CONSTANTS.XBOX.JOYSTICK.AXIS_LY: {
-#         "id": CONSTANTS.XBOX.JOYSTICK.AXIS_LY,
-#         "name": "LY",
-#         "val": Float32,
-#     },
-#     CONSTANTS.XBOX.JOYSTICK.AXIS_RX: {
-#         "id": CONSTANTS.XBOX.JOYSTICK.AXIS_RX,
-#         "name": "RX",
-#         "val": Float32,
-#     },
-#     CONSTANTS.XBOX.JOYSTICK.AXIS_RY: {
-#         "id": CONSTANTS.XBOX.JOYSTICK.AXIS_RY,
-#         "name": "RY",
-#         "val": Float32,
-#     },
-#     CONSTANTS.XBOX.TRIGGER.AXIS_LT: {
-#         "id": CONSTANTS.XBOX.TRIGGER.AXIS_LT,
-#         "name": "LT",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.TRIGGER.AXIS_RT: {
-#         "id": CONSTANTS.XBOX.TRIGGER.AXIS_RT,
-#         "name": "RT",
-#         "val": Bool,
-#     },
-# }
-
-# TOPICS_TRIGGER = {
-#     CONSTANTS.XBOX.TRIGGER.AXIS_LT: {
-#         "id": CONSTANTS.XBOX.TRIGGER.AXIS_LT,
-#         "name": "LT",
-#         "val": Float32
-#     },
-#     CONSTANTS.XBOX.TRIGGER.AXIS_RT: {
-#         "id": CONSTANTS.XBOX.TRIGGER.AXIS_RT,
-#         "name": "RT",
-#         "val": Float32
-#     }
-# }
-
-# TOPICS_BUTTON = {
-#     CONSTANTS.XBOX.BUTTONS.A: {
-#         "id": CONSTANTS.XBOX.BUTTONS.A,
-#         "name": "A",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.B: {
-#         "id": CONSTANTS.XBOX.BUTTONS.B,
-#         "name": "B",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.X: {
-#         "id": CONSTANTS.XBOX.BUTTONS.X,
-#         "name": "X",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.Y: {
-#         "id": CONSTANTS.XBOX.BUTTONS.Y,
-#         "name": "Y",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.LEFT_BUMPER: {
-#         "id": CONSTANTS.XBOX.BUTTONS.LEFT_BUMPER,
-#         "name": "LEFT_BUMPER",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.RIGHT_BUMPER: {
-#         "id": CONSTANTS.XBOX.BUTTONS.RIGHT_BUMPER,
-#         "name": "RIGHT_BUMPER",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.SELECT: {
-#         "id": CONSTANTS.XBOX.BUTTONS.SELECT,
-#         "name": "LT",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.START: {
-#         "id": CONSTANTS.XBOX.BUTTONS.START,
-#         "name": "RT",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.LEFT_STICK: {
-#         "id": CONSTANTS.XBOX.BUTTONS.LEFT_STICK,
-#         "name": "LEFT_STICK",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.RIGHT_STICK: {
-#         "id": CONSTANTS.XBOX.BUTTONS.RIGHT_STICK,
-#         "name": "RIGHT_STICK",
-#         "val": Bool,
-#     },
-#     CONSTANTS.XBOX.BUTTONS.HOME: {
-#         "id": CONSTANTS.XBOX.BUTTONS.HOME,
-#         "name": "HOME",
-#         "val": Bool,
-#     },
-# }
