@@ -5,11 +5,13 @@ from rclpy.publisher import Publisher
 
 # TODO: change to custom type to use unsigned ints
 from std_msgs.msg import UInt8MultiArray
+
 # from custom_interfaces.msg import UDPPacket
 
 import socket as skt
 from socket import socket
 import errno
+
 
 class xbee_udp(Node):
     __address: str
@@ -35,7 +37,7 @@ class xbee_udp(Node):
         except Exception as e:
             err = e.args
             # only error out if it wasn't from non-blocking
-            if(err[0] == errno.EWOULDBLOCK):
+            if err[0] == errno.EWOULDBLOCK:
                 return []
             else:
                 self.get_logger().info(f"failed to receive data: {e}")

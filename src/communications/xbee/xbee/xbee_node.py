@@ -4,7 +4,7 @@ from rclpy.publisher import Publisher
 from std_msgs.msg import UInt8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
 
-#from custom_interfaces.msg import Can
+# from custom_interfaces.msg import Can
 # from constants.constants.CAN_Constants import CHANNEL, TOPICS
 
 
@@ -53,6 +53,7 @@ class Xbee(Node):
             if len(data) == 0:
                 continue
             self.publish_data(data)
+
 
 def main() -> None:
     rclpy.init()
