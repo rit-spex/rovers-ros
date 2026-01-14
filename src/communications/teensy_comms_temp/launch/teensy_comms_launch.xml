@@ -1,3 +1,0 @@
-<launch>
-	<node pkg="can_udp" exec="can_udp_node" name="can_udp"></node>
-</launch>

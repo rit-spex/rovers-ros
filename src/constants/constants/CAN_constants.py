@@ -11,92 +11,92 @@
 
 from enum import IntEnum
 
-class CHANNEL(IntEnum):
-    JETSON        = 0
-    MAIN_BODY     = 1
-    SCIENCE_BOARD = 2
-    ARM_BOARD     = 3
+# class CHANNEL(IntEnum):
+#     JETSON        = 0
+#     MAIN_BODY     = 1
+#     SCIENCE_BOARD = 2
+#     ARM_BOARD     = 3
 
-TOPIC_RANGES = {
-    CHANNEL.MAIN_BODY: (0, 4),
-    CHANNEL.ARM_BOARD: (10, 18),
-    CHANNEL.SCIENCE_BOARD: (20, 30),
-}
+# TOPIC_RANGES = {
+#     CHANNEL.MAIN_BODY: (0, 4),
+#     CHANNEL.ARM_BOARD: (10, 18),
+#     CHANNEL.SCIENCE_BOARD: (20, 30),
+# }
 
-TOPICS = {
-    0: {
-        "id": 0,
-        "name": "E_STOP",
-        "buf": bytearray(8),
-        "channel": CHANNEL.MAIN_BODY,
-    },
-    1: {
-        "id": 1,
-        "name": "TARGET_VELOCITY",
-        "buf": bytearray(8),
-        "channel": CHANNEL.MAIN_BODY,
-    },
-    2: {
-        "id": 2,
-        "name": "CURRENT_VELOCITY",
-        "buf": bytearray(8),
-        "channel": CHANNEL.MAIN_BODY,
-    },
-    3: {
-        "id": 3,
-        "name": "DRIVE_POWER",
-        "buf": bytearray(8),
-        "channel": CHANNEL.MAIN_BODY,
-    },
-    10: {
-        "id": 10,
-        "name": "ARM_E_STOP",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    11: {
-        "id": 11,
-        "name": "MOVE_BASE",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    12: {
-        "id": 12,
-        "name": "MOVE_SHOULDER",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    13: {
-        "id": 13,
-        "name": "MOVE_ELBOW",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    14: {
-        "id": 14,
-        "name": "BEND_WRIST",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    15: {
-        "id": 15,
-        "name": "TWIST_WRIST",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    16: {
-        "id": 16,
-        "name": "MOVE_CLAW",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD,
-    },
-    17: {
-        "id": 17,
-        "name": "MOVE_SOLINOID",
-        "buf": bytearray(8),
-        "channel": CHANNEL.ARM_BOARD
-    }
-}
+# TOPICS = {
+#     0: {
+#         "id": 0,
+#         "name": "E_STOP",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.MAIN_BODY,
+#     },
+#     1: {
+#         "id": 1,
+#         "name": "TARGET_VELOCITY",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.MAIN_BODY,
+#     },
+#     2: {
+#         "id": 2,
+#         "name": "CURRENT_VELOCITY",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.MAIN_BODY,
+#     },
+#     3: {
+#         "id": 3,
+#         "name": "DRIVE_POWER",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.MAIN_BODY,
+#     },
+#     10: {
+#         "id": 10,
+#         "name": "ARM_E_STOP",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     11: {
+#         "id": 11,
+#         "name": "MOVE_BASE",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     12: {
+#         "id": 12,
+#         "name": "MOVE_SHOULDER",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     13: {
+#         "id": 13,
+#         "name": "MOVE_ELBOW",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     14: {
+#         "id": 14,
+#         "name": "BEND_WRIST",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     15: {
+#         "id": 15,
+#         "name": "TWIST_WRIST",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     16: {
+#         "id": 16,
+#         "name": "MOVE_CLAW",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD,
+#     },
+#     17: {
+#         "id": 17,
+#         "name": "MOVE_SOLINOID",
+#         "buf": bytearray(8),
+#         "channel": CHANNEL.ARM_BOARD
+#     }
+# }
 
 # New topic name base for ROS topics
 
@@ -129,6 +129,10 @@ class Signal:
         self.__type = type
         self.__default_value = default_value
         self.__value = self.__default_value
+
+        # these values are meant to be updated by the message init
+        self.__name = "invalid"
+        self.__topic_src = "invalid"
     @property
     def type(self) -> DATA_TYPE:
         """Get the type of the signal."""
@@ -142,10 +146,29 @@ class Signal:
         """Get the default value of the signal."""
         return self.__default_value
 
-    @value.setter
-    def value(self, new_value: Any) -> None:
+    @property
+    def name(self) -> str:
+        """Get the name of the signal."""
+        return self.__name
+
+    @property
+    def topic_src(self) -> str:
+        """Get the topic source of the signal."""
+        return self.__topic_src
+
+    def set_value(self, new_value: Any) -> None:
         """Set the current value of the signal."""
         self.__value = new_value
+
+    # This method is meant to be only called by the message init
+    def set_name(self, new_name: str) -> None:
+        """Set the name of the signal."""
+        self.__name = new_name
+
+    # This method is meant to be only called by the message init
+    def set_topic_src(self, new_topic_src: str) -> None:
+        """Set the topic source of the signal."""
+        self.__topic_src = new_topic_src
 
     def toString(self) -> str:
         """Get the string representation of the signal."""
@@ -153,11 +176,20 @@ class Signal:
 
 class Message:
     """Class representing a message with an ID, name, and signals."""
-    def __init__(self, id: int, name: str, subsystem: str, signals: dict[str, Signal]):
+    def __init__(self, id: int, name: str, subsystem: str, signals: dict[str, Signal], isforJetson: bool):
         self.__id = id
         self.__name = name
         self.__subsystem = subsystem
+        self.__isforJetson = isforJetson
         self.__signals = signals
+
+        # Calculate the topic name
+        self.__topic_name = TEENSY_TOPIC_NAME + "/" + self.__subsystem + "/" + self.__name
+
+        # Update the signals the message source and name of the signals
+        for (signal_name, signal) in self.__signals.items():
+            signal.set_topic_src(self.__topic_name + "/" + signal_name)
+            signal.set_name(signal_name)
 
     @property
     def id(self) -> int:
@@ -177,24 +209,29 @@ class Message:
     @property
     def get_topic_name(self) -> str:
         """Get the topic name of the message."""
-        return TEENSY_TOPIC_NAME + "/" + self.__subsystem + "/" + self.__name
-
-class SignalTopic(Signal):
-    """Class wrapping a signal with additional feature to work with topics."""
-    def __init__(self, signal: Signal, name: str, topic_src: str):
-        self.__name = name
-        super().__init__(signal.type, signal.default_value)
-        self.__topic_name = topic_src + "/" + name
-
-    @property
-    def name(self) -> str:
-        """Get the name of the signal topic."""
-        return self.__name
-
-    @property
-    def topic_name(self) -> str:
-        """Get the topic name of the signal topic."""
         return self.__topic_name
+
+    @property
+    def isforJetson(self) -> bool:
+        """Get the sent status of the message."""
+        return self.__isforJetson
+
+# class SignalTopic(Signal):
+#     """Class wrapping a signal with additional feature to work with topics."""
+#     def __init__(self, signal: Signal, name: str, topic_src: str):
+#         self.__name = name
+#         super().__init__(signal.type, signal.default_value)
+#         self.__topic_name = topic_src + "/" + name
+
+#     @property
+#     def name(self) -> str:
+#         """Get the name of the signal topic."""
+#         return self.__name
+
+#     @property
+#     def topic_name(self) -> str:
+#         """Get the topic name of the signal topic."""
+#         return self.__topic_name
 
 # From this point onward, data should be auto generated from interface sheet
 class ArmState(IntEnum):
@@ -212,7 +249,8 @@ TEENSY_CAN_MESSAGES = {
         name="E_STOP",
         signals={
             "E_STOP": Signal(DATA_TYPES.UINT_8, 0)
-        }
+        },
+        isforJetson=False
     ),
     10: Message(
         id=10,
@@ -220,7 +258,8 @@ TEENSY_CAN_MESSAGES = {
         name="ENABLE_ARM",
         signals={
             "enable": Signal(DATA_TYPES.UINT_8, 0)
-        }
+        },
+        isforJetson=False
     ),
     11: Message(
         id=11,
@@ -229,7 +268,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     12: Message(
         id=12,
@@ -238,7 +278,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     13: Message(
         id=13,
@@ -247,7 +288,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     14: Message(
         id=14,
@@ -256,7 +298,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     15: Message(
         id=15,
@@ -265,7 +308,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     16: Message(
         id=16,
@@ -274,7 +318,8 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     ),
     17: Message(
         id=17,
@@ -283,26 +328,27 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        }
+        },
+        isforJetson=False
     )
 }
 
 class SIGNALS_TOPICS:
-    Enable_Arm              = SignalTopic(TEENSY_CAN_MESSAGES[10].signals["enable"],    "enable",    TEENSY_CAN_MESSAGES[10].get_topic_name)
-    Move_Base_State         = SignalTopic(TEENSY_CAN_MESSAGES[11].signals["state"],     "state",     TEENSY_CAN_MESSAGES[11].get_topic_name)
-    Move_Base_Direction     = SignalTopic(TEENSY_CAN_MESSAGES[11].signals["direction"], "direction", TEENSY_CAN_MESSAGES[11].get_topic_name)
-    Move_Shoulder_State     = SignalTopic(TEENSY_CAN_MESSAGES[12].signals["state"],     "state",     TEENSY_CAN_MESSAGES[12].get_topic_name)
-    Move_Shoulder_Direction = SignalTopic(TEENSY_CAN_MESSAGES[12].signals["direction"], "direction", TEENSY_CAN_MESSAGES[12].get_topic_name)
-    Move_Elbow_State        = SignalTopic(TEENSY_CAN_MESSAGES[13].signals["state"],     "state",     TEENSY_CAN_MESSAGES[13].get_topic_name)
-    Move_Elbow_Direction    = SignalTopic(TEENSY_CAN_MESSAGES[13].signals["direction"], "direction", TEENSY_CAN_MESSAGES[13].get_topic_name)
-    Bend_Wrist_State        = SignalTopic(TEENSY_CAN_MESSAGES[14].signals["state"],     "state",     TEENSY_CAN_MESSAGES[14].get_topic_name)
-    Bend_Wrist_Direction    = SignalTopic(TEENSY_CAN_MESSAGES[14].signals["direction"], "direction", TEENSY_CAN_MESSAGES[14].get_topic_name)
-    Twist_Wrist_State       = SignalTopic(TEENSY_CAN_MESSAGES[15].signals["state"],     "state",     TEENSY_CAN_MESSAGES[15].get_topic_name)
-    Twist_Wrist_Direction   = SignalTopic(TEENSY_CAN_MESSAGES[15].signals["direction"], "direction", TEENSY_CAN_MESSAGES[15].get_topic_name)
-    Move_Claw_State         = SignalTopic(TEENSY_CAN_MESSAGES[16].signals["state"],     "state",     TEENSY_CAN_MESSAGES[16].get_topic_name)
-    Move_Claw_Direction     = SignalTopic(TEENSY_CAN_MESSAGES[16].signals["direction"], "direction", TEENSY_CAN_MESSAGES[16].get_topic_name)
-    Move_Solenoid_State     = SignalTopic(TEENSY_CAN_MESSAGES[17].signals["state"],     "state",     TEENSY_CAN_MESSAGES[17].get_topic_name)
-    Move_Solenoid_Direction = SignalTopic(TEENSY_CAN_MESSAGES[17].signals["direction"], "direction", TEENSY_CAN_MESSAGES[17].get_topic_name)
+    Enable_Arm              = TEENSY_CAN_MESSAGES[10].signals["enable"]  
+    Move_Base_State         = TEENSY_CAN_MESSAGES[11].signals["state"]   
+    Move_Base_Direction     = TEENSY_CAN_MESSAGES[11].signals["direction"]
+    Move_Shoulder_State     = TEENSY_CAN_MESSAGES[12].signals["state"]
+    Move_Shoulder_Direction = TEENSY_CAN_MESSAGES[12].signals["direction"]
+    Move_Elbow_State        = TEENSY_CAN_MESSAGES[13].signals["state"]   
+    Move_Elbow_Direction    = TEENSY_CAN_MESSAGES[13].signals["direction"]
+    Bend_Wrist_State        = TEENSY_CAN_MESSAGES[14].signals["state"]   
+    Bend_Wrist_Direction    = TEENSY_CAN_MESSAGES[14].signals["direction"]
+    Twist_Wrist_State       = TEENSY_CAN_MESSAGES[15].signals["state"]   
+    Twist_Wrist_Direction   = TEENSY_CAN_MESSAGES[15].signals["direction"]
+    Move_Claw_State         = TEENSY_CAN_MESSAGES[16].signals["state"]   
+    Move_Claw_Direction     = TEENSY_CAN_MESSAGES[16].signals["direction"]
+    Move_Solenoid_State     = TEENSY_CAN_MESSAGES[17].signals["state"]   
+    Move_Solenoid_Direction = TEENSY_CAN_MESSAGES[17].signals["direction"]
 
 # self.__messages = { # Note: dictationaries are ordered in Python 3.7+
 #             CONSTANTS.COMPACT_MESSAGES.HEARTBEAT_ID: # byte 0

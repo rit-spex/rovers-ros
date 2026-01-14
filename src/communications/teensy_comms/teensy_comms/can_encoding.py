@@ -1,10 +1,59 @@
 from typing import Any
-from constants.CAN_Constants import Signal, TEENSY_CAN_MESSAGES, Message
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES, DATA_TYPES
+#from CAN_constants import CAN_CONSTANTS
 
 class TeensyCommunication:
 
-    """Module for encoding and decoding data for Teensy communication."""
+    def __convert_native_to_int(self, type: CONSTANTS.COMPACT_MESSAGES.DATA_TYPE, value: Any) -> int:
+        """
+        Convert a native type to an integer representation.
 
+        Args:
+            type (int): The native type.
+
+        Returns:
+            int: The integer representation.
+        """
+        if type == CONSTANTS.COMPACT_MESSAGES.BOOLEAN:
+            return value # convert bool to 1/2 for 2 bit storage
+
+        elif type == CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL:
+            return value+1 # convert bool to 1/2 for 2 bit storage
+
+        elif type == CONSTANTS.COMPACT_MESSAGES.UINT_8_JOYSTICK:
+            # convert float joystick value (-1.0-1.0) to int (0-200)
+            value = max(-1.0, min(1.0, value))
+            value = value * 100 + 100
+            return int(value)
+
+        else:
+            return int(value)
+        
+    def __convert_int_to_native(self, type: CONSTANTS.COMPACT_MESSAGES.DATA_TYPE, value: int) -> Any:
+        """
+        Convert an integer representation to a native type.
+
+        Args:
+            type (int): The native type.
+
+        Returns:
+            Any: The native representation.
+        """
+        if type == CONSTANTS.COMPACT_MESSAGES.BOOLEAN:
+            return bool(value) # convert 1/2 back to bool
+
+        elif type == CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL:
+            return bool(value - 1) # convert 1/2 back to bool
+
+        elif type == CONSTANTS.COMPACT_MESSAGES.UINT_8_JOYSTICK:
+            # convert int (0-200) back to float joystick value (-1.0-1.0)
+            return (float(value) - 100.0) / 100.0
+
+        else:
+            return value
+
+
+    """Module for encoding and decoding data for Teensy communication."""
 
     def encode_data(self, data: Message) -> bytes:
         """
@@ -75,7 +124,7 @@ class TeensyCommunication:
         return bytes_data
 
 
-    def decode_data(self, data: bytes) -> tuple[dict[str, Any], int]:
+    def decode_data(self, data: bytes) -> dict[str, Any]:
         """
         Decode the received bytes into a data dictionary.
 
@@ -87,18 +136,15 @@ class TeensyCommunication:
             int: The identifier for the data.
         """
 
-        # the first byte is always the ID
-        ID = int.from_bytes(data[0:1], byteorder='big')
-
-        # start decoding from byte index 1
-        byte_index = 1
+        # start decoding from byte index 0
+        byte_index = 0
         bitsRemaining = 8
 
         # Implement decoding logic here
         decoded_data = {}
 
         # Implement encoding logic here
-        for key, signal in self.__messages[ID]["values"].items():
+        for key, signal in TEENSY_CAN_MESSAGES[ID]["values"].items():
 
             # store how many bits we need to store for this key
             signal_bits_size = signal.get_type.num_bits
