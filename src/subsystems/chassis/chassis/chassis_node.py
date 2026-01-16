@@ -1,8 +1,8 @@
 from typing import Any
 from constants.CommandCodes import CONSTANTS
-from constants.constants.CAN_structs import Message
-from constants.constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsystems_Names
-from constants.constants.can_encoding import TeensyCommunication
+from constants.CAN_structs import Message
+from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsystems_Names
+from constants.can_encoding import TeensyCommunication
 
 import rclpy
 from rclpy.node import Node

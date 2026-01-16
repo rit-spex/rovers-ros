@@ -10,7 +10,7 @@
 # ------------------------------------------------------------------
 
 from typing import Any
-from CAN_enums import CAN_MESSAGE_IDS
+from constants.CAN_enums import CAN_MESSAGE_IDS
 
 # New topic name base for ROS topics
 RX_TOPIC_NAME = "CAN/RX"

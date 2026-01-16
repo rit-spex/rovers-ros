@@ -1,7 +1,7 @@
 from typing import Any
-from constants.constants.CAN_constants import TEENSY_CAN_MESSAGES
-from constants.constants.CAN_enums import CAN_MESSAGE_IDS
-from constants.constants.CAN_structs import Message, DATA_TYPE
+from constants.CAN_constants import TEENSY_CAN_MESSAGES
+from constants.CAN_enums import CAN_MESSAGE_IDS
+from constants.CAN_structs import Message, DATA_TYPE
 from custom_interfaces.msg import Can
 
 #from CAN_constants import CAN_CONSTANTS

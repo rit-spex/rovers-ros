@@ -1,8 +1,8 @@
 from constants.CommandCodes import CONSTANTS
-from constants.constants.can_encoding import TeensyCommunication
+from constants.can_encoding import TeensyCommunication
+from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names
 
 from numpy import uint8
-from constants.constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher

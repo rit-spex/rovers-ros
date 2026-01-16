@@ -8,8 +8,8 @@
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
-from CAN_structs import DATA_TYPE, Signal, Message
-from CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection
+from constants.CAN_structs import DATA_TYPE, Signal, Message
+from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection
 
 class Subsystems_Names:
     ALL     = "ALL"

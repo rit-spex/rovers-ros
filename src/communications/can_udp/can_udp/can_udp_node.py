@@ -5,9 +5,9 @@ import rclpy.publisher
 
 from custom_interfaces.msg import Can
 
-from constants.constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
-from constants.constants.CAN_structs import TX_TOPIC_NAME
-from constants.constants.can_encoding import TeensyCommunication
+from constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.CAN_structs import TX_TOPIC_NAME
+from constants.can_encoding import TeensyCommunication
 
 from std_msgs.msg import Bool
 
