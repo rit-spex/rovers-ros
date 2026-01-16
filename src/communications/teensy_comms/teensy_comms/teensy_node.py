@@ -11,9 +11,9 @@ import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, UInt8, UInt16, UInt32
 from custom_interfaces.msg import CanFD, Can
-from communications.teensy_comms.teensy_comms.can_encoding import TeensyCommunication
+from constants.can_encoding import TeensyCommunication
 # from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES, DATA_TYPES
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES, DATA_TYPES, Message
 
 import numpy as np
 
@@ -31,7 +31,8 @@ class Teensy(Node):
 
         self.__teensy_communications = TeensyCommunication()
 
-        # store all publishers based on message and signal names for later reference
+        # Sends messages out to internal topics for other nodes
+        # Stored as Publishers[message_id][signal_name]
         self.__publishers = {}
         self.__subscribers = {}
 
@@ -112,22 +113,22 @@ class Teensy(Node):
         """
         self.get_logger().info("New Jetson message received")
 
-        decoded_data: dict[str, Any]
+        CAN_message: Message
 
         try:
-            # split the message data into a list
-            decoded_data = self.__basestation_communications.decode_data(bytes(data[0:]))
+            # decode the can packet into a message
+            CAN_message = self.__teensy_communications.decode_data(msg)
         except Exception as e:
             self.get_logger().error(f"Failed to decode message: {e}")
             return
 
-        for (key, value) in decoded_data.items():
-            if key not in self.__publishers[id]:
+        for (signal_name, signal) in CAN_message.signals.items():
+            if signal_name not in self.__publishers[CAN_message.id]:
                 continue
-            
-            value_type = self.__valueTypes[TEENSY_CAN_MESSAGES[id].signals[key].type]
 
-            self.__publishers[id][key].publish(value_type(data=value))
+            value_type = self.__valueTypes[signal.type]
+
+            self.__publishers[CAN_message.id][signal_name].publish(value_type(data=signal.value))
 
     def run(self):
         self.get_logger().info("starting teensy_comms ...")

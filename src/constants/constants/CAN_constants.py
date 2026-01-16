@@ -113,8 +113,19 @@ from typing import Any
 # Define wrapper class for data types
 class DATA_TYPE:
     def __init__(self, num_bits: int, id: int) -> None:
-        self.num_bits = num_bits
-        self.id = id
+        self.__num_bits = num_bits
+        self.__id = id
+
+    @property
+    def id(self) -> int:
+        """Get the ID of the data type."""
+        return self.__id
+
+    @property
+    def num_bits(self) -> int:
+        """Get the number of bits of the data type."""
+        return self.__num_bits
+
 
 # Define data types for can bus communication
 class DATA_TYPES:
@@ -207,7 +218,7 @@ class Message:
         return self.__signals
     
     @property
-    def get_topic_name(self) -> str:
+    def topic_name(self) -> str:
         """Get the topic name of the message."""
         return self.__topic_name
 
@@ -215,6 +226,10 @@ class Message:
     def isforJetson(self) -> bool:
         """Get the sent status of the message."""
         return self.__isforJetson
+
+    def toString(self) -> str:
+        """Get the string representation of the message."""
+        return f"Message(id={self.__id}, name={self.__name}, subsystem={self.__subsystem}, signals={self.__signals}, isforJetson={self.__isforJetson})"
 
 # class SignalTopic(Signal):
 #     """Class wrapping a signal with additional feature to work with topics."""
@@ -252,8 +267,27 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    10: Message(
-        id=10,
+    1: Message(
+        id=1,
+        subsystem=Subsystems_Names.ALL,
+        name="Ros-Heartbeat",
+        signals={
+            "timestamp": Signal(DATA_TYPES.UINT_32, 0)
+        },
+        isforJetson=False
+    ),
+    13: Message(
+        id=13,
+        subsystem=Subsystems_Names.ALL,
+        name="Drive_Power",
+        signals={
+            "left": Signal(DATA_TYPES.UINT_8, 0),
+            "right": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=False
+    ),
+    20: Message(
+        id=20,
         subsystem=Subsystems_Names.ARM,
         name="ENABLE_ARM",
         signals={
@@ -261,8 +295,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    11: Message(
-        id=11,
+    21: Message(
+        id=21,
         subsystem=Subsystems_Names.ARM,
         name="MOVE_BASE",
         signals={
@@ -271,8 +305,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    12: Message(
-        id=12,
+    22: Message(
+        id=22,
         subsystem=Subsystems_Names.ARM,
         name="MOVE_SHOULDER",
         signals={
@@ -281,8 +315,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    13: Message(
-        id=13,
+    23: Message(
+        id=23,
         subsystem=Subsystems_Names.ARM,
         name="MOVE_ELBOW",
         signals={
@@ -291,8 +325,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    14: Message(
-        id=14,
+    24: Message(
+        id=24,
         subsystem=Subsystems_Names.ARM,
         name="BEND_WRIST",
         signals={
@@ -301,8 +335,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    15: Message(
-        id=15,
+    25: Message(
+        id=25,
         subsystem=Subsystems_Names.ARM,
         name="TWIST_WRIST",
         signals={
@@ -311,8 +345,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    16: Message(
-        id=16,
+    26: Message(
+        id=26,
         subsystem=Subsystems_Names.ARM,
         name="MOVE_CLAW",
         signals={
@@ -321,8 +355,8 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    17: Message(
-        id=17,
+    27: Message(
+        id=27,
         subsystem=Subsystems_Names.ARM,
         name="MOVE_SOLINOID",
         signals={
@@ -334,21 +368,31 @@ TEENSY_CAN_MESSAGES = {
 }
 
 class SIGNALS_TOPICS:
-    Enable_Arm              = TEENSY_CAN_MESSAGES[10].signals["enable"]  
-    Move_Base_State         = TEENSY_CAN_MESSAGES[11].signals["state"]   
-    Move_Base_Direction     = TEENSY_CAN_MESSAGES[11].signals["direction"]
-    Move_Shoulder_State     = TEENSY_CAN_MESSAGES[12].signals["state"]
-    Move_Shoulder_Direction = TEENSY_CAN_MESSAGES[12].signals["direction"]
-    Move_Elbow_State        = TEENSY_CAN_MESSAGES[13].signals["state"]   
-    Move_Elbow_Direction    = TEENSY_CAN_MESSAGES[13].signals["direction"]
-    Bend_Wrist_State        = TEENSY_CAN_MESSAGES[14].signals["state"]   
-    Bend_Wrist_Direction    = TEENSY_CAN_MESSAGES[14].signals["direction"]
-    Twist_Wrist_State       = TEENSY_CAN_MESSAGES[15].signals["state"]   
-    Twist_Wrist_Direction   = TEENSY_CAN_MESSAGES[15].signals["direction"]
-    Move_Claw_State         = TEENSY_CAN_MESSAGES[16].signals["state"]   
-    Move_Claw_Direction     = TEENSY_CAN_MESSAGES[16].signals["direction"]
-    Move_Solenoid_State     = TEENSY_CAN_MESSAGES[17].signals["state"]   
-    Move_Solenoid_Direction = TEENSY_CAN_MESSAGES[17].signals["direction"]
+
+    # General
+    EStop_Enable            = TEENSY_CAN_MESSAGES[0].signals["E_STOP"]
+    Heartbeat_Timestamp     = TEENSY_CAN_MESSAGES[0].signals["timestamp"]
+
+    # Chassis
+    Drive_Power_Left        = TEENSY_CAN_MESSAGES[13].signals["left"]
+    Drive_Power_Right       = TEENSY_CAN_MESSAGES[13].signals["right"]
+
+    # ARM
+    Enable_Arm              = TEENSY_CAN_MESSAGES[20].signals["enable"]  
+    Move_Base_State         = TEENSY_CAN_MESSAGES[21].signals["state"]   
+    Move_Base_Direction     = TEENSY_CAN_MESSAGES[21].signals["direction"]
+    Move_Shoulder_State     = TEENSY_CAN_MESSAGES[22].signals["state"]
+    Move_Shoulder_Direction = TEENSY_CAN_MESSAGES[22].signals["direction"]
+    Move_Elbow_State        = TEENSY_CAN_MESSAGES[23].signals["state"]   
+    Move_Elbow_Direction    = TEENSY_CAN_MESSAGES[23].signals["direction"]
+    Bend_Wrist_State        = TEENSY_CAN_MESSAGES[24].signals["state"]   
+    Bend_Wrist_Direction    = TEENSY_CAN_MESSAGES[24].signals["direction"]
+    Twist_Wrist_State       = TEENSY_CAN_MESSAGES[25].signals["state"]   
+    Twist_Wrist_Direction   = TEENSY_CAN_MESSAGES[25].signals["direction"]
+    Move_Claw_State         = TEENSY_CAN_MESSAGES[26].signals["state"]   
+    Move_Claw_Direction     = TEENSY_CAN_MESSAGES[26].signals["direction"]
+    Move_Solenoid_State     = TEENSY_CAN_MESSAGES[27].signals["state"]   
+    Move_Solenoid_Direction = TEENSY_CAN_MESSAGES[27].signals["direction"]
 
 # self.__messages = { # Note: dictationaries are ordered in Python 3.7+
 #             CONSTANTS.COMPACT_MESSAGES.HEARTBEAT_ID: # byte 0

@@ -5,7 +5,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
-from constants.CAN_Constants import TOPICS
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
@@ -16,7 +16,6 @@ BIT_RATE = 500000
 
 
 class CAN(Node):
-    __subscriptions: list[rclpy.subscription.Subscription] = []
 
     def __init__(self) -> None:
         super().__init__("CAN_node")
@@ -30,14 +29,11 @@ class CAN(Node):
         )
         can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
-        for message_id in TOPICS.keys():
-            self.__subscriptions.append(
-                self.create_subscription(
-                    msg_type=Can,
-                    topic=f"/CAN/TX/{TOPICS[message_id]['name']}",
-                    callback=self.send_msg,
-                    qos_profile=10,
-                )
+        self.create_subscription(
+                msg_type=Can,
+                topic=f"/CAN/TX",
+                callback=self.send_msg,
+                qos_profile=10,
             )
 
     def reset_network(self):
@@ -45,7 +41,7 @@ class CAN(Node):
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def send_msg(self, msg):
-        self.get_logger().info(f"ID {msg.id} ({TOPICS[msg.id]['name']}): {msg.buf}")
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[msg.id].name}): {msg.buf}")
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )
@@ -61,13 +57,23 @@ class CAN(Node):
 class JETSON_LISTENER(can.Listener):
     __node: Node
 
+    __publisher: rclpy.publisher.Publisher
+
     def __init__(self, node) -> None:
         super().__init__()
         self.__node = node
+        self.__publisher = self.__node.create_publisher(
+            msg_type=Can,
+            topic=f"/CAN/RX",
+            qos_profile=10,
+        )
 
     def on_message_received(self, msg: can.Message) -> None:
-        pass
-
+        ros_msg = Can(
+            id=msg.arbitration_id,
+            buf=msg.data,
+        )
+        self.__publisher.publish(ros_msg)
 
 def main():
     rclpy.init()

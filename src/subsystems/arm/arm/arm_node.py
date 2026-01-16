@@ -11,8 +11,6 @@ from std_msgs.msg import Bool
 
 
 class Arm(Node):
-    __publishers: list[Publisher]
-
     __base_forward: int
     __base_backward: int
 
@@ -22,14 +20,14 @@ class Arm(Node):
     __elbow_forward: int
     __elbow_backward: int
 
-    #heres a change
-
     def __init__(self):
         super().__init__("arm_node")
 
-        self.__publishers = []
-        for i in range(TOPIC_RANGES[CHANNEL.ARM_BOARD][0], TOPIC_RANGES[CHANNEL.ARM_BOARD][1]): # change based on amount of IDs filled out
-            self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
+        self.__base_publisher_dir = self.create_publisher(Can, "/CAN/TX/ARM_BASE", 10)
+
+        # self.__publishers = []
+        # for i in range(TOPIC_RANGES[CHANNEL.ARM_BOARD][0], TOPIC_RANGES[CHANNEL.ARM_BOARD][1]): # change based on amount of IDs filled out
+        #     self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
 
         self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
         self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.R_STR       , self.__base_backward_callback, 10)

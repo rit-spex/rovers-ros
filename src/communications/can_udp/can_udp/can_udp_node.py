@@ -1,9 +1,10 @@
 import rclpy
 from rclpy.node import Node
 import rclpy.subscription
+import rclpy.publisher
 
-from custom_interfaces.msg import CanFD, Can
-from constants.CAN_Constants import TOPICS
+from custom_interfaces.msg import Can
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES
 
 import socket as skt
 from socket import socket
@@ -18,7 +19,7 @@ class CAN_UDP(Node):
     __send_port: int
     __socket: socket
     __buffer_size: int
-    __subscriptions: list[rclpy.subscription.Subscription] = []
+    __publisher: rclpy.publisher.Publisher
 
     def __init__(self) -> None:
         super().__init__("CAN_udp_node")
@@ -30,15 +31,20 @@ class CAN_UDP(Node):
         self.__buffer_size = 1024
         # can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
-        for message_id in TOPICS.keys():
-            self.__subscriptions.append(
-                self.create_subscription(
-                    msg_type=Can,
-                    topic=f"/CAN/TX/{TOPICS[message_id]['name']}",
-                    callback=self.send_msg,
-                    qos_profile=10,
-                )
-            )
+        # This is for messages coming in
+        self.__publisher = self.create_publisher(
+            msg_type=Can,
+            topic="/CAN/RX",
+            qos_profile=10,
+        )
+
+        # This is for messages going out
+        self.create_subscription(
+            msg_type=Can,
+            topic="/CAN/TX",
+            callback=self.send_msg,
+            qos_profile=10,
+        )
 
         self.run()
 
@@ -46,7 +52,7 @@ class CAN_UDP(Node):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().info(f"ID {msg.id} ({TOPICS[msg.id]['name']}): {msg.buf}")
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[msg.id].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):
@@ -67,6 +73,7 @@ class CAN_UDP(Node):
                 pass
             else:
                 self.get_logger().info(f"failed to send can udp packet: {e}")
+
     def run(self):
         # start the socket so we can send and recv messages
         self.get_logger().info("starting can udp socket connection...")

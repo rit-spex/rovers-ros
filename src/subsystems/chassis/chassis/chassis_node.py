@@ -1,5 +1,5 @@
 from typing import Any
-from constants.CAN_Constants import TOPICS
+from constants.CAN_Constants import SIGNALS_TOPICS
 from constants.CommandCodes import CONSTANTS
 
 import rclpy
@@ -15,16 +15,24 @@ class Chassis(Node):
     __can_publisher: Publisher
 
     __LY_value: float
-    __RX_value: float
+    __RY_value: float
+
+    __LY_Publisher: Publisher
+    __RY_Publisher: Publisher
 
     def __init__(self):
         super().__init__("chassis_node")
 
-        self.__topic = TOPICS[3]
-        self.__can_publisher = self.create_publisher(
-            msg_type=Can,
-            topic=f"/CAN/TX/{self.__topic['name']}",
-            qos_profile=10,
+        self.__LY_Publisher = self.create_publisher(
+            Float32,
+            SIGNALS_TOPICS.Drive_Power_Left.topic_name,
+            10
+        )
+
+        self.__RY_Publisher = self.create_publisher(
+            Float32,
+            SIGNALS_TOPICS.Drive_Power_Right.topic_name,
+            10
         )
 
         self.create_subscription(
@@ -45,42 +53,46 @@ class Chassis(Node):
 
     def __LY_callback(self, msg: Float32):
         self.__LY_value = msg.data
-        self.__send_controller_data()
+        self.__LY_Publisher.publish(self.__LY_value)
+        # self.__send_controller_data()
         # self.get_logger().info(f"LY_callback message: {msg}")
         # self.get_logger().info(f"LY_value is now {self.__LY_value}")
 
     def __RY_callback(self, msg: Float32):
-        self.__RX_value = msg.data
-        self.__send_controller_data()
-        # self.get_logger().info(f"RX_callback message: {msg}")
-        # self.get_logger().info(f"RX_value is now {self.__RX_value}")
+        self.__RY_value = msg.data
+        self.__RY_Publisher.publish(self.__RY_value)
+        # self.__send_controller_data()
+        # self.get_logger().info(f"RY_callback message: {msg}")
+        # self.get_logger().info(f"RY_value is now {self.__RY_value}")
 
-    def __send_controller_data(self):
-        # self.get_logger().info(f"LY: {self.__LY_value}")
-        # self.get_logger().info(f"RX: {self.__RX_value}")
-        # self.get_logger().info(f"")
+    # def __send_controller_data(self):
+    #     # self.get_logger().info(f"LY: {self.__LY_value}")
+    #     # self.get_logger().info(f"RY: {self.__RY_value}")
+    #     # self.get_logger().info(f"")
 
-        ros_msg = Can()
-        ros_msg.channel = self.__topic["channel"]
-        ros_msg.id = self.__topic["id"]
-        ros_msg.buf = [
-            int((self.__LY_value * 100) + 100),
-            int((self.__RX_value * 100) + 100),
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ]
+    #     ros_msg = Can()
+    #     ros_msg.channel = self.__topic["channel"]
+    #     ros_msg.id = self.__topic["id"]
+    #     ros_msg.buf = [
+    #         int((self.__LY_value * 100) + 100),
+    #         int((self.__RX_value * 100) + 100),
+    #         0,
+    #         0,
+    #         0,
+    #         0,
+    #         0,
+    #         0,
+    #     ]
 
-        self.__can_publisher.publish(ros_msg)
+    #     self.__can_publisher.publish(ros_msg)
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping chassis...")
         self.__LY_value = 0
-        self.__RX_value = 0
-        self.__send_controller_data()
+        self.__RY_value = 0
+        self.__LY_Publisher.publish(self.__LY_value)
+        self.__RY_Publisher.publish(self.__RY_value)
+
         rclpy.shutdown()
 
     def run(self):
