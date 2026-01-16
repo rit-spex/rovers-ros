@@ -1,11 +1,14 @@
 import os
-import time
 import can
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES, TX_TOPIC_NAME
+
+from constants.constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.constants.CAN_structs import TX_TOPIC_NAME
+from constants.constants.can_encoding import TeensyCommunication
+
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
@@ -16,6 +19,9 @@ BIT_RATE = 500000
 
 
 class CAN(Node):
+
+    # This is needed as a var to shut it down early during E-stop
+    __can_tx_subscription: rclpy.subscription.Subscription
 
     def __init__(self) -> None:
         super().__init__("CAN_node")
@@ -29,19 +35,46 @@ class CAN(Node):
         )
         can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
-        self.create_subscription(
+        self.__can_tx_subscription = self.create_subscription(
                 msg_type=Can,
                 topic=TX_TOPIC_NAME,
                 callback=self.send_msg,
                 qos_profile=10,
             )
+        
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/ESTOP",
+            callback=self.__on_estop_received,
+            qos_profile=10,
+        )
 
     def reset_network(self):
         self.get_logger().info("resetting the can network...")
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
-    def send_msg(self, msg):
-        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[msg.id].name}): {msg.buf}")
+    def __on_estop_received(self, msg: Bool):
+        self.get_logger().info("E-STOP received, shutting down can_comms_node")
+
+        # First turn off the subscription so no new messages can be sent
+        self.destroy_subscription(self.__can_tx_subscription)
+
+        self.get_logger().info("CAN_node: sending default messages before shutting down")
+        # clear out all of the messages with default values
+        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+            # Set all of the value to default
+            message.reset()
+            can_packet = TeensyCommunication.encode_can_message(message)
+            if can_packet is not None:
+                self.send_msg(can_packet)
+
+        # Flush all of the messages before shutting down
+        self.bus.flush_tx_buffer()
+        self.bus.shutdown()
+        rclpy.shutdown()
+
+    def send_msg(self, msg: Can):
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )

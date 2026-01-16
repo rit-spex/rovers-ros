@@ -134,6 +134,11 @@ class Message:
         """Get the subsystem of the message."""
         return self.__subsystem
 
+    def reset(self) -> None:
+        """Reset the message to its default state."""
+        for signal in self.__signals.values():
+            signal.set_value(signal.default_value)
+
     def toString(self) -> str:
         """Get the string representation of the message."""
         return f"Message(id={self.__id}, name={self.__name}, subsystem={self.__subsystem}, signals={self.__signals}, isforJetson={self.__isforJetson})"

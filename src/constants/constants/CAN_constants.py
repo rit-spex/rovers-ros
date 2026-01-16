@@ -30,7 +30,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ALL,
         name="E_STOP",
         signals={
-            "E_STOP": Signal(DATA_TYPES.UINT_8, 0)
+            "E_STOP": Signal(DATA_TYPES.UINT_8, 1)
         },
         isforJetson=False
     ),

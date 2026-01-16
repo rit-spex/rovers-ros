@@ -4,7 +4,12 @@ import rclpy.subscription
 import rclpy.publisher
 
 from custom_interfaces.msg import Can
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES, TX_TOPIC_NAME
+
+from constants.constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.constants.CAN_structs import TX_TOPIC_NAME
+from constants.constants.can_encoding import TeensyCommunication
+
+from std_msgs.msg import Bool
 
 import socket as skt
 from socket import socket
@@ -23,6 +28,8 @@ class CAN_UDP(Node):
     # Stored as Publishers[message_id]
     __publishers: dict[int, rclpy.publisher.Publisher]
 
+    # This is needed as a var to shut it down early during E-stop
+    __can_tx_subscription: rclpy.subscription.Subscription
 
     def __init__(self) -> None:
         super().__init__("CAN_udp_node")
@@ -48,20 +55,45 @@ class CAN_UDP(Node):
             )
 
         # This is for messages going out
+        self.__can_tx_subscription = self.create_subscription(
+                msg_type=Can,
+                topic=TX_TOPIC_NAME,
+                callback=self.send_msg,
+                qos_profile=10,
+            )
+        
         self.create_subscription(
-            msg_type=Can,
-            topic=TX_TOPIC_NAME,
-            callback=self.send_msg,
+            msg_type=Bool,
+            topic="/ESTOP",
+            callback=self.__on_estop_received,
             qos_profile=10,
         )
 
         self.run()
 
-    def send_msg(self, msg):
+    def __on_estop_received(self, msg: Bool):
+        self.get_logger().info("E-STOP received, shutting down can_comms_node")
+
+        # First turn off the subscription so no new messages can be sent
+        self.destroy_subscription(self.__can_tx_subscription)
+
+        self.get_logger().info("CAN_node: sending default messages before shutting down")
+        # clear out all of the messages with default values
+        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+            # Set all of the value to default
+            message.reset()
+            can_packet = TeensyCommunication.encode_can_message(message)
+            if can_packet is not None:
+                self.send_msg(can_packet)
+
+        self.__socket.close()
+        rclpy.shutdown()
+
+    def send_msg(self, msg: Can):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[msg.id].name}): {msg.buf}")
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):
