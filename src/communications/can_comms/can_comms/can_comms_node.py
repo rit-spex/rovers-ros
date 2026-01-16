@@ -5,7 +5,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES, TX_TOPIC_NAME
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
@@ -31,7 +31,7 @@ class CAN(Node):
 
         self.create_subscription(
                 msg_type=Can,
-                topic=f"/CAN/TX",
+                topic=TX_TOPIC_NAME,
                 callback=self.send_msg,
                 qos_profile=10,
             )
@@ -57,23 +57,30 @@ class CAN(Node):
 class JETSON_LISTENER(can.Listener):
     __node: Node
 
-    __publisher: rclpy.publisher.Publisher
+    # Stored as Publishers[message_id]
+    __publishers: dict[int, rclpy.publisher.Publisher]
 
     def __init__(self, node) -> None:
         super().__init__()
         self.__node = node
-        self.__publisher = self.__node.create_publisher(
-            msg_type=Can,
-            topic=f"/CAN/RX",
-            qos_profile=10,
-        )
+
+        # This is for messages coming in
+        for (id, message) in TEENSY_CAN_MESSAGES.items():
+            if(not message.isforJetson):
+                continue
+
+            self.__publishers[id] = self.__node.create_publisher(
+                msg_type=Can,
+                topic=message.topic_name,
+                qos_profile=10
+            )
 
     def on_message_received(self, msg: can.Message) -> None:
         ros_msg = Can(
             id=msg.arbitration_id,
             buf=msg.data,
         )
-        self.__publisher.publish(ros_msg)
+        self.__publishers[msg.arbitration_id].publish(ros_msg)
 
 def main():
     rclpy.init()

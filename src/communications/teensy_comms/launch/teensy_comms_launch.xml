@@ -1,3 +1,0 @@
-<launch>
-	<node pkg="teensy_comms" exec="teensy_comms_node" name="teensy_comms"></node>
-</launch>

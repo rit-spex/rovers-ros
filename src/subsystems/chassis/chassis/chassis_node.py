@@ -1,6 +1,8 @@
 from typing import Any
-from constants.CAN_Constants import SIGNALS_TOPICS
 from constants.CommandCodes import CONSTANTS
+from constants.constants.CAN_structs import Message
+from constants.constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsystems_Names
+from constants.constants.can_encoding import TeensyCommunication
 
 import rclpy
 from rclpy.node import Node
@@ -12,28 +14,25 @@ from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 class Chassis(Node):
     __topic: dict[str, Any]
-    __can_publisher: Publisher
-
+    
     __LY_value: float
     __RY_value: float
 
-    __LY_Publisher: Publisher
-    __RY_Publisher: Publisher
+    __publishers: dict[CAN_MESSAGE_IDS, Publisher]
+
+    __drive_power_can_message: Message
 
     def __init__(self):
         super().__init__("chassis_node")
 
-        self.__LY_Publisher = self.create_publisher(
-            Float32,
-            SIGNALS_TOPICS.Drive_Power_Left.topic_name,
-            10
-        )
-
-        self.__RY_Publisher = self.create_publisher(
-            Float32,
-            SIGNALS_TOPICS.Drive_Power_Right.topic_name,
-            10
-        )
+        self.__publishers = {}
+        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+            if(message.subsystem == Subsystems_Names.CHASSIS):
+                self.__publishers[message_id] = self.create_publisher(
+                    msg_type=Can,
+                    topic=message.topic_name,
+                    qos_profile=10
+                )
 
         self.create_subscription(
             Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, 10
@@ -49,18 +48,23 @@ class Chassis(Node):
         )
 
         self.__LY_value = 0
-        self.__RX_value = 0
+        self.__RY_value = 0
+        self.__drive_power_can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.DRIVE_POWER]
 
     def __LY_callback(self, msg: Float32):
         self.__LY_value = msg.data
-        self.__LY_Publisher.publish(self.__LY_value)
+        self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
+        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
         # self.__send_controller_data()
         # self.get_logger().info(f"LY_callback message: {msg}")
         # self.get_logger().info(f"LY_value is now {self.__LY_value}")
 
     def __RY_callback(self, msg: Float32):
         self.__RY_value = msg.data
-        self.__RY_Publisher.publish(self.__RY_value)
+        self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
+        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)        
         # self.__send_controller_data()
         # self.get_logger().info(f"RY_callback message: {msg}")
         # self.get_logger().info(f"RY_value is now {self.__RY_value}")
@@ -88,10 +92,10 @@ class Chassis(Node):
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping chassis...")
-        self.__LY_value = 0
-        self.__RY_value = 0
-        self.__LY_Publisher.publish(self.__LY_value)
-        self.__RY_Publisher.publish(self.__RY_value)
+        # self.__LY_value = 0
+        # self.__RY_value = 0
+        # self.__LY_Publisher.publish(self.__LY_value)
+        # self.__RY_Publisher.publish(self.__RY_value)
 
         rclpy.shutdown()
 

@@ -1,12 +1,14 @@
 from typing import Any
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES, DATA_TYPES, Signal, Message
+from constants.constants.CAN_constants import TEENSY_CAN_MESSAGES
+from constants.constants.CAN_enums import CAN_MESSAGE_IDS
+from constants.constants.CAN_structs import Message, DATA_TYPE
 from custom_interfaces.msg import Can
 
 #from CAN_constants import CAN_CONSTANTS
-
 class TeensyCommunication:
 
-    def __convert_native_to_int(self, type: DATA_TYPES, value: Any) -> int:
+    @staticmethod
+    def __convert_native_to_int(type: DATA_TYPE, value: Any) -> int:
         """
         Convert a native type to an integer representation.
 
@@ -18,7 +20,8 @@ class TeensyCommunication:
         """
         return int(value)
 
-    def __convert_int_to_native(self, type: DATA_TYPES, value: int) -> Any:
+    @staticmethod
+    def __convert_int_to_native(type: DATA_TYPE, value: int) -> Any:
         """
         Convert an integer representation to a native type.
 
@@ -42,9 +45,8 @@ class TeensyCommunication:
         return value
 
 
-    """Module for encoding and decoding data for Teensy communication."""
-
-    def encode_data(self, CANMessage: Message | None) -> Can | None:
+    @staticmethod
+    def encode_can_message(CANMessage: Message | None) -> Can | None:
         """
         Encode the given data dictionary into bytes for transmission.
 
@@ -111,8 +113,8 @@ class TeensyCommunication:
 
         return result_can
 
-
-    def decode_data(self, CANPacket: Can | None) -> Message | None:
+    @staticmethod
+    def decode_can_packet(CANPacket: Can | None) -> Message | None:
         """
         Decode the given CAN packet into a Message.
 
@@ -128,7 +130,7 @@ class TeensyCommunication:
             return None
 
         # Find what message the can packet is for
-        result_message = TEENSY_CAN_MESSAGES[CANPacket.id]
+        result_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(CANPacket.id)]
 
         # If no matching message for the id is found end parsing
         if result_message is None:
@@ -169,7 +171,7 @@ class TeensyCommunication:
                         byte_index += 1
 
             # convert back to native type
-            signal.value = self.__convert_int_to_native(signal.type, signal_value)
+            signal.set_value(TeensyCommunication.__convert_int_to_native(signal.type, signal_value))
 
         return result_message
 
@@ -177,21 +179,16 @@ class TeensyCommunication:
 if __name__ == "__main__":
     comm = TeensyCommunication()
 
-    # test_data = { # byte 0
-    #                 "ly": 100, # byte 1
-    #                 "ry": 100, # byte 2
-    #                 "A": 2, "B": 1, "X": 2, "Y": 1, # byte 3
-    #                 "LB": 2, "RB": 1, "LT": 2, "RT": 1 # byte 4
-    #         }
+    # test packing routine
+    test_data = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.E_STOP]
 
-    # test invalid data
-    test_data = {}
+    test_data.signals["E_STOP"].set_value(1)
 
-    CANPacket = comm.encode_data(test_data, TEENSY_CAN_MESSAGES[11])
+    CANPacket = comm.encode_can_message(test_data)
 
-    print(f"Encoded Data: {CANPacket}, ID: {TEENSY_CAN_MESSAGES[11].id}")
+    print(f"Encoded Data: {CANPacket}, ID: {test_data.id}")
 
-    CANMessage = comm.decode_data(CANPacket)
+    CANMessage = comm.decode_can_packet(CANPacket)
 
     if(CANMessage is not None):
-        print(f"Decoded Data: {CANMessage}, ID: {CANMessage.id}")
+        print(f"Decoded Data: {CANMessage.toString()}, ID: {CANMessage.id}")

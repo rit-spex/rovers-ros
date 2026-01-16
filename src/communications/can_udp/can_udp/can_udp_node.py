@@ -4,7 +4,7 @@ import rclpy.subscription
 import rclpy.publisher
 
 from custom_interfaces.msg import Can
-from constants.CAN_Constants import TEENSY_CAN_MESSAGES
+from constants.CAN_Constants import TEENSY_CAN_MESSAGES, TX_TOPIC_NAME
 
 import socket as skt
 from socket import socket
@@ -19,7 +19,10 @@ class CAN_UDP(Node):
     __send_port: int
     __socket: socket
     __buffer_size: int
-    __publisher: rclpy.publisher.Publisher
+
+    # Stored as Publishers[message_id]
+    __publishers: dict[int, rclpy.publisher.Publisher]
+
 
     def __init__(self) -> None:
         super().__init__("CAN_udp_node")
@@ -31,17 +34,23 @@ class CAN_UDP(Node):
         self.__buffer_size = 1024
         # can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
+        self.__publishers = {}
+
         # This is for messages coming in
-        self.__publisher = self.create_publisher(
-            msg_type=Can,
-            topic="/CAN/RX",
-            qos_profile=10,
-        )
+        for (id, message) in TEENSY_CAN_MESSAGES.items():
+            if(not message.isforJetson):
+                continue
+
+            self.__publishers[id] = self.create_publisher(
+                msg_type=Can,
+                topic=message.topic_name,
+                qos_profile=10
+            )
 
         # This is for messages going out
         self.create_subscription(
             msg_type=Can,
-            topic="/CAN/TX",
+            topic=TX_TOPIC_NAME,
             callback=self.send_msg,
             qos_profile=10,
         )
