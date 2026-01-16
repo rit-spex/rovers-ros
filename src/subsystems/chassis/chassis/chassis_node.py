@@ -56,39 +56,16 @@ class Chassis(Node):
         self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
         can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
         self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
-        # self.__send_controller_data()
-        # self.get_logger().info(f"LY_callback message: {msg}")
-        # self.get_logger().info(f"LY_value is now {self.__LY_value}")
+        self.get_logger().info(f"LY_callback message: {msg}")
+        self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
     def __RY_callback(self, msg: Float32):
         self.__RY_value = msg.data
         self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
         can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
         self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)        
-        # self.__send_controller_data()
         # self.get_logger().info(f"RY_callback message: {msg}")
-        # self.get_logger().info(f"RY_value is now {self.__RY_value}")
-
-    # def __send_controller_data(self):
-    #     # self.get_logger().info(f"LY: {self.__LY_value}")
-    #     # self.get_logger().info(f"RY: {self.__RY_value}")
-    #     # self.get_logger().info(f"")
-
-    #     ros_msg = Can()
-    #     ros_msg.channel = self.__topic["channel"]
-    #     ros_msg.id = self.__topic["id"]
-    #     ros_msg.buf = [
-    #         int((self.__LY_value * 100) + 100),
-    #         int((self.__RX_value * 100) + 100),
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #     ]
-
-    #     self.__can_publisher.publish(ros_msg)
+        # self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping chassis...")

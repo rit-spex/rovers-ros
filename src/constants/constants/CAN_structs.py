@@ -18,9 +18,10 @@ TX_TOPIC_NAME = "CAN/TX"
 
 # Define wrapper class for data types
 class DATA_TYPE:
-    def __init__(self, num_bits: int, id: int) -> None:
+    def __init__(self, id: int, num_bits: int, pack_format: str) -> None:
         self.__num_bits = num_bits
         self.__id = id
+        self.__pack_format = pack_format
 
     @property
     def id(self) -> int:
@@ -31,7 +32,12 @@ class DATA_TYPE:
     def num_bits(self) -> int:
         """Get the number of bits of the data type."""
         return self.__num_bits
-    
+
+    @property
+    def pack_format(self) -> str:
+        """Get the pack format of the data type."""
+        return self.__pack_format
+
 class Signal:
     """Class representing a signal with a name and type."""
     def __init__(self, type: DATA_TYPE, default_value: Any = 0):

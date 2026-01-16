@@ -8,9 +8,10 @@
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
-from constants.CAN_structs import DATA_TYPE, Signal, Message
 from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection
+from constants.CAN_structs import DATA_TYPE, Signal, Message
 
+# Define subsystem names
 class Subsystems_Names:
     ALL     = "ALL"
     CHASSIS = "CHASSIS"
@@ -18,11 +19,13 @@ class Subsystems_Names:
     SCIENCE = "SCIENCE"
 
 # Define data types for can bus communication
+# See the following for format details
+# https://docs.python.org/3/library/struct.html#struct-alignment
 class DATA_TYPES:
-    UINT_8          = DATA_TYPE(8,  0x00)
-    UINT_16         = DATA_TYPE(16, 0x01)
-    UINT_32         = DATA_TYPE(32, 0x02)
-    FLOAT_32        = DATA_TYPE(32, 0x03)
+    UINT_8          = DATA_TYPE(0x00, 8 , "B")
+    UINT_16         = DATA_TYPE(0x01, 16, "H")
+    UINT_32         = DATA_TYPE(0x02, 32, "I")
+    FLOAT_32        = DATA_TYPE(0x03, 32, "f")
 
 TEENSY_CAN_MESSAGES = {
     CAN_MESSAGE_IDS.E_STOP: Message(
@@ -37,7 +40,7 @@ TEENSY_CAN_MESSAGES = {
     CAN_MESSAGE_IDS.ROS_HEARTBEAT: Message(
         id=CAN_MESSAGE_IDS.ROS_HEARTBEAT,
         subsystem=Subsystems_Names.ALL,
-        name="Ros-Heartbeat",
+        name="Ros_Heartbeat",
         signals={
             "timestamp": Signal(DATA_TYPES.UINT_32, 0)
         },
@@ -45,11 +48,11 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.DRIVE_POWER: Message(
         id=CAN_MESSAGE_IDS.DRIVE_POWER,
-        subsystem=Subsystems_Names.ALL,
+        subsystem=Subsystems_Names.CHASSIS,
         name="Drive_Power",
         signals={
-            "left": Signal(DATA_TYPES.UINT_8, 0),
-            "right": Signal(DATA_TYPES.UINT_8, 0)
+            "left": Signal(DATA_TYPES.FLOAT_32, 0),
+            "right": Signal(DATA_TYPES.FLOAT_32, 0)
         },
         isforJetson=False
     ),

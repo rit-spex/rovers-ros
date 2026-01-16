@@ -29,7 +29,7 @@ class CAN_UDP(Node):
     __publishers: dict[int, rclpy.publisher.Publisher]
 
     # This is needed as a var to shut it down early during E-stop
-    __can_tx_subscription: rclpy.subscription.Subscription
+    __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
 
     def __init__(self) -> None:
         super().__init__("CAN_udp_node")
@@ -42,25 +42,24 @@ class CAN_UDP(Node):
         # can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
         self.__publishers = {}
+        self.__can_tx_subscriptions = {}
 
-        # This is for messages coming in
         for (id, message) in TEENSY_CAN_MESSAGES.items():
-            if(not message.isforJetson):
-                continue
-
-            self.__publishers[id] = self.create_publisher(
+            if(message.isforJetson):
+                # This is for messages coming in
+                self.__publishers[id] = self.create_publisher(
                 msg_type=Can,
                 topic=message.topic_name,
                 qos_profile=10
-            )
-
-        # This is for messages going out
-        self.__can_tx_subscription = self.create_subscription(
-                msg_type=Can,
-                topic=TX_TOPIC_NAME,
-                callback=self.send_msg,
-                qos_profile=10,
-            )
+                )
+            else:
+                # This is for messages going out
+                self.__can_tx_subscriptions[id] = self.create_subscription(
+                        msg_type=Can,
+                        topic=message.topic_name,
+                        callback=self.send_msg,
+                        qos_profile=10,
+                    )
         
         self.create_subscription(
             msg_type=Bool,
@@ -75,7 +74,8 @@ class CAN_UDP(Node):
         self.get_logger().info("E-STOP received, shutting down can_comms_node")
 
         # First turn off the subscription so no new messages can be sent
-        self.destroy_subscription(self.__can_tx_subscription)
+        for subscription in self.__can_tx_subscriptions.values():
+            self.destroy_subscription(subscription)
 
         self.get_logger().info("CAN_node: sending default messages before shutting down")
         # clear out all of the messages with default values
