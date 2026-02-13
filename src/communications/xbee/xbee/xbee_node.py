@@ -20,9 +20,7 @@ class Xbee(Node):
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(
-            UInt8MultiArray, "BASESTATION/MESSAGES", 10
-        )
+        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
 
     def read_data(self) -> list[int] | None:
         message = None

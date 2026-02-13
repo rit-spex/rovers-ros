@@ -1,4 +1,6 @@
 from constants.CAN_Constants import CHANNEL, TOPICS, TOPIC_RANGES
+from constants.CommandCodes import CONSTANTS
+
 from numpy import uint8
 import rclpy
 from rclpy.node import Node
@@ -29,19 +31,26 @@ class Arm(Node):
         for i in range(TOPIC_RANGES[CHANNEL.ARM_BOARD][0], TOPIC_RANGES[CHANNEL.ARM_BOARD][1]): # change based on amount of IDs filled out
             self.__publishers.append(self.create_publisher(Can, f"/CAN/TX/{TOPICS[i]['name']}", 10))
 
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/L", self.__base_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/R", self.__base_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CU", self.__shoulder_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CL", self.__shoulder_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CR", self.__elbow_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/CD", self.__elbow_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DD", self.__bend_wrist_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DU", self.__bend_wrist_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DL", self.__twist_wrist_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/DR", self.__twist_wrist_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/B", self.__gripper_forward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/A", self.__gripper_backward_callback, 10)
-        self.create_subscription(Bool, "/Xbee/RX/N64/Buttons/Z", self.__solenoid_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.R_STR       , self.__base_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_UP_STR    , self.__shoulder_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_DOWN_STR  , self.__shoulder_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_RIGHT_STR , self.__elbow_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_LEFT_STR  , self.__elbow_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_DOWN_STR , self.__bend_wrist_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_UP_STR   , self.__bend_wrist_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_LEFT_STR , self.__twist_wrist_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_RIGHT_STR, self.__twist_wrist_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.B_STR       , self.__gripper_forward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.A_STR       , self.__gripper_backward_callback, 10)
+        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.Z_STR       , self.__solenoid_callback, 10)
+
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/ESTOP",
+            callback=self.__on_estop_received,
+            qos_profile=10,
+        )
 
         self.__base_forward = 0
         self.__base_backward = 0
@@ -156,6 +165,33 @@ class Arm(Node):
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
         self.__publishers[ID - 10].publish(ros_msg)
+
+    def __on_estop_received(self, msg: Bool):
+        self.get_logger().info("E-STOP received, stopping arm...")
+        self.__base_forward = 0
+        self.__base_backward = 0
+        self.__shoulder_forward = 0
+        self.__shoulder_backward = 0
+        self.__elbow_forward = 0
+        self.__elbow_backward = 0
+        self.__bend_wrist_forward = 0
+        self.__bend_wrist_backward = 0
+        self.__twist_wrist_forward = 0
+        self.__twist_wrist_backward = 0
+        self.__gripper_forward = 0
+        self.__gripper_backward = 0
+        self.__solenoid = 0
+
+        self.__send_controller_data(11)
+        self.__send_controller_data(12)
+        self.__send_controller_data(13)
+        self.__send_controller_data(14)
+        self.__send_controller_data(15)
+        self.__send_controller_data(16)
+        self.__send_controller_data(17)
+
+        rclpy.shutdown()
+
 
     def run(self):
         self.get_logger().info("starting arm...")

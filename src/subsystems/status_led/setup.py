@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'main'
+package_name = 'status_led'
 
 setup(
     name=package_name,
@@ -10,8 +10,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name, ['launch/' + package_name + '_launch.xml']),
-        ('share/' + package_name, ['launch/simulation_launch.xml'])
+        ('share/' + package_name, ['launch/' + package_name + '_launch.xml'])
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -21,7 +20,8 @@ setup(
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
-        'console_scripts': ["master_node = main.master_node:main"
+        'console_scripts': [
+            'status_led_node = status_led.status_led_node:main'
         ],
     },
 )
