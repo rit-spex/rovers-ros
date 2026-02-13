@@ -9,8 +9,8 @@ def generate_launch_description():
             name='auto_node'
         ),
         Node(
-            package='usb_cam',
-            executable='usb_cam_node_exe',
+            package='cameras',
+            executable='cameras',
             name='camera_node'
         ),
         Node(
