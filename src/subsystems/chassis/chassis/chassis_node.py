@@ -15,7 +15,9 @@ class Chassis(Node):
     __can_publisher: Publisher
 
     __LY_value: float
-    __RX_value: float
+    __RY_value: float
+    # 0-manual  1-object_detection  2-arcu_tracking  3-GPS  4-ARM_keyboard
+    __operation_type = 0
 
     def __init__(self):
         super().__init__("chassis_node")
@@ -27,12 +29,34 @@ class Chassis(Node):
             qos_profile=10,
         )
 
+        # From controller (manual driving)
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_manual_callback, 10
         )
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_manual_callback, 10
         )
+
+        # From Object Detection
+        self.create_subscription(
+            Float32, "/object_detection/OD_LY", self.__OD_LY_callback, 10
+        )
+        self.create_subscription(
+            Float32, "/object_detection/OD_RY", self.__OD_RY_callback, 10
+        )
+
+        # From Arcu Detection
+        self.create_subscription(
+            Float32, "/object_detection/AR_LY", self.__AR_LY_callback, 10
+        )
+        self.create_subscription(
+            Float32, "/object_detection/AR_RY", self.__AR_RY_callback, 10
+        )
+
+        self.create_subscription(
+            Int8, "/BASESTATION/XBOX/ROBOT_MODE", self.__operation_type_callback, 10
+        )
+
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -41,19 +65,44 @@ class Chassis(Node):
         )
 
         self.__LY_value = 0
-        self.__RX_value = 0
+        self.__RY_value = 0
 
-    def __LY_callback(self, msg: Float32):
-        self.__LY_value = msg.data
-        self.__send_controller_data()
-        # self.get_logger().info(f"LY_callback message: {msg}")
-        # self.get_logger().info(f"LY_value is now {self.__LY_value}")
+    def __operation_type_callback(self, msg: Int8):
+        self.__operation_type = msg.data
 
-    def __RY_callback(self, msg: Float32):
-        self.__RX_value = msg.data
-        self.__send_controller_data()
-        # self.get_logger().info(f"RX_callback message: {msg}")
-        # self.get_logger().info(f"RX_value is now {self.__RX_value}")
+    def __LY_manual_callback(self, msg: Float32):
+        if self.__operation_type == 0:
+            self.__LY_value = msg.data
+            self.__send_controller_data()
+            # self.get_logger().info(f"LY_callback message: {msg}")
+            # self.get_logger().info(f"LY_value is now {self.__LY_value}")
+
+    def __RY_manual_callback(self, msg: Float32):
+        if self.__operation_type == 0:
+            self.__RY_value = msg.data
+            self.__send_controller_data()
+            # self.get_logger().info(f"RX_callback message: {msg}")
+            # self.get_logger().info(f"RX_value is now {self.__RX_value}")
+
+    def __OD_LY_callback(self, msg: Float32):
+        if self.__operation_type == 1:
+            self.__LY_value = msg.data
+            self.__send_controller_data()
+
+    def __OD_RY_callback(self, msg: Float32):
+        if self.__operation_type == 1:
+            self.__RY_value = msg.data
+            self.__send_controller_data()
+
+    def __AR_LY_callback(self, msg: Float32):
+        if self.__operation_type == 2:
+            self.__LY_value = msg.data
+            self.__send_controller_data()
+
+    def __AR_RY_callback(self, msg: Float32):
+        if self.__operation_type == 2:
+            self.__RY_value = msg.data
+            self.__send_controller_data()  
 
     def __send_controller_data(self):
         # self.get_logger().info(f"LY: {self.__LY_value}")
@@ -65,7 +114,7 @@ class Chassis(Node):
         ros_msg.id = self.__topic["id"]
         ros_msg.buf = [
             int((self.__LY_value * 100) + 100),
-            int((self.__RX_value * 100) + 100),
+            int((self.__RY_value * 100) + 100),
             0,
             0,
             0,
