@@ -80,7 +80,10 @@ class BaseStationCommunication:
                             CONSTANTS.XBOX.BUTTON.LEFT_BUMPER_STR:  Signal(CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL, False), # bit 0-1
                             CONSTANTS.XBOX.BUTTON.RIGHT_BUMPER_STR: Signal(CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL, False), # bit 2-3
                             CONSTANTS.XBOX.TRIGGER.AXIS_LT_STR:     Signal(CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL, False), # bit 4-5
-                            CONSTANTS.XBOX.TRIGGER.AXIS_RT_STR:     Signal(CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL, False)} # bit 6-7
+                            CONSTANTS.XBOX.TRIGGER.AXIS_RT_STR:     Signal(CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL, False), # bit 6-7
+
+                            # byte 5
+                            CONSTANTS.XBOX.MODES.CONTROL_MODE_STR:  Signal(CONSTANTS.COMPACT_MESSAGES.UINT_8, 100)} # bits 0-7
             },
             CONSTANTS.COMPACT_MESSAGES.QUIT_ID: { # byte 0
                 "name": CONSTANTS.QUIT.NAME,

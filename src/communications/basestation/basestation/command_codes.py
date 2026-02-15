@@ -160,6 +160,24 @@ class CONSTANTS:
             HOME         = 8
             HOME_STR     = "HOME"
 
+            
+        class MODES:
+            CONTROL_MODE = 100
+            CONTROL_MODE_STR = "CONTROL_MODE"
+
+            CONTROL_MODE_MEANING = ["MANUAL_MODE", "GPS_MODE", "ARCUO_MODE", "OBJDECT_MODE", "KEYB_MODE"]
+
+            MANUAL_MODE  = 101
+            MANUAL_MODE_STR = "MANUAL_MODE"
+            GPS_MODE     = 102
+            GPS_MODE_STR = "GPS_MODE"
+            ARCUO_MODE   = 103
+            ARCUO_MODE_STR = "ARCUO_MODE"
+            OBJDECT_MODE = 104
+            OBJDECT_MODE_STR = "OBJDECT_MODE"
+            KEYB_MODE    = 105
+            KEYB_MODE_STR = "KEYB_MODE"
+
         class JOYPAD:
             UP = (0, 1)
             DOWN = (0, -1)
