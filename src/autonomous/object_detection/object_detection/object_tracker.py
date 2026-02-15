@@ -12,7 +12,6 @@ class YOLOTracker(Node):
 
         # --- PARAMETERS ---
         # Replace 'yolo26n.pt' with the absolute path to your model if needed
-        # e.g., "/home/robot/ros2_ws/src/my_pkg/models/yolo26n.pt"
         self.declare_parameter('model_path', '/home/spex-rover/SPEX/rovers-ros/src/autonomous/object_detection/object_detection/last.pt') 
         self.declare_parameter('camera_topic', '/cameras/rover_cam_topic')
         self.declare_parameter('conf_threshold', 0.5)
