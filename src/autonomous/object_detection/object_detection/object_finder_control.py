@@ -49,8 +49,8 @@ class ObjectSearchAndFollow(Node):
         )
 
         # --- PUBLISHERS ---
-        self.velPubRight = self.create_publisher(Float32, "/auto/Axis/RY", 10)
-        self.velPubLeft = self.create_publisher(Float32, "/auto/Axis/LY", 10)
+        self.velPubRight = self.create_publisher(Float32, "/object_detection/OD_RY", 10)
+        self.velPubLeft = self.create_publisher(Float32, "/object_detection/OD_LY", 10)
 
         # --- MAIN CONTROL LOOP ---
         # Run at 20Hz (0.05s)
