@@ -12,16 +12,6 @@ find_package(ament_cmake REQUIRED)
 # find_package(<dependency> REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-set(msg_files
-    "msg/Can.msg"
-    "msg/CanFD.msg"
-    "msg/UDPPacket.msg"
-)
-rosidl_generate_interfaces(${PROJECT_NAME}
-  ${msg_files}
-)
-ament_export_dependencies(rosidl_default_runtime)
-
 # add_executable(custom_interfaces src/custom_interfaces.cpp)
 # target_include_directories(custom_interfaces PUBLIC
 #   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -42,5 +32,18 @@ if(BUILD_TESTING)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
+
+# set(PYTHON_LIBRARY "/usr/lib/x86_64-linux-gnu")
+# set(PYTHON_DEBUG_LIBRARY "/usr/lib/x86_64-linux-gnu")
+# set(PYTHON_INCLUDE_DIR "/usr/include/python3.10")
+
+set(msg_files
+"msg/Can.msg"
+"msg/CanFD.msg"
+"msg/UDPPacket.msg"
+)
+rosidl_generate_interfaces(${PROJECT_NAME}
+  ${msg_files}
+)
 
 ament_package()
