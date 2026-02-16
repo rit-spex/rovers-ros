@@ -26,7 +26,8 @@ setup(
         'console_scripts': [
         'object_detection_node = object_detection.object_finder_control:main',
         'object_tracker_node = object_detection.object_tracker:main',
-        'arcu_tracker_node = object_detection.arcu_tracker:main'
+        'arcu_tracker_node = object_detection.arcu_tracker:main',
+        'aruco_pathfinding_node = object_detection.aruco_pathfinding:main'
         ], 
     },
 )

@@ -105,8 +105,8 @@ class Chassis(Node):
             self.__send_controller_data()  
 
     def __send_controller_data(self):
-        self.get_logger().info(f"LY: {self.__LY_value}")
-        self.get_logger().info(f"RY: {self.__RY_value}")
+        #self.get_logger().info(f"LY: {self.__LY_value}")
+        #self.get_logger().info(f"RY: {self.__RY_value}")
         # self.get_logger().info(f"")
 
         ros_msg = Can()

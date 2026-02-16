@@ -5,6 +5,7 @@ from std_msgs.msg import Float32MultiArray, UInt8
 from cv_bridge import CvBridge
 import cv2
 from ultralytics.models import YOLO
+import os
 
 class YOLOTracker(Node):
     def __init__(self):
@@ -24,13 +25,17 @@ class YOLOTracker(Node):
         self.conf_thres = self.get_parameter('conf_threshold').get_parameter_value().double_value
         self.target_class = self.get_parameter('target_class_id').get_parameter_value().integer_value
 
-        # --- LOAD MODEL ---
-        self.get_logger().info(f"Loading YOLO model from: {model_path}...")
-        try:
+        engine_path = os.path.splitext(model_path)[0] + '.engine'
+
+        # 3. Check and Load
+        if os.path.exists(engine_path):
+            print(f"Found TensorRT engine! Loading optimized model: {engine_path}")
+            self.model = YOLO(engine_path)
+            # Note: When loading an engine, you usually don't need to specify device=0
+            # because the engine is already "baked" for the GPU it was built on.
+        else:
+            print(f"Engine not found. Falling back to PyTorch model")
             self.model = YOLO(model_path)
-        except Exception as e:
-            self.get_logger().error(f"Failed to load model: {e}")
-            raise e
 
         # --- ROS SETUP ---
         self.bridge = CvBridge()

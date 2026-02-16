@@ -55,7 +55,7 @@ class ArucoTracker(Node):
         self.update_interval = 1.35
         self.last_update_time = time.time()
         self.display_distance = 0.00
-        self.control_mode = 2
+        self.control_mode = 0
 
         # --- ROS SETUP ---
         self.bridge = CvBridge()
