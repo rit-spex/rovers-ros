@@ -7,7 +7,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
+from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16, UInt8
 
 
 class Chassis(Node):
@@ -54,7 +54,7 @@ class Chassis(Node):
         )
 
         self.create_subscription(
-            Int8, "/BASESTATION/XBOX/ROBOT_MODE", self.__operation_type_callback, 10
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE", self.__operation_type_callback, 10
         )
 
         self.create_subscription(
@@ -67,7 +67,7 @@ class Chassis(Node):
         self.__LY_value = 0
         self.__RY_value = 0
 
-    def __operation_type_callback(self, msg: Int8):
+    def __operation_type_callback(self, msg: UInt8):
         self.__operation_type = msg.data
 
     def __LY_manual_callback(self, msg: Float32):
@@ -105,8 +105,8 @@ class Chassis(Node):
             self.__send_controller_data()  
 
     def __send_controller_data(self):
-        # self.get_logger().info(f"LY: {self.__LY_value}")
-        # self.get_logger().info(f"RX: {self.__RX_value}")
+        self.get_logger().info(f"LY: {self.__LY_value}")
+        self.get_logger().info(f"RY: {self.__RY_value}")
         # self.get_logger().info(f"")
 
         ros_msg = Can()

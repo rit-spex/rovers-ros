@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, UInt8
 from cv_bridge import CvBridge
 import cv2
 from ultralytics.models import YOLO
@@ -9,6 +9,8 @@ from ultralytics.models import YOLO
 class YOLOTracker(Node):
     def __init__(self):
         super().__init__('object_tracker')
+
+        self.control_mode = 0
 
         # --- PARAMETERS ---
         # Replace 'yolo26n.pt' with the absolute path to your model if needed
@@ -41,16 +43,23 @@ class YOLOTracker(Node):
             10
         )
 
+        self.create_subscription(
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE", self.control_mode_callback, 10
+        )
+
         # Publisher: Data for Control Node
         # Format: [x1, y1, x2, y2, confidence, class_id, track_id]
         self.pub_bbox = self.create_publisher(Float32MultiArray, '/object_detection/bbox', 10)
 
         # Publisher: Debug Image (Annotated)
-        self.pub_debug = self.create_publisher(Image, '/object_detection/debug_image', 10)
+        self.pub_debug = self.create_publisher(Image, '/object_detection/tracking_out', 10)
 
         self.get_logger().info("YOLO Tracker Node Initialized.")
 
     def image_callback(self, msg):
+        if not (self.control_mode == 1):
+            return
+
         # 1. Convert ROS Image to OpenCV
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -120,6 +129,9 @@ class YOLOTracker(Node):
         annotated_frame = results[0].plot()
         debug_msg = self.bridge.cv2_to_imgmsg(annotated_frame, encoding="bgr8")
         self.pub_debug.publish(debug_msg)
+
+    def control_mode_callback(self, msg: UInt8):
+        self.control_mode = msg.data
 
 def main(args=None):
     rclpy.init(args=args)
