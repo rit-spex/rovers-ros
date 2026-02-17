@@ -1,10 +1,24 @@
 import math
 import time
+import rclpy
 import pygame
-from inverse_kinematics.inverse_kinematics.linearAlgebra import calcJointPositions, collisionProtection, homingStep, inverseKinematics, jointLimits
-from inverse_kinematics.inverse_kinematics.mathHelpers import wrap_to_pi
-from inverse_kinematics.inverse_kinematics.pygameGraphics import draw_arm, drawGUI, initPygame
-from inverse_kinematics.inverse_kinematics.spaceMouse import read_spacemouse, setup_spacemouse
+from inverse_kinematics.inverse_kinematics.linear_algebra import (
+    calc_joint_positions,
+    collision_protection,
+    homingStep,
+    inverse_kinematics,
+    joint_limits,
+)
+from inverse_kinematics.inverse_kinematics.math_helpers import wrap_to_pi
+from inverse_kinematics.inverse_kinematics.pygame_graphics import (
+    draw_arm,
+    draw_GUI,
+    init_pygame,
+)
+from inverse_kinematics.inverse_kinematics.space_mouse import (
+    read_spacemouse,
+    setup_spacemouse,
+)
 
 # Typing
 from rclpy import Node
@@ -15,7 +29,24 @@ from pygame.font import Font
 from numpy import dtype, ndarray
 
 
-class InverseKinematicsArmController(Node):
+"""
+Controls
+- No Buttons (Position Drive)
+    - Tx : Translation of wrist along x-axis
+    - Ty : Translation of wrist along y-axis
+    - Tz : Translation of wrist along z-axis
+    - Rx : Rotation of the gripper along the wrist axis
+    - Rz : Rotation of the gripper along the lead-screw axis
+- Left Button
+    - Homing Function : Drives the arm to point straight up
+- Right Button (Joint Drive)
+    - Rx : Rotation of the elbow
+    - Ry : Rotation of the shoulder
+    - Rz : Rotation of the base
+"""
+
+
+class inverse_kinematicsArmController(Node):
     # Arm initial parameters
     __initial_angles: list[float]
     __iAs: list[float]
@@ -58,9 +89,11 @@ class InverseKinematicsArmController(Node):
 
     def __init__(self):
         # Arm initial parameters
-        self.__initial_angles = [math.pi, math.pi/2, -math.pi/2, 0.0, 0.0]
+        self.__initial_angles = [math.pi, math.pi / 2, -math.pi / 2, 0.0, 0.0]
         self.__iAs = self.__initial_angles
-        self.__j0, self.__j1, self.__j2, self.__j3 = calcJointPositions(self.__iAs[0], self.__iAs[1], self.__iAs[2], self.__iAs[3], False)
+        self.__j0, self.__j1, self.__j2, self.__j3 = calc_joint_positions(
+            self.__iAs[0], self.__iAs[1], self.__iAs[2], self.__iAs[3], False
+        )
         self.__th0, self.__th1, self.__th2, self.__th3, __th4 = self.__initial_angles
 
         # General parameters
@@ -85,18 +118,28 @@ class InverseKinematicsArmController(Node):
         self.__start_time = time.time()
 
         # Initialize Pygame
-        self.__screen, self.__clock, self.__font, self.__static_surface = initPygame()
-
-        self.run()
+        self.__screen, self.__clock, self.__font, self.__static_surface = init_pygame()
 
     def run(self):
         self.__screen.fill(self.__col_green)
         self.__screen.blit(self.__static_surface, (0, 0))
         draw_arm(self.__screen, self.__j0, self.__j1, self.__j2, self.__j3)
-        drawGUI(self.__screen, self.__font, self.__point, self.__th0, self.__th1, self.__th2, self.__th3, self.__th4, self.__homing, self.__buttonz, self.__static_surface)
+        draw_GUI(
+            self.__screen,
+            self.__font,
+            self.__point,
+            self.__th0,
+            self.__th1,
+            self.__th2,
+            self.__th3,
+            self.__th4,
+            self.__homing,
+            self.__buttonz,
+            self.__static_surface,
+        )
         pygame.display.flip()
 
-        while (self.__running):
+        while self.__running:
             # Update pygame
             self.__clock.tick(self.__fps)
             for e in pygame.event.get():
@@ -105,30 +148,56 @@ class InverseKinematicsArmController(Node):
 
             # Read mouse data
             read_spacemouse(self.__device, self.__state)
-            if int(self.__state['buttons']) == 1:
+            if int(self.__state["buttons"]) == 1:
                 self.__homing = True
-            if int(self.__state['buttons']) == 2:
-                self.__buttonz[1] = not(self.__buttonz[1])
+            if int(self.__state["buttons"]) == 2:
+                self.__buttonz[1] = not (self.__buttonz[1])
 
             # Check if anything is going on
             if (not all(v == 0 for v in self.__state.values())) or self.__homing:
                 # Okay well what is going on
                 if self.__homing:
-                    self.__homing, self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = homingStep(self.__homing, self.__th0, self.__th1, self.__th2, self.__th3, self.__th4)
+                    (
+                        self.__homing,
+                        self.__th0,
+                        self.__th1,
+                        self.__th2,
+                        self.__th3,
+                        self.__th4,
+                    ) = homingStep(
+                        self.__homing,
+                        self.__th0,
+                        self.__th1,
+                        self.__th2,
+                        self.__th3,
+                        self.__th4,
+                    )
                     if self.__homing:
                         self.__screen.fill(self.__col_blue)
                     else:
                         self.__screen.fill(self.__col_green)
                 elif self.__buttonz[1]:
                     self.__screen.fill(self.__col_green)
-                    self.__th2 = wrap_to_pi(self.__th2 + self.__state['rx'] * self.__rotate_sens)
-                    _,_,_, self.__point = calcJointPositions(self.__th0, self.__th1, self.__th2, self.__th3, False)
+                    self.__th2 = wrap_to_pi(
+                        self.__th2 + self.__state["rx"] * self.__rotate_sens
+                    )
+                    _, _, _, self.__point = calc_joint_positions(
+                        self.__th0, self.__th1, self.__th2, self.__th3, False
+                    )
 
-                    self.__th1 = wrap_to_pi(self.__th1 + self.__state['ry'] * self.__rotate_sens)
-                    _,_,_, self.__point = calcJointPositions(self.__th0, self.__th1, self.__th2, self.__th3, False)
+                    self.__th1 = wrap_to_pi(
+                        self.__th1 + self.__state["ry"] * self.__rotate_sens
+                    )
+                    _, _, _, self.__point = calc_joint_positions(
+                        self.__th0, self.__th1, self.__th2, self.__th3, False
+                    )
 
-                    self.__th0 = wrap_to_pi(self.__th0 - self.__state['rz'] * self.__rotate_sens)
-                    _,_,_, self.__point = calcJointPositions(self.__th0, self.__th1, self.__th2, self.__th3, False)
+                    self.__th0 = wrap_to_pi(
+                        self.__th0 - self.__state["rz"] * self.__rotate_sens
+                    )
+                    _, _, _, self.__point = calc_joint_positions(
+                        self.__th0, self.__th1, self.__th2, self.__th3, False
+                    )
                 else:
                     # Move point inside cube
                     self.__point[0] += self.__state["x"] * self.__trans_sens
@@ -136,13 +205,17 @@ class InverseKinematicsArmController(Node):
                     self.__point[2] += self.__state["z"] * self.__trans_sens
 
                     # x rotates the gripper
-                    self.__th3 += self.__state['rx'] * self.__rotate_sens
+                    self.__th3 += self.__state["rx"] * self.__rotate_sens
                     # z spins the gripper
-                    self.__th4 += self.__state['rz'] * self.__rotate_sens
+                    self.__th4 += self.__state["rz"] * self.__rotate_sens
 
                     # Compute arm joints
                     try:
-                        self.__th0, self.__th1, self.__th2, _ = inverseKinematics(self.__point, [self.__th0, self.__th1, self.__th2, self.__th3], self.__th4)
+                        self.__th0, self.__th1, self.__th2, _ = inverse_kinematics(
+                            self.__point,
+                            [self.__th0, self.__th1, self.__th2, self.__th3],
+                            self.__th4,
+                        )
 
                         self.__screen.fill(self.__col_green)
                     except Exception as e:
@@ -155,18 +228,61 @@ class InverseKinematicsArmController(Node):
 
                 # Update stuff
                 if self.__buttonz[1]:
-                    self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = jointLimits(self.__th0, self.__th1, self.__th2, self.__th3, self.__th4, False)
+                    self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = (
+                        joint_limits(
+                            self.__th0,
+                            self.__th1,
+                            self.__th2,
+                            self.__th3,
+                            self.__th4,
+                            False,
+                        )
+                    )
                 else:
-                    self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = jointLimits(self.__th0, self.__th1, self.__th2, self.__th3, self.__th4, True)
+                    self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = (
+                        joint_limits(
+                            self.__th0,
+                            self.__th1,
+                            self.__th2,
+                            self.__th3,
+                            self.__th4,
+                            True,
+                        )
+                    )
 
-                self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = collisionProtection(self.__th0, self.__th1, self.__th2, self.__th3, self.__th4)
-                _, _, l2, _ = calcJointPositions(self.__th0, self.__th1, self.__th2, self.__th3)
+                self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = (
+                    collision_protection(
+                        self.__th0, self.__th1, self.__th2, self.__th3, self.__th4
+                    )
+                )
+                _, _, l2, _ = calc_joint_positions(
+                    self.__th0, self.__th1, self.__th2, self.__th3
+                )
                 self.__point = l2
 
                 # Draw
-                drawGUI(self.__screen, self.__font, self.__point, self.__th0, self.__th1, self.__th2, self.__th3, self.__th4, self.__homing, self.__buttonz, self.__static_surface)
-                print(f"{time.time()-self.__start_time:10.4f}\t\t{self.__th0*57.3:10.4f}\t\t{self.__th1*57.3:10.4f}\t\t{self.__th2*57.3:10.4f}\t\t{self.__th3*57.3:10.4f}")
+                draw_GUI(
+                    self.__screen,
+                    self.__font,
+                    self.__point,
+                    self.__th0,
+                    self.__th1,
+                    self.__th2,
+                    self.__th3,
+                    self.__th4,
+                    self.__homing,
+                    self.__buttonz,
+                    self.__static_surface,
+                )
+                print(
+                    f"{time.time()-self.__start_time:10.4f}\t\t{self.__th0*57.3:10.4f}\t\t{self.__th1*57.3:10.4f}\t\t{self.__th2*57.3:10.4f}\t\t{self.__th3*57.3:10.4f}"
+                )
                 pygame.display.flip()
 
         pygame.quit()
         self.__device.close()
+
+
+if __name__ == "__main__":
+    arm_controller = inverse_kinematicsArmController()
+    arm_controller.run()

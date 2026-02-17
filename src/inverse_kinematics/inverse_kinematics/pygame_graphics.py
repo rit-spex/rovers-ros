@@ -1,14 +1,15 @@
 import pygame
 import numpy as np
-from linearAlgebra import calcJointPositions
-
+from inverse_kinematics.inverse_kinematics.linear_algebra import calc_joint_positions
 
 
 def compute_camera_basis():
     C = np.array(CAM_POS)
     L = np.array(LOOK_AT)
-    F = (L - C); F /= np.linalg.norm(F)
-    R = np.cross(F, [0,1,0]); R /= np.linalg.norm(R)
+    F = L - C
+    F /= np.linalg.norm(F)
+    R = np.cross(F, [0, 1, 0])
+    R /= np.linalg.norm(R)
     U = np.cross(R, F)
     return C, R, U, F
 
@@ -65,20 +66,29 @@ def draw_cube(cube_size, screen):
     # Cube corners
     corners = [
         [-half, -half, -half],  # 0
-        [ half, -half, -half],  # 1
-        [ half,  half, -half],  # 2
-        [-half,  half, -half],  # 3
-        [-half, -half,  half],  # 4
-        [ half, -half,  half],  # 5
-        [ half,  half,  half],  # 6
-        [-half,  half,  half],  # 7
+        [half, -half, -half],  # 1
+        [half, half, -half],  # 2
+        [-half, half, -half],  # 3
+        [-half, -half, half],  # 4
+        [half, -half, half],  # 5
+        [half, half, half],  # 6
+        [-half, half, half],  # 7
     ]
 
     # Cube edges
     edges = [
-        (0,1),(1,2),(2,3),(3,0),
-        (4,5),(5,6),(6,7),(7,4),
-        (0,4),(1,5),(2,6),(3,7)
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ]
 
     # Projected corners
@@ -98,42 +108,42 @@ def draw_cube(cube_size, screen):
 
         # XY faces (z = constant)
         for z in [-half, half]:
-            for x in range(subdivisions+1):
+            for x in range(subdivisions + 1):
                 x_pos = -half + x * step
                 p1 = project_3d(x_pos, -half, z)
                 p2 = project_3d(x_pos, half, z)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
-            for y in range(subdivisions+1):
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
+            for y in range(subdivisions + 1):
                 y_pos = -half + y * step
                 p1 = project_3d(-half, y_pos, z)
                 p2 = project_3d(half, y_pos, z)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
 
         # XZ faces (y = constant)
         for y in [-half, half]:
-            for x in range(subdivisions+1):
+            for x in range(subdivisions + 1):
                 x_pos = -half + x * step
                 p1 = project_3d(x_pos, y, -half)
                 p2 = project_3d(x_pos, y, half)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
-            for z_pos_index in range(subdivisions+1):
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
+            for z_pos_index in range(subdivisions + 1):
                 z_pos = -half + z_pos_index * step
                 p1 = project_3d(-half, y, z_pos)
                 p2 = project_3d(half, y, z_pos)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
 
         # YZ faces (x = constant)
         for x in [-half, half]:
-            for y in range(subdivisions+1):
+            for y in range(subdivisions + 1):
                 y_pos = -half + y * step
                 p1 = project_3d(x, y_pos, -half)
                 p2 = project_3d(x, y_pos, half)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
-            for z_pos_index in range(subdivisions+1):
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
+            for z_pos_index in range(subdivisions + 1):
                 z_pos = -half + z_pos_index * step
                 p1 = project_3d(x, -half, z_pos)
                 p2 = project_3d(x, half, z_pos)
-                pygame.draw.line(screen, (120,120,120), p1[:2], p2[:2], 1)
+                pygame.draw.line(screen, (120, 120, 120), p1[:2], p2[:2], 1)
 
     # ================== Main axes from -corner ==================
     origin = [-half, -half, -half]
@@ -166,17 +176,32 @@ def draw_link(screen, p0, p1, color, width=3):
 def draw_chassis(screen):
     # ---------- Chassis ----------
     x0, y0, z0 = -6.7, -8.5, -6
-    x1, y1, z1 =  6.7,  8.5,  0
+    x1, y1, z1 = 6.7, 8.5, 0
 
     corners = [
-        [x0,y0,z0], [x1,y0,z0], [x1,y1,z0], [x0,y1,z0],
-        [x0,y0,z1], [x1,y0,z1], [x1,y1,z1], [x0,y1,z1]
+        [x0, y0, z0],
+        [x1, y0, z0],
+        [x1, y1, z0],
+        [x0, y1, z0],
+        [x0, y0, z1],
+        [x1, y0, z1],
+        [x1, y1, z1],
+        [x0, y1, z1],
     ]
 
     edges = [
-        (0,1),(1,2),(2,3),(3,0),
-        (4,5),(5,6),(6,7),(7,4),
-        (0,4),(1,5),(2,6),(3,7)
+        (0, 1),
+        (1, 2),
+        (2, 3),
+        (3, 0),
+        (4, 5),
+        (5, 6),
+        (6, 7),
+        (7, 4),
+        (0, 4),
+        (1, 5),
+        (2, 6),
+        (3, 7),
     ]
 
     proj = [project_3d(*c) for c in corners]
@@ -184,17 +209,19 @@ def draw_chassis(screen):
         pygame.draw.line(screen, (100, 100, 200), proj[i][:2], proj[j][:2], 2)
 
     pygame.draw.line(
-        screen, (100,100,200),
-        project_3d(x0,y0,z0)[:2],
-        project_3d(x0,y0,z1+36)[:2],
-        2
+        screen,
+        (100, 100, 200),
+        project_3d(x0, y0, z0)[:2],
+        project_3d(x0, y0, z1 + 36)[:2],
+        2,
     )
 
     pygame.draw.line(
-        screen, (100,100,200),
-        project_3d(x1,y0,z0)[:2],
-        project_3d(x1,y0,z1+24)[:2],
-        2
+        screen,
+        (100, 100, 200),
+        project_3d(x1, y0, z0)[:2],
+        project_3d(x1, y0, z1 + 24)[:2],
+        2,
     )
 
 
@@ -208,12 +235,11 @@ def draw_arm(screen, l0, l1, l2, l3):
 
     # ---------- Helper ----------
 
-
     # ---------- Arm ----------
     draw_link(screen, l0, l1, (200, 200, 200), 3)
-    draw_link(screen, l0+[0,0,2], l1+[0,0,2], (200, 200, 200), 3)
+    draw_link(screen, l0 + [0, 0, 2], l1 + [0, 0, 2], (200, 200, 200), 3)
     draw_link(screen, l1, l2, (200, 150, 150), 3)
-    draw_link(screen, l1+[0,0,2], l2+[0,0,2], (200, 150, 150), 3)
+    draw_link(screen, l1 + [0, 0, 2], l2 + [0, 0, 2], (200, 150, 150), 3)
     draw_link(screen, l2, l3, (255, 80, 80), 3)
 
     # ---------- Motors ----------
@@ -230,7 +256,9 @@ def draw_arm(screen, l0, l1, l2, l3):
             pygame.draw.line(screen, (0, 0, 0), p0[:2], p1[:2], 2)
 
 
-def drawGUI(screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, static_surface):
+def draw_GUI(
+    screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, static_surface
+):
     """
     Draws the robot arm, the point, and GUI info onto the Pygame screen.
 
@@ -242,7 +270,7 @@ def drawGUI(screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, stati
     buttonz: list of button states
     static_surface: pre-rendered background surface
     """
-    l0, l1, l2, l3 = calcJointPositions(th0, th1, th2, th3)
+    l0, l1, l2, l3 = calc_joint_positions(th0, th1, th2, th3)
 
     # Draw background and arm
     screen.blit(static_surface, (0, 0))
@@ -253,12 +281,12 @@ def drawGUI(screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, stati
     if proj:
         x2d, y2d, s = proj
         r = min(50, max(2, int(6 * s)))
-        pygame.draw.circle(screen, (122, 255, 255), (x2d, y2d), r//2)
+        pygame.draw.circle(screen, (122, 255, 255), (x2d, y2d), r // 2)
 
     # Display coordinates
     x_text = font.render(f"X: {point[0]:.2f}  ", True, (255, 0, 0))
     y_text = font.render(f"Y: {point[1]:.2f}  ", True, (0, 126, 255))
-    z_text = font.render(f"Z: {point[2]:.2f}",  True, (0, 255, 0))
+    z_text = font.render(f"Z: {point[2]:.2f}", True, (0, 255, 0))
 
     screen.blit(x_text, (10, 10))
     screen.blit(y_text, (10 + x_text.get_width(), 10))
@@ -275,8 +303,24 @@ def drawGUI(screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, stati
     screen.blit(t0_text, (10, y_offset))
     screen.blit(t1_text, (10 + t0_text.get_width(), y_offset))
     screen.blit(t2_text, (10 + t0_text.get_width() + t1_text.get_width(), y_offset))
-    screen.blit(t3_text, (10 + t0_text.get_width() + t1_text.get_width() + t2_text.get_width(), y_offset))
-    screen.blit(t4_text, (10 + t0_text.get_width() + t1_text.get_width() + t2_text.get_width() + t3_text.get_width(), y_offset))
+    screen.blit(
+        t3_text,
+        (
+            10 + t0_text.get_width() + t1_text.get_width() + t2_text.get_width(),
+            y_offset,
+        ),
+    )
+    screen.blit(
+        t4_text,
+        (
+            10
+            + t0_text.get_width()
+            + t1_text.get_width()
+            + t2_text.get_width()
+            + t3_text.get_width(),
+            y_offset,
+        ),
+    )
 
     # Display boolean states
     if homing:
@@ -289,12 +333,11 @@ def drawGUI(screen, font, point, th0, th1, th2, th3, th4, homing, buttonz, stati
     else:
         b2_surf = font.render(f"Drive Mode: Position", True, (255, 255, 255))
 
-
     screen.blit(b1_surf, (10, 60))
     screen.blit(b2_surf, (10, 60 + b1_surf.get_height() + 5))
 
 
-def initPygame():
+def init_pygame():
 
     # Pygame window
     pygame.init()
@@ -311,12 +354,11 @@ def initPygame():
     return screen, clock, font, static_surface
 
 
-
 # Graphic and camera settings
 cube_size = 125  # smaller cube so points are closer to camera
 WIDTH = 900
 HEIGHT = 700
 half = cube_size / 1.2
-CAM_POS = [-half*0.25, -half*1.25, half*.5]  # slightly outside the cube
-LOOK_AT = [-cube_size/4, 0, -10]  # center of the cube
+CAM_POS = [-half * 0.25, -half * 1.25, half * 0.5]  # slightly outside the cube
+LOOK_AT = [-cube_size / 4, 0, -10]  # center of the cube
 C, R, U, F = compute_camera_basis()
