@@ -1,3 +1,4 @@
+import threading
 import rclpy
 from rclpy.node import Node
 import rclpy.subscription
@@ -35,7 +36,7 @@ class CAN_UDP(Node):
         super().__init__("CAN_udp_node")
 
         self.__address = "127.0.0.1"
-        self.__recv_port = 8010
+        self.__recv_port = 8001
         self.__send_port = 8000
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
@@ -68,6 +69,10 @@ class CAN_UDP(Node):
             qos_profile=10,
         )
 
+        # 1. Create and start the receiver thread for udp messages
+        receiver_thread = threading.Thread(target=udp_receive_thread, args=(self, self.__socket))
+        receiver_thread.start()
+
         self.run()
 
     def __on_estop_received(self, msg: Bool):
@@ -88,6 +93,11 @@ class CAN_UDP(Node):
 
         self.__socket.close()
         rclpy.shutdown()
+
+    def on_message_received(self, msg: Can):
+        self.get_logger().info(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.__publishers[msg.id].publish(msg)
+
 
     def send_msg(self, msg: Can):
         """
@@ -124,6 +134,31 @@ class CAN_UDP(Node):
         self.__socket.setblocking(False)
 
         rclpy.spin(self)
+
+def udp_receive_thread(node: CAN_UDP, socket: socket):
+    while rclpy.ok():
+        try:
+            data, addr = socket.recvfrom(1024)
+            if data:
+                # unpack the message with the same format as packing
+                unpacked_data = unpack(">iB" + "B" * (len(data) - 5), data)
+                message_id = unpacked_data[0]
+                data_length = unpacked_data[1]
+                buf = [0] * 8  # Initialize buffer with 8 zeros
+                for i in range(unpacked_data[1]):
+                    buf[i] = unpacked_data[2+i]
+                msg = Can()
+                msg.id = message_id
+                msg.buf = buf
+                node.on_message_received(msg)
+        except Exception as e:
+            err = e.args
+            # only error out if it wasn't from non-blocking
+            if(err[0] == errno.EWOULDBLOCK):
+                pass
+            else:
+                node.get_logger().info(f"failed to receive can udp packet: {e}")
+
 
 def main():
     rclpy.init()

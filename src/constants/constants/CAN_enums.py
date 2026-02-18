@@ -30,3 +30,4 @@ class CAN_MESSAGE_IDS(IntEnum):
     TWIST_WRIST = 25
     MOVE_CLAW = 26
     MOVE_SOLENOID = 27
+    ARM_STATUS = 30

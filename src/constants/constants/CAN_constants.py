@@ -134,5 +134,16 @@ TEENSY_CAN_MESSAGES = {
             "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
         },
         isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ARM_STATUS: Message(
+        id=CAN_MESSAGE_IDS.ARM_STATUS,
+        subsystem=Subsystems_Names.ARM,
+        name="ARM_STATUS",
+        signals={
+            "estopped": Signal(DATA_TYPES.UINT_8, 0),
+            "enabled":  Signal(DATA_TYPES.UINT_8, 0),
+
+        },
+        isforJetson=True
     )
 }
