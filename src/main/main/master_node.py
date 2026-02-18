@@ -8,11 +8,8 @@ import rclpy.logging
 from rclpy.node import Node, Timer
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, UInt16
+from std_msgs.msg import Bool, UInt8, UInt16
 from constants.CommandCodes import CONSTANTS
-
-# from constants.CommandCodes import TOPICS_JOYSTICK, TOPICS_BUTTON, CONSTANTS
-# from constants.CAN_Constants import CHANNEL, TOPICS
 
 timeout_duration = 1  # seconds
 
@@ -20,12 +17,8 @@ timeout_duration = 1  # seconds
 class Master(Node):
 
     __estop_publisher: rclpy.publisher.Publisher
-
-    __quit_subscription: rclpy.subscription.Subscription
-    __estop_subscription: rclpy.subscription.Subscription
-
-    __heartbeat_subscription: rclpy.subscription.Subscription
-    __heartbeat_timer: Timer
+    __auto_state_publisher: rclpy.publisher.Publisher
+    __auto_state_publisher: rclpy.publisher.Publisher
 
     # heartbeat tracking
     __last_heartbeat_time: UInt16
@@ -34,8 +27,6 @@ class Master(Node):
 
     def __init__(self):
         super().__init__("Master")
-
-        self.__led_status = False
 
         self.__last_heartbeat_time = UInt16()
         self.__current_heartbeat_time = UInt16()
@@ -47,13 +38,18 @@ class Master(Node):
             topic="/ESTOP",
             qos_profile=10,
         )
-        self.__quit_subscription = self.create_subscription(
+        self.__auto_state_publisher = self.create_publisher(
+            msg_type=UInt8,
+            topic="/ROVER/AUTO_STATE",
+            qos_profile=10,
+        )
+        self.create_subscription(
             msg_type=Bool,
             topic="/BASESTATION/" + CONSTANTS.QUIT.NAME + "/" + CONSTANTS.QUIT.NAME,
             callback=self.__on_quit_received,
             qos_profile=10,
         )
-        self.__heartbeat_subscription = self.create_subscription(
+        self.create_subscription(
             msg_type=UInt16,
             topic="/BASESTATION/"
             + CONSTANTS.HEARTBEAT.NAME
@@ -62,13 +58,19 @@ class Master(Node):
             callback=self.__on_heartbeat_received,
             qos_profile=10,
         )
-        self.__estop_subscription = self.create_subscription(
+        self.create_subscription(
+            msg_type=UInt8,
+            topic="/BASESTATION/auto_state/auto_state",
+            callback=self.__on_auto_state_received,
+            qos_profile=10,
+        )
+        self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
             callback=self.__on_estop_received,
             qos_profile=10,
         )
-        self.__heartbeat_timer = self.create_timer(
+        self.create_timer(
             timer_period_sec=timeout_duration,
             callback=self.__check_timeout,
         )
@@ -81,10 +83,8 @@ class Master(Node):
                 estop_msg = Bool()
                 estop_msg.data = True
                 self.__estop_publisher.publish(estop_msg)
-                return
             else:
                 self.__last_heartbeat_time = self.__current_heartbeat_time
-        return
 
     def __on_quit_received(self, msg: Bool):
         self.get_logger().info("Quit message received, forwarding e-stop ...")
@@ -99,6 +99,9 @@ class Master(Node):
         self.get_logger().info("E-Stop message received, shutting down ...")
 
         rclpy.shutdown()
+
+    def __on_auto_state_received(self, msg: UInt8):
+        self.__auto_state_publisher.publish(UInt8(data=msg.data))
 
     def run(self):
         self.get_logger().info("starting master node ...")

@@ -1,6 +1,7 @@
 <launch>
 	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
+	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>
 	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
 	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
 	<node pkg="arm" exec="arm_node" name="arm"></node>
