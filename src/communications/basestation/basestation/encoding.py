@@ -16,6 +16,10 @@ class Signal:
         """Get the current value of the signal."""
         return self.__value
 
+    def set_value(self, value: Any):
+        """Set the value of the signal."""
+        self.__value = value
+
     @property
     def default_value(self) -> Any:
         """Get the default value of the signal."""

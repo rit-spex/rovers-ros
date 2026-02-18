@@ -154,42 +154,42 @@ class Arm(Node):
                 state = ArmState.Active if self.__base_forward | self.__base_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__base_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
 
             case CAN_MESSAGE_IDS.MOVE_SHOULDER: # SHOULDER
                 # Update the signals
                 state = ArmState.Active if self.__shoulder_forward | self.__shoulder_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__shoulder_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.MOVE_ELBOW: # ELBOW
                 # Update the signals
                 state = ArmState.Active if self.__elbow_forward | self.__elbow_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__elbow_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.BEND_WRIST: # BEND WRIST
                 # Update the signals
                 state = ArmState.Active if self.__bend_wrist_forward | self.__bend_wrist_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__bend_wrist_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.TWIST_WRIST: # TWIST WRIST
                 # Update the signals
                 state = ArmState.Active if self.__twist_wrist_forward | self.__twist_wrist_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__twist_wrist_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.MOVE_CLAW: # CLAW
                 state = ArmState.Active if self.__gripper_forward | self.__gripper_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__gripper_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.MOVE_SOLENOID: # SOLENOID
                 state = ArmState.Active if self.__solenoid else ArmState.Stop
                 position = ArmDirection.Forward if self.__solenoid else ArmDirection.Backward   
                 can_message.signals["state"].set_value(state)
-                can_message.signals["position"].set_value(position)
+                can_message.signals["direction"].set_value(position)
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
 
@@ -199,6 +199,7 @@ class Arm(Node):
             self.get_logger().error("Failed to encode CAN message.")
             return
         else:
+            # self.get_logger().info(f"Sending CAN message: {can_message.name} with state {can_message.signals['state'].value} and direction {can_message.signals['direction'].value}")
             self.__publishers[ID].publish(Can_packet)
 
     def __on_estop_received(self, msg: Bool):
