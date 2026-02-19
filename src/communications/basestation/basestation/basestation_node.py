@@ -42,6 +42,7 @@ class Basestation(Node):
 
         self.__encoder = MessageEncoder()
         self.__publishers = {}
+        self.__last_values = {}
 
         self.__value_types = {
             CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL: Bool,
@@ -117,6 +118,12 @@ class Basestation(Node):
             signal = signal_defs.get(key)
             if signal is None:
                 continue
+
+            # only send data that has changed to avoid spamming the network
+            last_val_key = (message_id, key)
+            if self.__last_values.get(last_val_key) == value:
+                continue
+            self.__last_values[last_val_key] = value
 
             signal_type = signal.type
             value_type = self.__value_types.get(signal_type)
