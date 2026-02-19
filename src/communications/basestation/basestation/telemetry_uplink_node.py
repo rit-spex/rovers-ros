@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import sys
+import os
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -30,6 +31,11 @@ class TelemetryUplink(Node):
 
     def __init__(self):
         super().__init__("telemetry_uplink")
+
+        self._protocol_trace = (
+            os.environ.get("ROVER_PROTOCOL_TRACE", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
         self._encoder = MessageEncoder()
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -145,6 +151,12 @@ class TelemetryUplink(Node):
 
     def _send(self, payload: Dict, message_id: int) -> None:
         encoded = self._encoder.encode_data(payload, message_id)
+        if self._protocol_trace:
+            message_name = self._encoder.get_message_name(message_id)
+            self.get_logger().info(
+                "[protocol tx] id=0x%02X name=%s payload=%s bytes=%s"
+                % (message_id, message_name, payload, encoded.hex(" "))
+            )
         self._socket.sendto(encoded, self._target)
 
 

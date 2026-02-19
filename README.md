@@ -73,3 +73,10 @@ ros2 launch main main_launch.xml
 ```
 
 After you see "starting xbee..." enter the password `rovers`.
+
+## Proof of Protocol Establishment
+
+```
+ROVER_PROTOCOL_TRACE=1
+```
+^ in the shell (probably want to do this for both basestation and ros shells)

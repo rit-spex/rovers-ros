@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -32,6 +33,11 @@ class Basestation(Node):
 
     def __init__(self):
         super().__init__("Basestation")
+
+        self._protocol_trace = (
+            os.environ.get("ROVER_PROTOCOL_TRACE", "0").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
 
         self.__encoder = MessageEncoder()
         self.__publishers = {}
@@ -81,13 +87,21 @@ class Basestation(Node):
                 )
 
     def __on_message_received(self, message: UInt8MultiArray):
+        raw_bytes = bytes(message.data)
         try:
             decoded_data, message_id = self.__encoder.decode_data(
-                bytes(message.data)
+                raw_bytes
             )
         except Exception as exc:
             self.get_logger().error(f"Failed to decode message: {exc}")
             return
+
+        if self._protocol_trace:
+            message_name = self.__encoder.get_message_name(message_id)
+            self.get_logger().info(
+                "[protocol rx] id=0x%02X name=%s payload=%s bytes=%s"
+                % (message_id, message_name, decoded_data, raw_bytes.hex(" "))
+            )
 
         publishers = self.__publishers.get(message_id, {})
         signal_defs = self.__encoder.get_messages().get(message_id, {}).get(
