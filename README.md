@@ -22,11 +22,11 @@ The basestation sends controller data over XBee radio as compact bit-packed byte
 
 ```
                         XBee Radio
-  ┌─────────────┐   ───────────────>   ┌─────────────────┐
-  │ BASESTATION  │   controller data   │   ROVER (ROS 2) │
-  │ (Raspberry Pi)│  <───────────────  │  (this repo)     │
-  │              │   telemetry (UDP)    │                  │
-  └─────────────┘                      └─────────────────┘
+  ┌───────────────┐   ───────────────> ┌─────────────────┐
+  │ BASESTATION   │   controller data  │  ROVER (ROS 2)  │
+  │ (Raspberry Pi)│  <───────────────  │  (this repo)    │
+  │               │   telemetry (UDP)  │                 │
+  └───────────────┘                    └─────────────────┘
 ```
 
 ### ROS nodes that use the protocol
