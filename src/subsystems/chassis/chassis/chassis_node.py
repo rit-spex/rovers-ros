@@ -29,6 +29,8 @@ class Chassis(Node):
             qos_profile=10,
         )
 
+        self.__control_mode_publisher = self.create_publisher(UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", 10)
+
         # From controller (manual driving)
         self.create_subscription(
             Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_manual_callback, 10
@@ -54,8 +56,13 @@ class Chassis(Node):
         )
 
         self.create_subscription(
-            UInt8, "/BASESTATION/XBOX/CONTROL_MODE", self.__operation_type_callback, 10
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.__operation_type_callback, 10
         )
+
+        self.create_subscription(Bool, "BASESTATION/XBOX/B", self.__xbox_b_callback, 10)
+        self.create_subscription(Bool, "BASESTATION/XBOX/X", self.__xbox_x_callback, 10)
+        self.create_subscription(Bool, "BASESTATION/XBOX/A", self.__xbox_a_callback, 10)
+        self.create_subscription(Bool, "BASESTATION/XBOX/Y", self.__xbox_y_callback, 10)
 
         self.create_subscription(
             msg_type=Bool,
@@ -104,6 +111,25 @@ class Chassis(Node):
             self.__RY_value = msg.data
             self.__send_controller_data()  
 
+    # Control Mode Switching Functions -----------------
+    def __xbox_b_callback(self, msg):
+        cm = UInt8()
+        cm.data = 0
+        self.__control_mode_publisher.publish(cm)
+    def __xbox_x_callback(self, msg):
+        cm = UInt8()
+        cm.data = 1
+        self.__control_mode_publisher.publish(cm)
+    def __xbox_a_callback(self, msg):
+        cm = UInt8()
+        cm.data = 2
+        self.__control_mode_publisher.publish(cm)
+    def __xbox_y_callback(self, msg):
+        cm = UInt8()
+        cm.data = 3
+        self.__control_mode_publisher.publish(cm)
+
+
     def __send_controller_data(self):
         #self.get_logger().info(f"LY: {self.__LY_value}")
         #self.get_logger().info(f"RY: {self.__RY_value}")
@@ -128,7 +154,7 @@ class Chassis(Node):
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping chassis...")
         self.__LY_value = 0
-        self.__RX_value = 0
+        self.__RY_value = 0
         self.__send_controller_data()
         rclpy.shutdown()
 

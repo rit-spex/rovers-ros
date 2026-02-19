@@ -31,7 +31,7 @@ class GPSIMUPathfinding(Node):
 
         # --- Subscribers ---
         # 1. GPS Position
-        self.create_subscription(NavSatFix, '/object_detection/GPS', self.gps_callback, 10)
+        self.create_subscription(NavSatFix, '/GPS/ROVER', self.gps_callback, 10)
         
         # 2. IMU Heading (The new part!)
         # Note: Check if your topic is 'unilidar/imu' or 'unilidar/IMU'

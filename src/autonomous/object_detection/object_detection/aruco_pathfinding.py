@@ -86,8 +86,8 @@ class GeneratePath(Node):
         elif leftVel < -1.0:
             leftVel = -1.0
 
-        self.outputVelRight.data = rightVel  # + self.prevVelRight.data) / 2
-        self.outputVelLeft.data = leftVel  # + self.prevVelLeft.data) / 2
+        self.outputVelRight.data = -leftVel  # + self.prevVelRight.data) / 2
+        self.outputVelLeft.data = -rightVel  # + self.prevVelLeft.data) / 2
         self.prevVelRight.data = self.outputVelRight.data
         self.prevVelLeft.data = self.outputVelLeft.data
 

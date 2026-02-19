@@ -147,8 +147,8 @@ class ObjectSearchAndFollow(Node):
     def publish_velocity(self, left, right):
         l_msg = Float32()
         r_msg = Float32()
-        l_msg.data = left  # Inverted per your original script
-        r_msg.data = right 
+        l_msg.data = -left  # Inverted per your original script
+        r_msg.data = -right 
         self.velPubLeft.publish(l_msg)
         self.velPubRight.publish(r_msg)
 

@@ -68,7 +68,7 @@ class ArucoTracker(Node):
         )
 
         self.create_subscription(
-            UInt8, "/BASESTATION/XBOX/CONTROL_MODE", self.control_mode_callback, 10
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.control_mode_callback, 10
         )
         
         # Outputs

@@ -5,6 +5,7 @@ from std_msgs.msg import Float32MultiArray, UInt8
 from cv_bridge import CvBridge
 import cv2
 from ultralytics.models import YOLO
+from ament_index_python.packages import get_package_share_directory
 import os
 
 class YOLOTracker(Node):
@@ -15,7 +16,15 @@ class YOLOTracker(Node):
 
         # --- PARAMETERS ---
         # Replace 'yolo26n.pt' with the absolute path to your model if needed
-        self.declare_parameter('model_path', '/home/spex-rover/SPEX/rovers-ros/src/autonomous/object_detection/object_detection/last.pt') 
+        # 1. Get the path to your package's share directory in 'install'
+        package_share_dir = get_package_share_directory('object_detection')
+
+        # 2. Join it with the relative path you defined in setup.py
+        default_model_path = os.path.join(package_share_dir, 'models', 'last.pt')
+
+        # 3. Declare the parameter using the dynamic path
+        self.declare_parameter('model_path', default_model_path)
+
         self.declare_parameter('camera_topic', '/cameras/rover_cam_topic')
         self.declare_parameter('conf_threshold', 0.5)
         self.declare_parameter('target_class_id', -1) # -1 means track ALL classes
@@ -49,7 +58,7 @@ class YOLOTracker(Node):
         )
 
         self.create_subscription(
-            UInt8, "/BASESTATION/XBOX/CONTROL_MODE", self.control_mode_callback, 10
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.control_mode_callback, 10
         )
 
         # Publisher: Data for Control Node
