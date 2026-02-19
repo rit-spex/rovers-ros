@@ -1,4 +1,6 @@
 <launch>
+	<arg name="protocol_trace" default="0"></arg>
+	<set_env name="ROVER_PROTOCOL_TRACE" value="$(var protocol_trace)"></set_env>
 	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
 	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>

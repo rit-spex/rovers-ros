@@ -34,13 +34,29 @@ The basestation sends controller data over XBee radio as compact bit-packed byte
 | Node | File | Purpose |
 |------|------|---------|
 | `basestation_node` | `src/communications/basestation/basestation/basestation_node.py` | Decodes XBee messages → ROS topics |
-| `telemetry_uplink_node` | `src/communications/basestation/basestation/telemetry_uplink_node.py` | ROS topics → UDP telemetry packets |
+### Protocol Trace Debugging
 
-Import wrappers (`encoding.py`, `command_codes.py`) in the basestation and constants packages add `lib/rovers-protocol` to `sys.path` so the protocol works without pip-installing.
+You can enable real-time hex-level protocol tracing to verify that the rover is correctly encoding/decoding messages. This is useful for confirming bit-packed message IDs and field values match what the basestation expects.
+
+To enable tracing, pass the `protocol_trace:=1` argument:
+
+```bash
+# In simulation
+ros2 launch main simulation_launch.xml protocol_trace:=1
+
+# On hardware (SSH in and run)
+ros2 launch main main_launch.xml protocol_trace:=1
+```
+
+When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex traces like:
+- `[protocol rx] <ID:0x02> data:0200ff...` (Xbox control message)
+- `[protocol tx] <ID:0xF1> data:f1045a...` (Telemetry message)
+
+---
 
 ## Building
 
-Make sure you have ROS 2 installed, then:
+Make sure you have ROS 2 (Humble) installed, then:
 
 ```bash
 colcon build
@@ -73,10 +89,3 @@ ros2 launch main main_launch.xml
 ```
 
 After you see "starting xbee..." enter the password `rovers`.
-
-## Proof of Protocol Establishment
-
-```
-ROVER_PROTOCOL_TRACE=1
-```
-^ in the shell (probably want to do this for both basestation and ros shells)

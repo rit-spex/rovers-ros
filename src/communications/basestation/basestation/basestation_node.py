@@ -126,6 +126,9 @@ class Basestation(Node):
 
     def run(self):
         self.get_logger().info("starting basestation ...")
+        self.get_logger().info(
+            f"protocol trace {'enabled' if self._protocol_trace else 'disabled'}"
+        )
         rclpy.spin(self)
 
     def __on_estop_received(self, _msg: Bool):

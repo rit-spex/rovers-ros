@@ -1,4 +1,6 @@
 <launch>
+	<arg name="protocol_trace" default="0"></arg>
+	<set_env name="ROVER_PROTOCOL_TRACE" value="$(var protocol_trace)"></set_env>
 	<node pkg="can_udp" exec="can_udp_node" name="can_udp"></node>
 	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp"></node>
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>

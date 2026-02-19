@@ -164,6 +164,9 @@ class TelemetryUplink(Node):
 def main():
     rclpy.init()
     node = TelemetryUplink()
+    node.get_logger().info(
+        f"protocol trace {'enabled' if node._protocol_trace else 'disabled'}"
+    )
     rclpy.spin(node)
 
 
