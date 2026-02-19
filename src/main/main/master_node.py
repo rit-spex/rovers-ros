@@ -5,6 +5,7 @@ from typing import Any
 # ros imports
 import rclpy
 import rclpy.logging
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node, Timer
 import rclpy.publisher
 import rclpy.subscription
@@ -111,7 +112,14 @@ class Master(Node):
 def main():
     rclpy.init()
     master = Master()
-    master.run()
+    try:
+        master.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        master.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

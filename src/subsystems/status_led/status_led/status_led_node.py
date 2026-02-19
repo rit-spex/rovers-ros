@@ -3,6 +3,7 @@ from constants.CAN_Constants import TOPICS
 from constants.CommandCodes import CONSTANTS
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node, Timer
 from rclpy.publisher import Publisher
 from std_msgs.msg import Float32
@@ -67,7 +68,14 @@ class StatusLED(Node):
 def main():
     rclpy.init()
     status_led = StatusLED()
-    status_led.run()
+    try:
+        status_led.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        status_led.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

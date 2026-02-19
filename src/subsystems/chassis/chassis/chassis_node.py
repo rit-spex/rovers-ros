@@ -3,6 +3,7 @@ from constants.CAN_Constants import TOPICS
 from constants.CommandCodes import CONSTANTS
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import Can
@@ -92,7 +93,14 @@ class Chassis(Node):
 def main():
     rclpy.init()
     chassis = Chassis()
-    chassis.run()
+    try:
+        chassis.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        chassis.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

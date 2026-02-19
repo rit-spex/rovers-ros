@@ -3,6 +3,7 @@ from constants.CommandCodes import CONSTANTS
 
 from numpy import uint8
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
@@ -201,4 +202,15 @@ class Arm(Node):
 def main():
     rclpy.init()
     arm = Arm()
-    arm.run()
+    try:
+        arm.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        arm.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

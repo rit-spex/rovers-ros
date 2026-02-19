@@ -2,6 +2,7 @@ import os
 import time
 import can
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
@@ -71,8 +72,15 @@ class JETSON_LISTENER(can.Listener):
 
 def main():
     rclpy.init()
-    can = CAN()
-    can.run()
+    node = CAN()
+    try:
+        node.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == "__main__":
     main()

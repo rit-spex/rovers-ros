@@ -10,6 +10,7 @@ from typing import Any, Dict
 import rclpy
 import rclpy.publisher
 import rclpy.subscription
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, UInt8, UInt8MultiArray, UInt16
 
@@ -139,7 +140,14 @@ class Basestation(Node):
 def main():
     rclpy.init()
     basestation = Basestation()
-    basestation.run()
+    try:
+        basestation.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        basestation.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

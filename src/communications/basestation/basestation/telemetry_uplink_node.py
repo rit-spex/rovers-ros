@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Dict
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, UInt8, UInt16
 
@@ -147,7 +148,8 @@ class TelemetryUplink(Node):
             self._send(self._subsystem_enabled, CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID)
             self._send(self._control_mode, CONSTANTS.COMPACT_MESSAGES.CONTROL_MODE_ID)
         except Exception as exc:
-            self.get_logger().error(f"Failed to publish telemetry uplink packets: {exc}")
+            if rclpy.ok():
+                self.get_logger().error(f"Failed to publish telemetry uplink packets: {exc}")
 
     def _send(self, payload: Dict, message_id: int) -> None:
         encoded = self._encoder.encode_data(payload, message_id)
@@ -159,6 +161,13 @@ class TelemetryUplink(Node):
             )
         self._socket.sendto(encoded, self._target)
 
+    def destroy_node(self) -> bool:
+        try:
+            self._socket.close()
+        except OSError:
+            pass
+        return super().destroy_node()
+
 
 
 def main():
@@ -167,7 +176,14 @@ def main():
     node.get_logger().info(
         f"protocol trace {'enabled' if node._protocol_trace else 'disabled'}"
     )
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
