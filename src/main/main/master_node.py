@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-from typing import Any
-
 # ros imports
 import rclpy
 import rclpy.logging
 from rclpy.executors import ExternalShutdownException
-from rclpy.node import Node, Timer
+from rclpy.node import Node
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, UInt8, UInt16
@@ -19,19 +17,18 @@ class Master(Node):
 
     __estop_publisher: rclpy.publisher.Publisher
     __auto_state_publisher: rclpy.publisher.Publisher
-    __auto_state_publisher: rclpy.publisher.Publisher
 
     # heartbeat tracking
-    __last_heartbeat_time: UInt16
-    __current_heartbeat_time: UInt16
-    __recieved_heartbeat: bool
+    __last_heartbeat_time: int
+    __current_heartbeat_time: int
+    __received_heartbeat: bool
 
     def __init__(self):
         super().__init__("Master")
 
-        self.__last_heartbeat_time = UInt16()
-        self.__current_heartbeat_time = UInt16()
-        self.__recieved_heartbeat = False
+        self.__last_heartbeat_time = 0
+        self.__current_heartbeat_time = 0
+        self.__received_heartbeat = False
 
         # create publishers and subscriptions for e-stop and heartbeat
         self.__estop_publisher = self.create_publisher(
@@ -78,7 +75,7 @@ class Master(Node):
 
     def __check_timeout(self) -> None:
         # self.get_logger().info("Checking for heartbeat timeout...")
-        if self.__recieved_heartbeat:
+        if self.__received_heartbeat:
             if self.__current_heartbeat_time == self.__last_heartbeat_time:
                 self.get_logger().info("Heartbeat timeout detected")
                 estop_msg = Bool()
@@ -93,8 +90,8 @@ class Master(Node):
 
     def __on_heartbeat_received(self, msg: UInt16):
         # self.get_logger().info("Heartbeat message received")
-        self.__recieved_heartbeat = True
-        self.__current_heartbeat_time = msg
+        self.__received_heartbeat = True
+        self.__current_heartbeat_time = int(msg.data)
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-Stop message received, shutting down ...")

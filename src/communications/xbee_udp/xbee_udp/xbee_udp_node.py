@@ -1,12 +1,10 @@
 # ros imports
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 
-# TODO: change to custom type to use unsigned ints
 from std_msgs.msg import UInt8MultiArray
-
-# from custom_interfaces.msg import UDPPacket
 
 import socket as skt
 from socket import socket
@@ -29,7 +27,7 @@ class xbee_udp(Node):
         self.__buffer_size = 1024
         self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
 
-    def read_data(self, buffer_size: int) -> list[int] | None:
+    def read_data(self, buffer_size: int) -> list[int]:
         try:
             data, addr = self.__socket.recvfrom(buffer_size)
             payload = list(data)
@@ -38,14 +36,17 @@ class xbee_udp(Node):
                 f"{data.hex(' ')}"
             )
 
-        except Exception as e:
-            err = e.args
+        except BlockingIOError:
+            return []
+        except OSError as e:
             # only error out if it wasn't from non-blocking
-            if err[0] == errno.EWOULDBLOCK:
+            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
                 return []
-            else:
-                self.get_logger().error(f"failed to receive data: {e}")
-                return []
+            self.get_logger().error(f"failed to receive data: {e}")
+            return []
+        except Exception as e:
+            self.get_logger().error(f"failed to receive data: {e}")
+            return []
         return payload
 
     def publish_data(self, data: list[int]) -> None:
@@ -60,23 +61,26 @@ class xbee_udp(Node):
         # make it so it will not stop the code when requesting a read
         self.__socket.setblocking(False)
 
-        while True:
-            data = self.read_data(self.__buffer_size)
-            if data is None:
-                self.get_logger().info("client disconnected")
-                break
-            if len(data) == 0:
-                continue
-            self.publish_data(data)
-        rclpy.spin(self)
-
-        # self.signal_estop()
-
+        try:
+            while rclpy.ok():
+                data = self.read_data(self.__buffer_size)
+                if data:
+                    self.publish_data(data)
+                rclpy.spin_once(self, timeout_sec=0.01)
+        finally:
+            self.__socket.close()
 
 def main():
     rclpy.init()
     udp = xbee_udp()
-    udp.run()
+    try:
+        udp.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        udp.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

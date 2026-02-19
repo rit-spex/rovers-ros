@@ -62,7 +62,7 @@ class StatusLED(Node):
         if not self._gpio_enabled:
             return
         # self.get_logger().info("flicker_led")
-        if self.__led_status == True:
+        if self.__led_status:
             self.__led_status = False
             GPIO.output(LED_PIN, GPIO.LOW)  # Turn off LED to indicate live jetson
         else:
@@ -70,11 +70,21 @@ class StatusLED(Node):
             GPIO.output(LED_PIN, GPIO.HIGH)  # Turn on LED to indicate live jetson
 
     def __on_estop_received(self, msg: Bool):
+        if not msg.data:
+            return
         self.get_logger().info("E-STOP received, stopping status LED...")
         self.__led_status = True
         if self._gpio_enabled:
             GPIO.output(LED_PIN, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
         rclpy.shutdown()
+
+    def destroy_node(self):
+        if self._gpio_enabled:
+            try:
+                GPIO.cleanup(LED_PIN)
+            except Exception:
+                self.get_logger().exception("Failed to cleanup GPIO pin %s", LED_PIN)
+        return super().destroy_node()
 
     def run(self):
         self.get_logger().info("starting status LED...")

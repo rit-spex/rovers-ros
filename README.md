@@ -84,7 +84,7 @@ ssh rovers@129.21.91.140
 Then:
 ```bash
 cd ~/ros/rovers-ros
-source source.zsh
+source source.sh
 ros2 launch main main_launch.xml
 ```
 

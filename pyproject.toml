@@ -13,7 +13,7 @@ opencv-python = "^4.10.0.84"
 catkin-pkg = "^1.0.0"
 empy = "3.3.4"
 lark = "^1.2.2"
-serial = "^0.0.97"
+pyserial = "^3.5"
 rclpy-intellisense = "^1.2.0"
 pyyaml = "^6.0"
 
