@@ -82,7 +82,7 @@ TOPICS = {
     },
     17: {
         "id": 17,
-        "name": "MOVE_SOLENOID",
+        "name": "MOVE_SOLINOID",
         "buf": bytearray(8),
         "channel": CHANNEL.ARM_BOARD
     }
