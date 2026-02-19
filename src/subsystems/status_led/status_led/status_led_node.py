@@ -8,7 +8,15 @@ from rclpy.node import Node, Timer
 from rclpy.publisher import Publisher
 from std_msgs.msg import Float32
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
-import Jetson.GPIO as GPIO
+
+try:
+    import Jetson.GPIO as GPIO
+    _GPIO_AVAILABLE = True
+    _GPIO_IMPORT_ERROR = ""
+except Exception as exc:
+    GPIO = None  # type: ignore[assignment]
+    _GPIO_AVAILABLE = False
+    _GPIO_IMPORT_ERROR = str(exc)
 
 LED_flicker_sec = 1.0
 LED_PIN = 7
@@ -24,10 +32,16 @@ class StatusLED(Node):
     def __init__(self):
         super().__init__("status_led_node")
 
-        # GPIO setup to have led indicate heartbeat status
-        GPIO.setmode(GPIO.BOARD)
-        GPIO.setup(LED_PIN, GPIO.OUT, initial=GPIO.LOW)
-        # GPIO.output(LED_PIN, GPIO.LOW)
+        self._gpio_enabled = _GPIO_AVAILABLE
+        if self._gpio_enabled:
+            # GPIO setup to have led indicate heartbeat status
+            GPIO.setmode(GPIO.BOARD)
+            GPIO.setup(LED_PIN, GPIO.OUT, initial=GPIO.LOW)
+        else:
+            self.get_logger().warning(
+                "Jetson GPIO unavailable; status LED disabled (%s)"
+                % _GPIO_IMPORT_ERROR
+            )
 
         # requires some default value
         self.__led_status = False
@@ -45,6 +59,8 @@ class StatusLED(Node):
         )
 
     def __flicker_led(self):
+        if not self._gpio_enabled:
+            return
         # self.get_logger().info("flicker_led")
         if self.__led_status == True:
             self.__led_status = False
@@ -56,7 +72,8 @@ class StatusLED(Node):
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping status LED...")
         self.__led_status = True
-        GPIO.output(LED_PIN, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
+        if self._gpio_enabled:
+            GPIO.output(LED_PIN, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
         rclpy.shutdown()
 
     def run(self):

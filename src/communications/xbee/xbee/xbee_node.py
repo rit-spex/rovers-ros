@@ -44,7 +44,14 @@ class Xbee(Node):
 
     def run(self) -> None:
         self.get_logger().info("starting xbee...")
-        self.__xbee_device.open()
+        try:
+            self.__xbee_device.open()
+        except Exception as exc:
+            self.get_logger().warning(
+                f"xbee unavailable on {self.__port}; running without radio ({exc})"
+            )
+            rclpy.spin(self)
+            return
 
         try:
             while rclpy.ok():
@@ -69,6 +76,8 @@ def main() -> None:
         xbee.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception as exc:
+        xbee.get_logger().error(f"xbee node failed: {exc}")
     finally:
         xbee.destroy_node()
         if rclpy.ok():
