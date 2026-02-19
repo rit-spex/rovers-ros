@@ -31,8 +31,12 @@ class xbee_udp(Node):
 
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
-            data = self.__socket.recvfrom(buffer_size)
-            self.get_logger().info(f"got data :)")
+            data, addr = self.__socket.recvfrom(buffer_size)
+            payload = list(data)
+            self.get_logger().info(
+                f"received {len(payload)} bytes from {addr[0]}:{addr[1]}: "
+                f"{data.hex(' ')}"
+            )
 
         except Exception as e:
             err = e.args
@@ -40,9 +44,9 @@ class xbee_udp(Node):
             if err[0] == errno.EWOULDBLOCK:
                 return []
             else:
-                self.get_logger().info(f"failed to receive data: {e}")
+                self.get_logger().error(f"failed to receive data: {e}")
                 return []
-        return list(data[0])
+        return payload
 
     def publish_data(self, data: list[int]) -> None:
         msg = UInt8MultiArray()
