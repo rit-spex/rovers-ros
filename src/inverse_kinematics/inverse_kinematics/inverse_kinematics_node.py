@@ -19,7 +19,7 @@ from space_mouse import (
     setup_spacemouse,
 )
 
-# # Typing
+# Typing
 from rclpy.node import Node
 from typing import Any
 from pygame import Surface
