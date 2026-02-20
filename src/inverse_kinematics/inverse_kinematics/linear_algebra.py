@@ -4,14 +4,14 @@ import matplotlib.pyplot as plt
 import math
 import time
 
-from inverse_kinematics.inverse_kinematics.math_helpers import (
+from math_helpers import (
     calc_angle_between_points,
     get_flipped_angles,
     wrap_to_pi,
     angle_diff,
     Tz,
 )
-from inverse_kinematics.inverse_kinematics.arm_parameters import A0, A1, A2, A3
+from arm_parameters import A0, A1, A2, A3
 
 # === Okay this is just geometry ===
 

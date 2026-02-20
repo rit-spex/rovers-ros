@@ -1,6 +1,6 @@
 import pygame
 import numpy as np
-from inverse_kinematics.inverse_kinematics.linear_algebra import calc_joint_positions
+from linear_algebra import calc_joint_positions
 
 
 def compute_camera_basis():

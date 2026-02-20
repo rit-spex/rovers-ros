@@ -1,27 +1,26 @@
 import math
 import time
-import rclpy
 import pygame
-from inverse_kinematics.inverse_kinematics.linear_algebra import (
+from linear_algebra import (
     calc_joint_positions,
     collision_protection,
     homingStep,
     inverse_kinematics,
     joint_limits,
 )
-from inverse_kinematics.inverse_kinematics.math_helpers import wrap_to_pi
-from inverse_kinematics.inverse_kinematics.pygame_graphics import (
+from math_helpers import wrap_to_pi
+from pygame_graphics import (
     draw_arm,
     draw_GUI,
     init_pygame,
 )
-from inverse_kinematics.inverse_kinematics.space_mouse import (
+from space_mouse import (
     read_spacemouse,
     setup_spacemouse,
 )
 
-# Typing
-from rclpy import Node
+# # Typing
+from rclpy.node import Node
 from typing import Any
 from pygame import Surface
 from pygame.time import Clock
@@ -46,7 +45,7 @@ Controls
 """
 
 
-class inverse_kinematicsArmController(Node):
+class ArmController(Node):
     # Arm initial parameters
     __initial_angles: list[float]
     __iAs: list[float]
@@ -88,6 +87,7 @@ class inverse_kinematicsArmController(Node):
     __static_surface: Surface
 
     def __init__(self):
+        pass
         # Arm initial parameters
         self.__initial_angles = [math.pi, math.pi / 2, -math.pi / 2, 0.0, 0.0]
         self.__iAs = self.__initial_angles
@@ -110,6 +110,7 @@ class inverse_kinematicsArmController(Node):
 
         # Space mouse
         self.__device = setup_spacemouse()
+        print(self.__device)
         self.__state = {"x": 0, "y": 0, "z": 0, "rx": 0, "ry": 0, "rz": 0, "buttons": 0}
         self.__buttonz = [False, False]
         self.__homing = False
@@ -283,6 +284,9 @@ class inverse_kinematicsArmController(Node):
         self.__device.close()
 
 
-if __name__ == "__main__":
-    arm_controller = inverse_kinematicsArmController()
+def main():
+    arm_controller = ArmController()
     arm_controller.run()
+
+if __name__ == "__main__":
+    main()
