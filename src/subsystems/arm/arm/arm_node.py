@@ -64,17 +64,22 @@ ARM_MOTOR_PARAMS = [
     arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651)  # twist wrist
 ]
 
+REQUESTED_ARM_UPDATE_RATE = 5 # in Hz, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
+
 class Arm(Node):
 
     __publishers: dict[CAN_MESSAGE_IDS, Publisher]
     
     # arm MUST be enabled to move, this is a safety feature to prevent the arm from moving unexpectedly
-    __arm_enabled: bool
+    arm_enabled: bool
     __gripper_closed: bool
     __solenoid_engaged: bool
     __gripper_actual_ticks: int32
     __motors_target_ticks: list[int32]
     __motors_actual_ticks: list[int32]
+
+    # this thread will continuously request the position of the can open motors
+    request_position_thread: threading.Thread
 
     # this is needed to prevent message object from being modified at the same time by multiple threads when sending messages to the arm
     __open_can_send_lock: threading.Lock
@@ -100,31 +105,35 @@ class Arm(Node):
             qos_profile=10,
         )
 
-        self.__arm_enabled = False
+        self.arm_enabled = False
         self.__gripper_closed = False
         self.__solenoid_engaged = False
         self.__motors_target_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
         self.__motors_actual_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
         self.__open_can_send_lock = threading.Lock()
 
+        # 1. Create and start the receiver thread for udp messages
+        self.request_position_thread = threading.Thread(target=request_position_thread, args=(self,))
+        
+
     def __base_callback(self, msg: Float32):        
-        self.__send_motor_command(ARM_MOTOR_IDX.BASE, int(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
+        self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
 
     def __shoulder_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.SHOULDER, int(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks))
+        self.__send_motor_command(ARM_MOTOR_IDX.SHOULDER, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks))
 
     def __elbow_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, int(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks))
+        self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks))
 
     def __bend_wrist_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, int(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].rad_2_ticks))
+        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].rad_2_ticks))
 
     def __twist_wrist_callback(self, msg: Bool):
-        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, int(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].rad_2_ticks))
+        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].rad_2_ticks))
 
     def __gripper_callback(self, msg: Bool):
         # only send message if arm is enabled 
-        if not self.__arm_enabled:
+        if not self.arm_enabled:
             return
 
         # reject message that are the same as current
@@ -144,7 +153,7 @@ class Arm(Node):
 
     def __solenoid_callback(self, msg: Bool):
         # only send message if arm is enabled 
-        if not self.__arm_enabled:
+        if not self.arm_enabled:
             return
 
         # reject message that are the same as current
@@ -162,9 +171,9 @@ class Arm(Node):
             self.get_logger().error(f"CAN message for moving the claw does not exist: {e}")
             return
 
-    def __send_motor_command(self, motor_idx: ARM_MOTOR_IDX, target_tick: float):
+    def __send_motor_command(self, motor_idx: ARM_MOTOR_IDX, target_tick: int32):
         # only send message if arm is enabled 
-        if not self.__arm_enabled:
+        if not self.arm_enabled:
             return
         
         # check if the target angle is within the limits of the motor
@@ -313,10 +322,10 @@ class Arm(Node):
     def __on_arm_enable_received(self, msg: Bool):
     
         # reject message that are the same as current
-        if msg.data == self.__arm_enabled:
+        if msg.data == self.arm_enabled:
             return
     
-        self.__arm_enabled = msg.data
+        self.arm_enabled = msg.data
 
         # if arm is being enabled
         if msg.data:
@@ -405,6 +414,17 @@ class Arm(Node):
         self.get_logger().info("starting arm...")
         rclpy.spin(self)
         self.get_logger().info("stopping arm...")
+
+def request_position_thread(node: Arm):
+    rate = node.create_rate(REQUESTED_ARM_UPDATE_RATE)
+    while rclpy.ok():
+        # only request position if arm is enabled
+        if node.arm_enabled:
+            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_BASE, int32(0), OPEN_CAN.ID.READ)
+            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_SHOULDER, int32(0), OPEN_CAN.ID.READ)
+            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_ELBOW, int32(0), OPEN_CAN.ID.READ)
+
+        rate.sleep()
 
 def main():
     rclpy.init()
