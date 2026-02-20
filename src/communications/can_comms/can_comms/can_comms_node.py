@@ -14,7 +14,7 @@ from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
-BIT_RATE = 500000
+BIT_RATE = 1000000 # 1 Mbps
 
 
 class CAN(Node):
@@ -27,7 +27,7 @@ class CAN(Node):
         self.reset_network()
 
         can.rc["interface"] = "socketcan"
-        can.rc["bitrate"] = 500000
+        can.rc["bitrate"] = BIT_RATE
 
         self.bus = can.Bus(
             CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True

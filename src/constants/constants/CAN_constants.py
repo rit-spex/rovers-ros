@@ -40,9 +40,31 @@ TEENSY_CAN_MESSAGES = {
     CAN_MESSAGE_IDS.ROS_HEARTBEAT: Message(
         id=CAN_MESSAGE_IDS.ROS_HEARTBEAT,
         subsystem=Subsystems_Names.ALL,
-        name="Ros_Heartbeat",
+        name="ROS_Heartbeat",
         signals={
-            "timestamp": Signal(DATA_TYPES.UINT_32, 0)
+            "source": Signal(DATA_TYPES.UINT_8, 0),
+            "timestamp": Signal(DATA_TYPES.UINT_32, 0),
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.TEENSY_HEARTBEAT: Message(
+        id=CAN_MESSAGE_IDS.TEENSY_HEARTBEAT,
+        subsystem=Subsystems_Names.ALL,
+        name="Teensy_Heartbeat",
+        signals={
+            "source": Signal(DATA_TYPES.UINT_8, 0),
+            "timestamp": Signal(DATA_TYPES.UINT_32, 0),
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.ENABLE_CHASSIS: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_CHASSIS,
+        subsystem=Subsystems_Names.CHASSIS,
+        name="ENABLE_CHASSIS",
+        signals={
+            "enable": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=False
     ),
@@ -65,36 +87,36 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    CAN_MESSAGE_IDS.MOVE_BASE: Message(
-        id=CAN_MESSAGE_IDS.MOVE_BASE,
-        subsystem=Subsystems_Names.ARM,
-        name="MOVE_BASE",
-        signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        },
-        isforJetson=False
-    ),
-    CAN_MESSAGE_IDS.MOVE_SHOULDER: Message(
-        id=CAN_MESSAGE_IDS.MOVE_SHOULDER,
-        subsystem=Subsystems_Names.ARM,
-        name="MOVE_SHOULDER",
-        signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        },
-        isforJetson=False
-    ),
-    CAN_MESSAGE_IDS.MOVE_ELBOW: Message(
-        id=CAN_MESSAGE_IDS.MOVE_ELBOW,
-        subsystem=Subsystems_Names.ARM,
-        name="MOVE_ELBOW",
-        signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
-        },
-        isforJetson=False
-    ),
+    # CAN_MESSAGE_IDS.MOVE_BASE: Message(
+    #     id=CAN_MESSAGE_IDS.MOVE_BASE,
+    #     subsystem=Subsystems_Names.ARM,
+    #     name="MOVE_BASE",
+    #     signals={
+    #         "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
+    #         "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+    #     },
+    #     isforJetson=False
+    # ),
+    # CAN_MESSAGE_IDS.MOVE_SHOULDER: Message(
+    #     id=CAN_MESSAGE_IDS.MOVE_SHOULDER,
+    #     subsystem=Subsystems_Names.ARM,
+    #     name="MOVE_SHOULDER",
+    #     signals={
+    #         "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
+    #         "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+    #     },
+    #     isforJetson=False
+    # ),
+    # CAN_MESSAGE_IDS.MOVE_ELBOW: Message(
+    #     id=CAN_MESSAGE_IDS.MOVE_ELBOW,
+    #     subsystem=Subsystems_Names.ARM,
+    #     name="MOVE_ELBOW",
+    #     signals={
+    #         "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
+    #         "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+    #     },
+    #     isforJetson=False
+    # ),
     CAN_MESSAGE_IDS.BEND_WRIST: Message(
         id=CAN_MESSAGE_IDS.BEND_WRIST,
         subsystem=Subsystems_Names.ARM,
@@ -120,8 +142,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="MOVE_CLAW",
         signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+            "state":     Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -130,20 +151,330 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="MOVE_SOLENOID",
         signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+            "enabled":     Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
-    CAN_MESSAGE_IDS.ARM_STATUS: Message(
-        id=CAN_MESSAGE_IDS.ARM_STATUS,
+    CAN_MESSAGE_IDS.READ_WRIST: Message(
+        id=CAN_MESSAGE_IDS.READ_WRIST,
         subsystem=Subsystems_Names.ARM,
-        name="ARM_STATUS",
+        name="READ_WRIST",
         signals={
-            "estopped": Signal(DATA_TYPES.UINT_8, 0),
-            "enabled":  Signal(DATA_TYPES.UINT_8, 0),
+            "Bend_Pos": Signal(DATA_TYPES.UINT_32, 0),
+            "Twist_Pos":  Signal(DATA_TYPES.UINT_32, 0),
 
         },
         isforJetson=True
-    )
+    ),
+    CAN_MESSAGE_IDS.READ_CLAW: Message(
+        id=CAN_MESSAGE_IDS.READ_CLAW,
+        subsystem=Subsystems_Names.ARM,
+        name="READ_CLAW",
+        signals={
+            "State": Signal(DATA_TYPES.UINT_8, 0),
+            "Position":  Signal(DATA_TYPES.UINT_32, 0),
+
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.ENABLE_SCIENCE: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_SCIENCE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_SCIENCE",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),   
+    CAN_MESSAGE_IDS.MOVE_AUGER: Message(
+        id=CAN_MESSAGE_IDS.MOVE_AUGER,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="MOVE_AUGER",
+        signals={
+            "position": Signal(DATA_TYPES.UINT_32, 0),
+            "home": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=False
+    ),   
+    CAN_MESSAGE_IDS.ENABLE_DRILL: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_DRILL,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_DRILL",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),   
+    CAN_MESSAGE_IDS.MOVE_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.MOVE_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="MOVE_SLIDE",
+        signals={
+            "stage": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),  
+    CAN_MESSAGE_IDS.ENABLE_PUMP1: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_PUMP1,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_PUMP1",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ), 
+    CAN_MESSAGE_IDS.ENABLE_PUMP2: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_PUMP2,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_PUMP2",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ENABLE_PUMP3: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_PUMP3,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_PUMP3",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ENABLE_PUMP4: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_PUMP4,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_PUMP4",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.MOVE_SPECTROMETER_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.MOVE_SPECTROMETER_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="MOVE_SPECTROMETER_SLIDE",
+        signals={
+            "Stage": Signal(DATA_TYPES.UINT_8, 0),
+            "Home": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.MOVE_FLOROMETER_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.MOVE_FLOROMETER_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="MOVE_FLOROMETER_SLIDE",
+        signals={
+            "Stage": Signal(DATA_TYPES.UINT_8, 0),
+            "Home": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ENABLE_FLOROMETER_MICRO_PUMP: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_FLOROMETER_MICRO_PUMP,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_FLOROMETER_MICRO_PUMP",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ENABLE_PRIMER: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_PRIMER,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_PRIMER",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.ENABLE_VIBRATOR: Message(
+        id=CAN_MESSAGE_IDS.ENABLE_VIBRATOR,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="ENABLE_VIBRATOR",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.READ_AUGER: Message(
+        id=CAN_MESSAGE_IDS.READ_AUGER,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_AUGER",
+        signals={
+            "Position": Signal(DATA_TYPES.UINT_32, 0),
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.READ_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_SLIDE",
+        signals={
+            "Stage": Signal(DATA_TYPES.UINT_8, 0),
+            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_DRILL: Message(
+        id=CAN_MESSAGE_IDS.READ_DRILL,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_DRILL",
+        signals={
+            "Enabled": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_PUMPS: Message(
+        id=CAN_MESSAGE_IDS.READ_PUMPS,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_PUMPS",
+        signals={
+            "Pump1_Enabled": Signal(DATA_TYPES.UINT_8, 0),
+            "Pump2_Enabled": Signal(DATA_TYPES.UINT_8, 0),
+            "Pump3_Enabled": Signal(DATA_TYPES.UINT_8, 0),
+            "Pump4_Enabled": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_SPECTROMETER_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.READ_SPECTROMETER_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_SPECTROMETER_SLIDE",
+        signals={
+            "Stage": Signal(DATA_TYPES.UINT_8, 0),
+            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_FLOROMETER_SLIDE: Message(
+        id=CAN_MESSAGE_IDS.READ_FLOROMETER_SLIDE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_FLOROMETER_SLIDE",
+        signals={
+            "Stage": Signal(DATA_TYPES.UINT_8, 0),
+            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_SPECTROMETER_LIGHT: Message(
+        id=CAN_MESSAGE_IDS.READ_SPECTROMETER_LIGHT,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_SPECTROMETER_LIGHT",
+        signals={
+            "wavelength": Signal(DATA_TYPES.FLOAT_32, 0),
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_FLOROMETER_COLOR_SENSOR: Message(
+        id=CAN_MESSAGE_IDS.READ_FLOROMETER_COLOR_SENSOR,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_FLOROMETER_COLOR_SENSOR",
+        signals={
+            "red": Signal(DATA_TYPES.UINT_16, 0),
+            "green": Signal(DATA_TYPES.UINT_16, 0),
+            "blue": Signal(DATA_TYPES.UINT_16, 0),
+            "violet": Signal(DATA_TYPES.UINT_16, 0),
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.SEND_BASE: Message(
+        id=CAN_MESSAGE_IDS.SEND_BASE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="SEND_BASE",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.SEND_SHOULDER: Message(
+        id=CAN_MESSAGE_IDS.SEND_SHOULDER,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="SEND_SHOULDER",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.SEND_ELBOW: Message(
+        id=CAN_MESSAGE_IDS.SEND_ELBOW,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="SEND_ELBOW",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.READ_BASE: Message(
+        id=CAN_MESSAGE_IDS.READ_BASE,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_BASE",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.READ_SHOULDER: Message(
+        id=CAN_MESSAGE_IDS.READ_SHOULDER,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_SHOULDER",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
+    CAN_MESSAGE_IDS.READ_ELBOW: Message(
+        id=CAN_MESSAGE_IDS.READ_ELBOW,
+        subsystem=Subsystems_Names.SCIENCE,
+        name="READ_ELBOW",
+        signals={
+            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+        },
+        isforJetson=False
+    ),
 }
