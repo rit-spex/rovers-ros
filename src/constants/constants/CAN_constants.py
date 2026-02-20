@@ -394,14 +394,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="SEND_BASE",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x2b)), # Default with disable message
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, int(0x40)),   # Default with disable message
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),   # Default with disable message
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -410,14 +410,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="SEND_SHOULDER",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x2b)), # Default with disable message
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, int(0x40)),   # Default with disable message
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),   # Default with disable message
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -426,14 +426,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="SEND_ELBOW",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x2b)), # Default with disable message
+            "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, int(0x40)),   # Default with disable message
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),   # Default with disable message
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -442,14 +442,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="READ_BASE",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x43)),
             "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -458,14 +458,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="READ_SHOULDER",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x43)),
             "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -474,14 +474,14 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="READ_ELBOW",
         signals={
-            "ID": Signal(DATA_TYPES.UINT_8, 0),
+            "MESSAGE_TYPE": Signal(DATA_TYPES.UINT_8, int(0x43)),
             "OPCODE_LSB": Signal(DATA_TYPES.UINT_8, 0),
-            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, 0),
+            "OPCODE_MSB": Signal(DATA_TYPES.UINT_8, int(0x60)),
             "EMPTY": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
-            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
             "DATA1": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA2": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA3": Signal(DATA_TYPES.UINT_8, 0),
+            "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),

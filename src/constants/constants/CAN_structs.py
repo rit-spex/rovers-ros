@@ -85,6 +85,10 @@ class Signal:
         """Set the topic source of the signal."""
         self.__topic_src = new_topic_src
 
+    def reset(self) -> None:
+        """Reset the signal to its default value."""
+        self.__value = self.__default_value
+
     def toString(self) -> str:
         """Get the string representation of the signal."""
         return f"Signal(type={self.__type}, value={self.__value}, default_value={self.__default_value})"
