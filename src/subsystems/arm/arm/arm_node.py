@@ -14,15 +14,13 @@ from std_msgs.msg import Bool
 class Arm(Node):
 
     __publishers: dict[CAN_MESSAGE_IDS, Publisher]
-
-    __base_forward: int
-    __base_backward: int
-
-    __shoulder_forward: int
-    __shoulder_backward: int
-
-    __elbow_forward: int
-    __elbow_backward: int
+    __base_target_angle: float
+    __shoulder_target_angle: float
+    __elbow_target_angle: float
+    __bend_wrist_target_angle: float
+    __twist_wrist_target_angle: float
+    __gripper_closed: bool
+    __solenoid_engaged: bool
 
     def __init__(self):
         super().__init__("arm_node")
@@ -36,19 +34,19 @@ class Arm(Node):
                     qos_profile=10
                 )
 
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.R_STR       , self.__base_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_UP_STR    , self.__shoulder_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_DOWN_STR  , self.__shoulder_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_RIGHT_STR , self.__elbow_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_LEFT_STR  , self.__elbow_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_DOWN_STR , self.__bend_wrist_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_UP_STR   , self.__bend_wrist_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_LEFT_STR , self.__twist_wrist_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_RIGHT_STR, self.__twist_wrist_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.B_STR       , self.__gripper_forward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.A_STR       , self.__gripper_backward_callback, 10)
-        self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.Z_STR       , self.__solenoid_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.R_STR       , self.__base_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_UP_STR    , self.__shoulder_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_DOWN_STR  , self.__shoulder_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_RIGHT_STR , self.__elbow_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.C_LEFT_STR  , self.__elbow_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_DOWN_STR , self.__bend_wrist_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_UP_STR   , self.__bend_wrist_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_LEFT_STR , self.__twist_wrist_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.DP_RIGHT_STR, self.__twist_wrist_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.B_STR       , self.__gripper_forward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.A_STR       , self.__gripper_backward_callback, 10)
+        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.Z_STR       , self.__solenoid_callback, 10)
 
         self.create_subscription(
             msg_type=Bool,
@@ -56,15 +54,6 @@ class Arm(Node):
             callback=self.__on_estop_received,
             qos_profile=10,
         )
-        
-        self.__base_forward = 0
-        self.__base_backward = 0
-
-        self.__shoulder_forward = 0
-        self.__shoulder_backward = 0
-
-        self.__elbow_forward = 0
-        self.__elbow_backward = 0
 
         self.__bend_wrist_forward = 0
         self.__bend_wrist_backward = 0
@@ -149,20 +138,20 @@ class Arm(Node):
             return
 
         match ID:
-            case CAN_MESSAGE_IDS.MOVE_BASE: # BASE
+            case CAN_MESSAGE_IDS.SEND_BASE: # BASE
                 # Update the signals
                 state = ArmState.Active if self.__base_forward | self.__base_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__base_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
                 can_message.signals["direction"].set_value(position)
 
-            case CAN_MESSAGE_IDS.MOVE_SHOULDER: # SHOULDER
+            case CAN_MESSAGE_IDS.SEND_SHOULDER: # SHOULDER
                 # Update the signals
                 state = ArmState.Active if self.__shoulder_forward | self.__shoulder_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__shoulder_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
                 can_message.signals["direction"].set_value(position)
-            case CAN_MESSAGE_IDS.MOVE_ELBOW: # ELBOW
+            case CAN_MESSAGE_IDS.SEND_ELBOW: # ELBOW
                 # Update the signals
                 state = ArmState.Active if self.__elbow_forward | self.__elbow_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__elbow_forward else ArmDirection.Backward
@@ -170,26 +159,17 @@ class Arm(Node):
                 can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.BEND_WRIST: # BEND WRIST
                 # Update the signals
-                state = ArmState.Active if self.__bend_wrist_forward | self.__bend_wrist_backward else ArmState.Stop
-                position = ArmDirection.Forward if self.__bend_wrist_forward else ArmDirection.Backward
-                can_message.signals["state"].set_value(state)
-                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.TWIST_WRIST: # TWIST WRIST
                 # Update the signals
-                state = ArmState.Active if self.__twist_wrist_forward | self.__twist_wrist_backward else ArmState.Stop
-                position = ArmDirection.Forward if self.__twist_wrist_forward else ArmDirection.Backward
-                can_message.signals["state"].set_value(state)
-                can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.MOVE_CLAW: # CLAW
+                # Update the signals
                 state = ArmState.Active if self.__gripper_forward | self.__gripper_backward else ArmState.Stop
                 position = ArmDirection.Forward if self.__gripper_forward else ArmDirection.Backward
                 can_message.signals["state"].set_value(state)
                 can_message.signals["direction"].set_value(position)
             case CAN_MESSAGE_IDS.MOVE_SOLENOID: # SOLENOID
-                state = ArmState.Active if self.__solenoid else ArmState.Stop
-                position = ArmDirection.Forward if self.__solenoid else ArmDirection.Backward   
-                can_message.signals["state"].set_value(state)
-                can_message.signals["direction"].set_value(position)
+                # Update the signals
+                can_message.signals["enabled"].set_value(self.__solenoid)
             case _:
                 self.get_logger().info(f"{ID} not accounted for...")
 
@@ -204,28 +184,6 @@ class Arm(Node):
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping arm...")
-        # This should be handled by can node
-        # self.__base_forward = 0
-        # self.__base_backward = 0
-        # self.__shoulder_forward = 0
-        # self.__shoulder_backward = 0
-        # self.__elbow_forward = 0
-        # self.__elbow_backward = 0
-        # self.__bend_wrist_forward = 0
-        # self.__bend_wrist_backward = 0
-        # self.__twist_wrist_forward = 0
-        # self.__twist_wrist_backward = 0
-        # self.__gripper_forward = 0
-        # self.__gripper_backward = 0
-        # self.__solenoid = 0
-
-        # self.__send_controller_data(11)
-        # self.__send_controller_data(12)
-        # self.__send_controller_data(13)
-        # self.__send_controller_data(14)
-        # self.__send_controller_data(15)
-        # self.__send_controller_data(16)
-        # self.__send_controller_data(17)
 
         rclpy.shutdown()
 

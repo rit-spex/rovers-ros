@@ -26,6 +26,9 @@ class DATA_TYPES:
     UINT_16         = DATA_TYPE(0x01, 16, "H")
     UINT_32         = DATA_TYPE(0x02, 32, "I")
     FLOAT_32        = DATA_TYPE(0x03, 32, "f")
+    INT_8           = DATA_TYPE(0x04, 8 , "b")
+    INT_16          = DATA_TYPE(0x05, 16, "h")
+    INT_32          = DATA_TYPE(0x06, 32, "i")
 
 TEENSY_CAN_MESSAGES = {
     CAN_MESSAGE_IDS.E_STOP: Message(
@@ -122,8 +125,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="BEND_WRIST",
         signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+            "position": Signal(DATA_TYPES.INT_32, 0),
         },
         isforJetson=False
     ),
@@ -132,8 +134,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="TWIST_WRIST",
         signals={
-            "state":     Signal(DATA_TYPES.UINT_8, ArmState.Stop),
-            "direction": Signal(DATA_TYPES.UINT_8, ArmDirection.Forward)
+            "position": Signal(DATA_TYPES.INT_32, 0),
         },
         isforJetson=False
     ),
@@ -155,14 +156,21 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False
     ),
-    CAN_MESSAGE_IDS.READ_WRIST: Message(
-        id=CAN_MESSAGE_IDS.READ_WRIST,
+    CAN_MESSAGE_IDS.READ_WRIST_BEND: Message(
+        id=CAN_MESSAGE_IDS.READ_WRIST_BEND,
         subsystem=Subsystems_Names.ARM,
-        name="READ_WRIST",
+        name="READ_WRIST_BEND",
         signals={
-            "Bend_Pos": Signal(DATA_TYPES.UINT_32, 0),
-            "Twist_Pos":  Signal(DATA_TYPES.UINT_32, 0),
-
+            "Position": Signal(DATA_TYPES.INT_32, 0),
+        },
+        isforJetson=True
+    ),
+    CAN_MESSAGE_IDS.READ_WRIST_TWIST: Message(
+        id=CAN_MESSAGE_IDS.READ_WRIST_TWIST,
+        subsystem=Subsystems_Names.ARM,
+        name="READ_WRIST_TWIST",
+        signals={
+            "Position": Signal(DATA_TYPES.INT_32, 0),
         },
         isforJetson=True
     ),
@@ -172,7 +180,7 @@ TEENSY_CAN_MESSAGES = {
         name="READ_CLAW",
         signals={
             "State": Signal(DATA_TYPES.UINT_8, 0),
-            "Position":  Signal(DATA_TYPES.UINT_32, 0),
+            "Position":  Signal(DATA_TYPES.INT_32, 0),
 
         },
         isforJetson=True
@@ -191,7 +199,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.SCIENCE,
         name="MOVE_AUGER",
         signals={
-            "position": Signal(DATA_TYPES.UINT_32, 0),
+            "position": Signal(DATA_TYPES.INT_32, 0),
             "home": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=False
@@ -302,7 +310,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.SCIENCE,
         name="READ_AUGER",
         signals={
-            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Position": Signal(DATA_TYPES.INT_32, 0),
         },
         isforJetson=True
     ),
@@ -312,7 +320,7 @@ TEENSY_CAN_MESSAGES = {
         name="READ_SLIDE",
         signals={
             "Stage": Signal(DATA_TYPES.UINT_8, 0),
-            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Position": Signal(DATA_TYPES.INT_32, 0),
             "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=True
@@ -344,7 +352,7 @@ TEENSY_CAN_MESSAGES = {
         name="READ_SPECTROMETER_SLIDE",
         signals={
             "Stage": Signal(DATA_TYPES.UINT_8, 0),
-            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Position": Signal(DATA_TYPES.INT_32, 0),
             "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=True
@@ -355,7 +363,7 @@ TEENSY_CAN_MESSAGES = {
         name="READ_FLOROMETER_SLIDE",
         signals={
             "Stage": Signal(DATA_TYPES.UINT_8, 0),
-            "Position": Signal(DATA_TYPES.UINT_32, 0),
+            "Position": Signal(DATA_TYPES.INT_32, 0),
             "Limit_Switch": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=True
@@ -374,16 +382,16 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.SCIENCE,
         name="READ_FLOROMETER_COLOR_SENSOR",
         signals={
-            "red": Signal(DATA_TYPES.UINT_16, 0),
-            "green": Signal(DATA_TYPES.UINT_16, 0),
-            "blue": Signal(DATA_TYPES.UINT_16, 0),
-            "violet": Signal(DATA_TYPES.UINT_16, 0),
+            "red": Signal(DATA_TYPES.INT_16, 0),
+            "green": Signal(DATA_TYPES.INT_16, 0),
+            "blue": Signal(DATA_TYPES.INT_16, 0),
+            "violet": Signal(DATA_TYPES.INT_16, 0),
         },
         isforJetson=True
     ),
     CAN_MESSAGE_IDS.SEND_BASE: Message(
         id=CAN_MESSAGE_IDS.SEND_BASE,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="SEND_BASE",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
@@ -399,7 +407,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.SEND_SHOULDER: Message(
         id=CAN_MESSAGE_IDS.SEND_SHOULDER,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="SEND_SHOULDER",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
@@ -415,7 +423,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.SEND_ELBOW: Message(
         id=CAN_MESSAGE_IDS.SEND_ELBOW,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="SEND_ELBOW",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
@@ -431,7 +439,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.READ_BASE: Message(
         id=CAN_MESSAGE_IDS.READ_BASE,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="READ_BASE",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
@@ -447,7 +455,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.READ_SHOULDER: Message(
         id=CAN_MESSAGE_IDS.READ_SHOULDER,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="READ_SHOULDER",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
@@ -463,7 +471,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.READ_ELBOW: Message(
         id=CAN_MESSAGE_IDS.READ_ELBOW,
-        subsystem=Subsystems_Names.SCIENCE,
+        subsystem=Subsystems_Names.ARM,
         name="READ_ELBOW",
         signals={
             "ID": Signal(DATA_TYPES.UINT_8, 0),
