@@ -7,57 +7,7 @@ from custom_interfaces.msg import Can
 import struct
 import ctypes
 
-#from CAN_constants import CAN_CONSTANTS
 class TeensyCommunication:
-
-    # @staticmethod
-    # def __convert_native_to_int(type: DATA_TYPE, value: Any) -> int:
-    #     """
-    #     Convert a native type to an integer representation.
-
-    #     Args:
-    #         type (int): The native type.
-
-    #     Returns:
-    #         int: The integer representation.
-    #     """
-
-    #     if type == DATA_TYPES.UINT_8:
-    #         return int(value)
-
-    #     elif type == DATA_TYPES.UINT_16:
-    #         return int(value)
-
-    #     elif type == DATA_TYPES.UINT_32:
-    #         return int(value)
-
-    #     elif type == DATA_TYPES.FLOAT_32:
-    #         return value 
-
-    # @staticmethod
-    # def __convert_int_to_native(type: DATA_TYPE, value: int) -> Any:
-    #     """
-    #     Convert an integer representation to a native type.
-
-    #     Args:
-    #         type (int): The native type.
-
-    #     Returns:
-    #         Any: The native representation.
-    #     """
-    #     # if type == DATA_TYPES.BOOLEAN:
-    #     #     return bool(value) # convert 1/2 back to bool
-
-    #     # elif type == DATA_TYPES.UINT_2_BOOL:
-    #     #     return bool(value - 1) # convert 1/2 back to bool
-
-    #     # elif type == DATA_TYPES.UINT_8_JOYSTICK:
-    #     #     # convert int (0-200) back to float joystick value (-1.0-1.0)
-    #     #     return (float(value) - 100.0) / 100.0
-
-    #     # else:
-    #     return value
-
 
     @staticmethod
     def encode_can_message(CANMessage: Message | None) -> Can | None:
@@ -98,51 +48,6 @@ class TeensyCommunication:
         for x in range(0, 8):
             result_can.buf[x] = int.from_bytes(bufTemp[x], byteorder='big')
 
-        # Calculate the number of bits used for current byte that will are fill currently
-        # bitsRemaining = 8
-        # current_byte = 0
-
-        # # the byte index
-        # byte_index = 0
-
-        # # Implement encoding logic here
-        # for signal_name, signal in CANMessage.signals.items():
-
-        #     # store how many bits we need to store for this key
-        #     signal_bits_size = signal.type.num_bits
-            
-        #     # this is value we can modify
-        #     signal_value = TeensyCommunication.__convert_native_to_int(signal.type, signal.value)
-
-        #     # repeat in case of 16 bit values or larger
-        #     while(signal_bits_size > 0):
-        #         if bitsRemaining - signal_bits_size < 0:
-        #             # use the remaining bits in the current byte
-        #             signal_bits_size -= bitsRemaining
-        #             current_byte |= (signal_value >> (signal_bits_size)) & ((1 << bitsRemaining) - 1)
-        #             result_can.buf[byte_index] = current_byte
-        #             byte_index += 1
-        #             bitsRemaining = 8
-        #             current_byte = 0
-        #         else:
-        #             # the signal fits in the current byte
-        #             current_byte |= (signal_value & ((1 << signal_bits_size) - 1)) << (bitsRemaining - signal_bits_size)
-        #             bitsRemaining -= signal_bits_size
-        #             signal_value = signal_value >> signal_bits_size
-        #             signal_bits_size = 0
-
-        #             # reset the byte if full
-        #             if bitsRemaining == 0:
-        #                 result_can.buf[byte_index] = current_byte
-        #                 byte_index += 1
-        #                 bitsRemaining = 8
-        #                 current_byte = 0
-
-        # # if there are remaining bits in the current byte, add it
-        # if bitsRemaining < 8:
-        #     result_can.buf[byte_index] = current_byte
-        #     byte_index += 1
-
         return result_can
 
     @staticmethod
@@ -168,42 +73,20 @@ class TeensyCommunication:
         if result_message is None:
             return None
 
-        # # Calculate the number of bits used for current byte of the data section
-        # byte_index = 0
-        # bitsRemaining = 8
+        signal_values = []
+        pack_format = "="
 
-        # # Implement encoding logic here
-        # for signal_name, signal in result_message.signals.items():
+        # Combine the signals together into one list of values
+        for (signal_id, signal) in result_message.signals.items():
+            signal_values.append(signal.value)
+            pack_format += signal.type.pack_format
 
-        #     # store how many bits we need to store for this signal
-        #     signal_bits_size = signal.type.num_bits
+        unpacked_list = list(struct.unpack_from(pack_format, bytes(CANPacket.buf), 0))
 
-        #     # set the value to zero for parsing
-        #     signal_value = 0
-
-        #     # repeat in case of 16 bit values or larger
-        #     while(signal_bits_size > 0):
-        #         if bitsRemaining - signal_bits_size < 0:
-        #             # use the remaining bits in the current byte
-        #             signal_bits_size -= bitsRemaining
-        #             signal_value <<= bitsRemaining
-        #             signal_value |= (CANPacket.buf[byte_index] & ((1 << bitsRemaining) - 1))
-        #             byte_index += 1
-        #             bitsRemaining = 8
-        #         else:
-        #             # the signal fits in the current byte
-        #             signal_value <<= signal_bits_size
-        #             signal_value |= ((CANPacket.buf[byte_index] >> (bitsRemaining - signal_bits_size)) & ((1 << signal_bits_size) - 1))
-        #             bitsRemaining -= signal_bits_size
-        #             signal_bits_size = 0
-
-        #             # reset the byte if full
-        #             if bitsRemaining == 0:
-        #                 bitsRemaining = 8
-        #                 byte_index += 1
-
-        #     # convert back to native type
-        #     signal.set_value(TeensyCommunication.__convert_int_to_native(signal.type, signal_value))
+        signal_index = 0
+        for (signal_id, signal) in result_message.signals.items():
+            signal.set_value(unpacked_list[signal_index])
+            signal_index += 1
 
         return result_message
 
