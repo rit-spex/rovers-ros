@@ -2,13 +2,13 @@ from constants.CommandCodes import CONSTANTS
 from constants.can_encoding import TeensyCommunication
 from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names
 from constants.CAN_structs import Signal, Message
+from custom_interfaces.msg import Can
 
 from numpy import uint8, int32
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
-from custom_interfaces.msg import Can
 from std_msgs.msg import Bool, Float32
 from enum import IntEnum
 import threading
@@ -89,14 +89,24 @@ class Arm(Node):
 
         self.__publishers = {}
         for (message_id, message) in TEENSY_CAN_MESSAGES.items():
-            if(message.subsystem == Subsystems_Names.ARM):
+            if(message.subsystem == Subsystems_Names.ARM and not message.isforJetson):
                 self.__publishers[message_id] = self.create_publisher(
                     msg_type=Can,
                     topic=message.topic_name,
                     qos_profile=10
                 )
 
+        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+            if(message.subsystem == Subsystems_Names.ARM and message.isforJetson):
+                self.create_subscription(
+                    msg_type=Can,
+                    topic=message.topic_name,
+                    callback=self.__on_new_CAN_message_received,
+                    qos_profile=10
+                )
         # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
+
+        self.create_subscription(Bool, "ARM/ENABLED", self.__on_arm_enable_received, 10)
 
         self.create_subscription(
             msg_type=Bool,

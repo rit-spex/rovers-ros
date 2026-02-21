@@ -13,7 +13,7 @@ from constants.CAN_structs import DATA_TYPE, Signal, Message
 
 # Define subsystem names
 class Subsystems_Names:
-    ALL     = "ALL"
+    GENERAL = "GENERAL"
     CHASSIS = "CHASSIS"
     ARM     = "ARM"
     SCIENCE = "SCIENCE"
@@ -33,7 +33,7 @@ class DATA_TYPES:
 TEENSY_CAN_MESSAGES = {
     CAN_MESSAGE_IDS.E_STOP: Message(
         id=CAN_MESSAGE_IDS.E_STOP,
-        subsystem=Subsystems_Names.ALL,
+        subsystem=Subsystems_Names.GENERAL,
         name="E_STOP",
         signals={
             "E_STOP": Signal(DATA_TYPES.UINT_8, 1)
@@ -42,7 +42,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.ROS_HEARTBEAT: Message(
         id=CAN_MESSAGE_IDS.ROS_HEARTBEAT,
-        subsystem=Subsystems_Names.ALL,
+        subsystem=Subsystems_Names.GENERAL,
         name="ROS_Heartbeat",
         signals={
             "source": Signal(DATA_TYPES.UINT_8, 0),
@@ -53,7 +53,7 @@ TEENSY_CAN_MESSAGES = {
     ),
     CAN_MESSAGE_IDS.TEENSY_HEARTBEAT: Message(
         id=CAN_MESSAGE_IDS.TEENSY_HEARTBEAT,
-        subsystem=Subsystems_Names.ALL,
+        subsystem=Subsystems_Names.GENERAL,
         name="Teensy_Heartbeat",
         signals={
             "source": Signal(DATA_TYPES.UINT_8, 0),
