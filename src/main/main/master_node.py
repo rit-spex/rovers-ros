@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from numpy import int32
+
 # ros imports
 import rclpy
 import rclpy.logging
@@ -57,6 +59,21 @@ class Master(Node):
         self.__last_basestation_heartbeat_time = UInt16()
         self.__current_basestation_heartbeat_time = UInt16()
         self.__basestation_recieved_heartbeat = False
+
+        self.__chassis_teensy_enabled = False
+        self.__chassis_node_enabled = False
+        self.__last_chassis_command = UInt16()
+        self.__curr_chassis_command = UInt16()
+
+        self.__arm_teensy_enabled = False
+        self.__arm_node_enabled = False
+        self.__last_arm_command = UInt16()
+        self.__curr_arm_command = UInt16()
+
+        self.__science_teensy_enabled = False
+        self.__science_node_enabled = False
+        self.__last_science_command = UInt16()
+        self.__curr_science_command = UInt16()
 
         # create publishers and subscriptions for e-stop, chassis, arm, and science commands
         self.__estop_publisher = self.create_publisher(
@@ -157,7 +174,7 @@ class Master(Node):
                 self.__last_basestation_heartbeat_time = self.__current_basestation_heartbeat_time
 
         # check for chassis command timeout
-        if self.__chassis_enabled:
+        if self.__chassis_teensy_enabled:
             if self.__curr_chassis_command == self.__last_chassis_command:
                 self.get_logger().info("Chassis command timeout detected, disabling chassis")
                 self.__chassis_node_enabled = False
@@ -168,7 +185,7 @@ class Master(Node):
                 self.__last_chassis_command = self.__curr_chassis_command
         
         # check for arm command timeout
-        if self.__arm_enabled:
+        if self.__arm_teensy_enabled:
             if self.__curr_arm_command == self.__last_arm_command:
                 self.get_logger().info("Arm command timeout detected, disabling arm")
                 self.__arm_node_enabled = False
@@ -179,7 +196,7 @@ class Master(Node):
                 self.__last_arm_command = self.__curr_arm_command
 
         # check for science command timeout
-        if self.__science_enabled:
+        if self.__science_teensy_enabled:
             if self.__curr_science_command == self.__last_science_command:
                 self.get_logger().info("Science command timeout detected, disabling science")
                 self.__science_node_enabled = False
@@ -191,7 +208,7 @@ class Master(Node):
 
         # send heartbeat message to teensy
         ros_heartbeat = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.ROS_HEARTBEAT]
-        ros_heartbeat.signals["timestamp"].set_value(self.get_clock().now().nanoseconds // 1_000_000) # set timestamp to current time in milliseconds
+        ros_heartbeat.signals["timestamp"].set_value(int32((self.get_clock().now().nanoseconds // 1_000_000) % 100000000)) # set timestamp to current time in milliseconds
 
         can_packet = TeensyCommunication.encode_can_message(ros_heartbeat)
         if can_packet is not None:

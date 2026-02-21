@@ -40,7 +40,6 @@ class CAN_UDP(Node):
         self.__send_port = 8000
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        # can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
         self.__publishers = {}
         self.__can_tx_subscriptions = {}
