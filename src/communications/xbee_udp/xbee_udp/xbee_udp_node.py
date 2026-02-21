@@ -6,9 +6,11 @@ from rclpy.publisher import Publisher
 
 from std_msgs.msg import UInt8MultiArray
 
+import select
 import socket as skt
 from socket import socket
-import errno
+
+from constants.CommandCodes import CONSTANTS
 
 
 class xbee_udp(Node):
@@ -21,8 +23,8 @@ class xbee_udp(Node):
     def __init__(self) -> None:
         super().__init__("xbee_udp_node")
 
-        self.__address = "127.0.0.1"
-        self.__port = 5005
+        self.__address = CONSTANTS.COMMUNICATION.UDP_HOST
+        self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
         self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
@@ -35,15 +37,6 @@ class xbee_udp(Node):
                 f"received {len(payload)} bytes from {addr[0]}:{addr[1]}: "
                 f"{data.hex(' ')}"
             )
-
-        except BlockingIOError:
-            return []
-        except OSError as e:
-            # only error out if it wasn't from non-blocking
-            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                return []
-            self.get_logger().error(f"failed to receive data: {e}")
-            return []
         except Exception as e:
             self.get_logger().error(f"failed to receive data: {e}")
             return []
@@ -58,15 +51,15 @@ class xbee_udp(Node):
         self.get_logger().info("starting xbee udp socket connection...")
         self.__socket.bind((self.__address, self.__port))
 
-        # make it so it will not stop the code when requesting a read
-        self.__socket.setblocking(False)
-
         try:
             while rclpy.ok():
-                data = self.read_data(self.__buffer_size)
-                if data:
-                    self.publish_data(data)
-                rclpy.spin_once(self, timeout_sec=0.01)
+                # Wait up to 10 ms for data instead of non-blocking spin
+                ready, _, _ = select.select([self.__socket], [], [], 0.01)
+                if ready:
+                    data = self.read_data(self.__buffer_size)
+                    if data:
+                        self.publish_data(data)
+                rclpy.spin_once(self, timeout_sec=0)
         finally:
             self.__socket.close()
 

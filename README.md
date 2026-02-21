@@ -34,6 +34,8 @@ The basestation sends controller data over XBee radio as compact bit-packed byte
 | Node | File | Purpose |
 |------|------|---------|
 | `basestation_node` | `src/communications/basestation/basestation/basestation_node.py` | Decodes XBee messages → ROS topics |
+| `telemetry_uplink_node` | `src/communications/basestation/basestation/telemetry_uplink_node.py` | Encodes rover telemetry and sends it to the basestation via UDP |
+
 ### Protocol Trace Debugging
 
 You can enable real-time hex-level protocol tracing to verify that the rover is correctly encoding/decoding messages. This is useful for confirming bit-packed message IDs and field values match what the basestation expects.

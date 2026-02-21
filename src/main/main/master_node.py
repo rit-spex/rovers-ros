@@ -43,7 +43,7 @@ class Master(Node):
         )
         self.create_subscription(
             msg_type=Bool,
-            topic="/BASESTATION/" + CONSTANTS.QUIT.NAME + "/" + CONSTANTS.QUIT.NAME,
+            topic="/BASESTATION/" + CONSTANTS.QUIT.NAME + "/" + CONSTANTS.QUIT.QUIT_MESSAGE,
             callback=self.__on_quit_received,
             qos_profile=10,
         )

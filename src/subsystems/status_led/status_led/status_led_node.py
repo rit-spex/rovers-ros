@@ -1,13 +1,7 @@
-from typing import Any
-from constants.CAN_Constants import TOPICS
-from constants.CommandCodes import CONSTANTS
-
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node, Timer
-from rclpy.publisher import Publisher
-from std_msgs.msg import Float32
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
+from std_msgs.msg import Bool
 
 try:
     import Jetson.GPIO as GPIO
