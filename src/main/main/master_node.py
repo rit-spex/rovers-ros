@@ -29,6 +29,8 @@ class Master(Node):
     __science_node_enable_publisher: rclpy.publisher.Publisher # This is sent to other nodes to tell them to enable/disable the science subsystem
     __science_teensy_enable_publisher: rclpy.publisher.Publisher
 
+    __ros_teensy_publisher: rclpy.publisher.Publisher # This is sent to the teensy to tell it that the ROS system is alive
+
     # basestation heartbeat tracking
     __last_basestation_heartbeat_time: UInt16
     __current_basestation_heartbeat_time: UInt16
@@ -96,6 +98,12 @@ class Master(Node):
         self.__science_teensy_enable_publisher = self.create_publisher(
             msg_type=Can,
             topic= TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.ENABLE_SCIENCE].topic_name,
+            qos_profile=10,
+        )
+
+        self.__ros_teensy_publisher = self.create_publisher(
+            msg_type=Can,
+            topic= TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.ROS_HEARTBEAT].topic_name,
             qos_profile=10,
         )
 
@@ -180,6 +188,14 @@ class Master(Node):
                 self.__science_teensy_enable_publisher.publish(self.__pack_enable_message_to_teensy(CAN_MESSAGE_IDS.ENABLE_SCIENCE, False))
             else:
                 self.__last_science_command = self.__curr_science_command
+
+        # send heartbeat message to teensy
+        ros_heartbeat = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.ROS_HEARTBEAT]
+        ros_heartbeat.signals["timestamp"].set_value(self.get_clock().now().nanoseconds // 1_000_000) # set timestamp to current time in milliseconds
+
+        can_packet = TeensyCommunication.encode_can_message(ros_heartbeat)
+        if can_packet is not None:
+            self.__ros_teensy_publisher.publish(can_packet)
 
     def __on_quit_received(self, msg: Bool):
         self.get_logger().info("Quit message received, forwarding e-stop ...")

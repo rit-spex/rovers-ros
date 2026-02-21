@@ -47,7 +47,7 @@ TEENSY_CAN_MESSAGES = {
         signals={
             "source": Signal(DATA_TYPES.UINT_8, 0),
             "timestamp": Signal(DATA_TYPES.UINT_32, 0),
-            "Enabled": Signal(DATA_TYPES.UINT_8, 0)
+            "Enabled": Signal(DATA_TYPES.UINT_8, 1)
         },
         isforJetson=False
     ),
