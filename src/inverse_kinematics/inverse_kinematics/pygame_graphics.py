@@ -359,6 +359,6 @@ cube_size = 125  # smaller cube so points are closer to camera
 WIDTH = 900
 HEIGHT = 700
 half = cube_size / 1.2
-CAM_POS = [-half * 0.25, -half * 1.25, half * 0.5]  # slightly outside the cube
+CAM_POS = [-half * 0.25, -half * 0.5, half * 0.5]  # slightly outside the cube
 LOOK_AT = [-cube_size / 4, 0, -10]  # center of the cube
 C, R, U, F = compute_camera_basis()

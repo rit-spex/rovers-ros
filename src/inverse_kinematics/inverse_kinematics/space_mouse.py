@@ -1,4 +1,4 @@
-import hidapi as hid
+import hid
 import struct
 
 
@@ -8,7 +8,7 @@ def setup_spacemouse(vendor_id=0x256f, product_id=0xc62e):
     """
     Initialize the SpaceMouse device.
     """
-    device = hid.Device(vendor_id=0x256f, product_id=0xc62e)
+    device = hid.Device(vid=vendor_id, pid=product_id)
     # device.open(vendor_id, product_id)
     # device.set_nonblocking(True)
     return device
@@ -18,7 +18,7 @@ def read_spacemouse(dev, state):
     """
     Read SpaceMouse data and update the state dictionary.
     """
-    data = dev.read(64)
+    data = dev.read(64, timeout=10)
     if not data:
         return
 
@@ -36,7 +36,6 @@ def read_spacemouse(dev, state):
         state["buttons"] = struct.unpack("<H", bytes(data[1:3]))[0]
 
     flush_hid(dev)
-
 
 # def read_dualshock_4(device, state: dict[str, float]):
 #     data = device.read(64)
@@ -69,8 +68,10 @@ def flush_hid(device):
         device (_type_): _description_
     """
     while True:
-        data = device.read(64)
+        data = device.read(64, timeout=10)
         if not data:
+            break
+        elif len(data) == 0:
             break
 
 

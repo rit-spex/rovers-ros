@@ -14,6 +14,7 @@ from pygame_graphics import (
     draw_GUI,
     init_pygame,
 )
+import rclpy
 from space_mouse import (
     read_spacemouse,
     setup_spacemouse,
@@ -87,14 +88,15 @@ class ArmController(Node):
     __static_surface: Surface
 
     def __init__(self):
-        pass
+        super().__init__("Arm_inverse_kinematics")
+
         # Arm initial parameters
         self.__initial_angles = [math.pi, math.pi / 2, -math.pi / 2, 0.0, 0.0]
         self.__iAs = self.__initial_angles
         self.__j0, self.__j1, self.__j2, self.__j3 = calc_joint_positions(
             self.__iAs[0], self.__iAs[1], self.__iAs[2], self.__iAs[3], False
         )
-        self.__th0, self.__th1, self.__th2, self.__th3, __th4 = self.__initial_angles
+        self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = self.__initial_angles
 
         # General parameters
         self.__point = self.__j3
@@ -149,6 +151,7 @@ class ArmController(Node):
 
             # Read mouse data
             read_spacemouse(self.__device, self.__state)
+
             if int(self.__state["buttons"]) == 1:
                 self.__homing = True
             if int(self.__state["buttons"]) == 2:
@@ -275,7 +278,7 @@ class ArmController(Node):
                     self.__buttonz,
                     self.__static_surface,
                 )
-                print(
+                self.get_logger().info(
                     f"{time.time()-self.__start_time:10.4f}\t\t{self.__th0*57.3:10.4f}\t\t{self.__th1*57.3:10.4f}\t\t{self.__th2*57.3:10.4f}\t\t{self.__th3*57.3:10.4f}"
                 )
                 pygame.display.flip()
@@ -285,6 +288,7 @@ class ArmController(Node):
 
 
 def main():
+    rclpy.init()
     arm_controller = ArmController()
     arm_controller.run()
 
