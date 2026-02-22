@@ -1,17 +1,16 @@
-import hid
+import hidapi as hid
 import struct
 
 
 # ================== SpaceMouse setup ==================
 
-def setup_spacemouse(vendor_id=9583, product_id=50734):
+def setup_spacemouse(vendor_id=0x256f, product_id=0xc62e):
     """
     Initialize the SpaceMouse device.
     """
-    print(f"vendor_id, product_id: {vendor_id, product_id}")
-    device = hid.device()
-    device.open(vendor_id, product_id)
-    device.set_nonblocking(True)
+    device = hid.Device(vendor_id=0x256f, product_id=0xc62e)
+    # device.open(vendor_id, product_id)
+    # device.set_nonblocking(True)
     return device
 
 
@@ -32,35 +31,35 @@ def read_spacemouse(dev, state):
         state["z"]  = -vals[2]
         state["rx"] =  vals[3]
         state["ry"] =  vals[4]
-        state["rz"] =  vals[5]
+        state["rz"] = -vals[5]
     elif report_id == 0x03 and len(data) >= 3:  # button report
         state["buttons"] = struct.unpack("<H", bytes(data[1:3]))[0]
 
     flush_hid(dev)
 
 
-def read_dualshock_4(device, state: dict[str, float]):
-    data = device.read(64)
-    if not data:
-        print("no data")
-        return
-
-    report_id = data[0]
-    print(report_id)
-
-    if report_id == 0x01 and len(data) >= 13:  # translation/rotation report
-        vals = struct.unpack("<hhhhhh", bytes(data[1:13]))
-        print(vals)
-        state["x"]  =  vals[0]
-        state["y"]  = -vals[1]  # flip axis if needed
-        state["z"]  = -vals[2]
-        state["rx"] =  vals[3]
-        state["ry"] =  vals[4]
-        state["rz"] =  vals[5]
-    elif report_id == 0x03 and len(data) >= 3:  # button report
-        state["buttons"] = struct.unpack("<H", bytes(data[1:3]))[0]
-
-    flush_hid(device)
+# def read_dualshock_4(device, state: dict[str, float]):
+#     data = device.read(64)
+#     if not data:
+#         print("no data")
+#         return
+#
+#     report_id = data[0]
+#     print(report_id)
+#
+#     if report_id == 0x01 and len(data) >= 13:  # translation/rotation report
+#         vals = struct.unpack("<hhhhhh", bytes(data[1:13]))
+#         print(vals)
+#         state["x"]  =  vals[0]
+#         state["y"]  = -vals[1]  # flip axis if needed
+#         state["z"]  = -vals[2]
+#         state["rx"] =  vals[3]
+#         state["ry"] =  vals[4]
+#         state["rz"] =  vals[5]
+#     elif report_id == 0x03 and len(data) >= 3:  # button report
+#         state["buttons"] = struct.unpack("<H", bytes(data[1:3]))[0]
+#
+#     flush_hid(device)
 
 
 def flush_hid(device):
@@ -92,3 +91,4 @@ def flush_hid_preserve_buttons(device, state):
             last_buttons = struct.unpack("<H", bytes(data[1:3]))[0]
 
     state["buttons"] = last_buttons
+
