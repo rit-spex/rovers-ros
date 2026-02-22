@@ -8,7 +8,7 @@
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
-from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection, Subsystems_Names
+from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection, SubsystemsIDs
 from constants.CAN_structs import DATA_TYPE, Signal, Message
 
 # Define subsystem names
@@ -45,9 +45,9 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.GENERAL,
         name="ROS_Heartbeat",
         signals={
-            "source": Signal(DATA_TYPES.UINT_8, 0),
+            "source": Signal(DATA_TYPES.UINT_8, SubsystemsIDs.GENERAL),
             "timestamp": Signal(DATA_TYPES.UINT_32, 0),
-            "Enabled": Signal(DATA_TYPES.UINT_8, 1)
+            "enabled": Signal(DATA_TYPES.UINT_8, 1)
         },
         isforJetson=False
     ),
@@ -56,9 +56,9 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.GENERAL,
         name="Teensy_Heartbeat",
         signals={
-            "source": Signal(DATA_TYPES.UINT_8, 0),
+            "source": Signal(DATA_TYPES.UINT_8, SubsystemsIDs.GENERAL),
             "timestamp": Signal(DATA_TYPES.UINT_32, 0),
-            "Enabled": Signal(DATA_TYPES.UINT_8, 0)
+            "enabled": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=True
     ),

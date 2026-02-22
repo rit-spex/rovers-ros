@@ -15,7 +15,7 @@ from custom_interfaces.msg import Can
 
 from constants.CommandCodes import CONSTANTS
 from constants.can_encoding import TeensyCommunication
-from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names
+from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names, SubsystemsIDs
 from constants.CAN_structs import Signal, Message
 
 timeout_duration = 1  # seconds
@@ -243,13 +243,14 @@ class Master(Node):
         elif(can_message.id == CAN_MESSAGE_IDS.TEENSY_HEARTBEAT):
             try:
                 source_signal = can_message.signals["source"]
-                if(source_signal.value == Subsystems_Names.CHASSIS):
+                # self.get_logger().info(f"Source signal received: {can_message.toString()}")
+                if(source_signal.value == SubsystemsIDs.CHASSIS):
                     self.__last_chassis_command = self.__curr_chassis_command
                     self.__curr_chassis_command = can_message.signals["timestamp"].value
 
                     # only set chassis enabled if it is not already
                     if(not self.__chassis_teensy_enabled):
-                        self.__chassis_enabled = True
+                        self.__chassis_teensy_enabled = True
                         self.__chassis_teensy_enable_publisher.publish(self.__pack_enable_message_to_teensy(CAN_MESSAGE_IDS.ENABLE_CHASSIS, True))
                         self.get_logger().info("Chassis command received, enabling chassis teensy")
                     elif(can_message.signals["enabled"].value == 1 and not self.__chassis_node_enabled):
@@ -257,13 +258,13 @@ class Master(Node):
                         self.__chassis_node_enable_publisher.publish(Bool(data=True))
                         self.get_logger().info("Chassis enabled message received from teensy, enabling chassis node")
 
-                elif(source_signal.value == Subsystems_Names.ARM):
+                elif(source_signal.value == SubsystemsIDs.ARM):
                     self.__last_arm_command = self.__curr_arm_command
                     self.__curr_arm_command = can_message.signals["timestamp"].value
 
                     # only set arm enabled if it is not already
                     if(not self.__arm_teensy_enabled):
-                        self.__arm_enabled = True
+                        self.__arm_teensy_enabled = True
                         self.__arm_teensy_enable_publisher.publish(self.__pack_enable_message_to_teensy(CAN_MESSAGE_IDS.ENABLE_ARM, True))
                         self.get_logger().info("Arm command received, enabling arm teensy")
                     elif(can_message.signals["enabled"].value == 1 and not self.__arm_node_enabled):
@@ -271,13 +272,13 @@ class Master(Node):
                         self.__arm_node_enable_publisher.publish(Bool(data=True))
                         self.get_logger().info("Arm enabled message received from teensy, enabling arm node")
 
-                elif(source_signal.value == Subsystems_Names.SCIENCE):
+                elif(source_signal.value == SubsystemsIDs.SCIENCE):
                     self.__last_science_command = self.__curr_science_command
                     self.__curr_science_command = can_message.signals["timestamp"].value
 
                     # only set science enabled if it is not already
                     if(not self.__science_teensy_enabled):
-                        self.__science_enabled = True
+                        self.__science_teensy_enabled = True
                         self.__science_teensy_enable_publisher.publish(self.__pack_enable_message_to_teensy(CAN_MESSAGE_IDS.ENABLE_SCIENCE, True))
                         self.get_logger().info("Science command received, enabling science teensy")
                     elif(can_message.signals["enabled"].value == 1 and not self.__science_node_enabled):
@@ -296,7 +297,7 @@ class Master(Node):
             return None
         
         message = TEENSY_CAN_MESSAGES[message_id]
-        message.signals["enabled"].set_value(enabled)
+        message.signals["enable"].set_value(enabled)
         can_packet = TeensyCommunication.encode_can_message(message)
         if can_packet is not None:
             return can_packet
