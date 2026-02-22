@@ -68,7 +68,15 @@ class Chassis(Node):
         self.create_subscription(
             Float32, "/object_detection/AR_RY", self.__AR_RY_callback, 10
         )
+        # From GPS node
+        self.create_subscription(
+            Float32, "/object_detection/GPS_LY", self.__GPS_LY_callback, 10
+        )
+        self.create_subscription(
+            Float32, "/object_detection/GPS_RY", self.__GPS_RY_callback, 10
+        )
 
+        # Control mode switch
         self.create_subscription(
             UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.__operation_type_callback, 10
         )
@@ -122,6 +130,16 @@ class Chassis(Node):
 
     def __AR_RY_callback(self, msg: Float32):
         if self.__operation_type == 2:
+            self.__RY_value = msg.data
+            self.__send_controller_data()
+
+    def __GPS_LY_callback(self, msg: Float32):
+        if self.__operation_type == 3:
+            self.__LY_value = msg.data
+            self.__send_controller_data()
+
+    def __GPS_RY_callback(self, msg: Float32):
+        if self.__operation_type == 3:
             self.__RY_value = msg.data
             self.__send_controller_data()
 

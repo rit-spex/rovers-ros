@@ -5,20 +5,23 @@ from sensor_msgs.msg import NavSatFix
 import serial
 import time
 
+
 class GPSNode(Node):
     def __init__(self):
-        super().__init__('gps_node')
+        super().__init__("gps_node")
 
         # 1. Declare Parameters
         # Adjust these! '/dev/ttyACM0' is common for USB, '/dev/ttyTHS1' for UART pins
-        self.declare_parameter('port', '/dev/ttyACM0')
-        self.declare_parameter('baudrate', 38400) # MAX-M10s often defaults to 38400 or 9600
+        self.declare_parameter("port", "/dev/ttyTHS1")
+        self.declare_parameter(
+            "baudrate", 38400
+        )  # MAX-M10s often defaults to 38400 or 9600
 
-        port = self.get_parameter('port').get_parameter_value().string_value
-        baud = self.get_parameter('baudrate').get_parameter_value().integer_value
+        port = self.get_parameter("port").get_parameter_value().string_value
+        baud = self.get_parameter("baudrate").get_parameter_value().integer_value
 
         # 2. specific Topic Name requested
-        self.publisher_ = self.create_publisher(NavSatFix, '/GPS/ROVER', 10)
+        self.publisher_ = self.create_publisher(NavSatFix, "/GPS/ROVER", 10)
 
         # 3. Setup Serial Connection
         try:
@@ -39,10 +42,12 @@ class GPSNode(Node):
         try:
             # Read all available lines
             while self.serial_conn.in_waiting > 0:
-                line = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
-                
+                line = (
+                    self.serial_conn.readline().decode("utf-8", errors="ignore").strip()
+                )
+
                 # Check for the GNGGA (Global Navigation) or GPGGA (GPS only) sentence
-                if line.startswith('$GNGGA') or line.startswith('$GPGGA'):
+                if line.startswith("$GNGGA") or line.startswith("$GPGGA"):
                     self.parse_and_publish(line)
 
         except Exception as e:
@@ -53,11 +58,11 @@ class GPSNode(Node):
         Parses standard NMEA GNGGA string:
         $GNGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47
         """
-        parts = nmea_sentence.split(',')
+        parts = nmea_sentence.split(",")
 
         # specific check: verify we have a 'Fix Quality' > 0 (index 6)
         # If it's 0, the GPS doesn't have a lock yet.
-        if len(parts) < 10 or parts[6] == '0':
+        if len(parts) < 10 or parts[6] == "0":
             self.get_logger().debug("No GPS fix yet...")
             return
 
@@ -84,7 +89,7 @@ class GPSNode(Node):
             # self.get_logger().info(f"Published GPS: {msg.latitude}, {msg.longitude}")
 
         except ValueError:
-            pass # Malformed string
+            pass  # Malformed string
 
     def nmea_to_decimal(self, coordinate, direction):
         """
@@ -92,22 +97,23 @@ class GPSNode(Node):
         """
         # Math: The first digits are degrees, the rest are minutes.
         # Longitude can be 3 digits for degrees (DDDMM), Latitude is 2 (DDMM).
-        
+
         # Simple logic: Divide by 100 to separate DD and MM.MM
         degrees = int(coordinate / 100)
         minutes = coordinate - (degrees * 100)
-        
+
         decimal = degrees + (minutes / 60.0)
 
-        if direction == 'S' or direction == 'W':
+        if direction == "S" or direction == "W":
             decimal *= -1
 
         return decimal
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = GPSNode()
-    
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -118,5 +124,6 @@ def main(args=None):
         node.destroy_node()
         rclpy.shutdown()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

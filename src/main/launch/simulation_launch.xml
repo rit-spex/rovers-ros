@@ -9,8 +9,8 @@
 	<node pkg="object_detection" exec="object_tracker_node" name="object_tracker"></node>
 	<node pkg="object_detection" exec="arcu_tracker_node" name="arcu_tracker"></node>
 	<node pkg="object_detection" exec="aruco_pathfinding_node" name="arcu_pathfinding"></node>
-	
+	<node pkg="object_detection" exec="GPS_node" name="GPS_node"></node>
+	<node pkg="object_detection" exec="GPS_pathfinding_node" name="GPS_pathfinding"></node>
 	<node pkg="cameras" exec="cameras" name="cameras"></node>
 	<node pkg="unitree_lidar_ros2" exec="unitree_lidar_ros2_node" name="unilidar_node"></node>
-
 </launch>
