@@ -64,7 +64,7 @@ ARM_MOTOR_PARAMS = [
     arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651)  # twist wrist
 ]
 
-REQUESTED_ARM_UPDATE_RATE = 5 # in Hz, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
+REQUESTED_ARM_UPDATE_RATE = 0.5 # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
 
 class Arm(Node):
 
@@ -106,7 +106,7 @@ class Arm(Node):
                 )
         # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
 
-        self.create_subscription(Bool, "ARM/ENABLED", self.__on_arm_enable_received, 10)
+        self.create_subscription(Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10)
 
         self.create_subscription(
             msg_type=Bool,
@@ -122,9 +122,11 @@ class Arm(Node):
         self.__motors_actual_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
         self.__open_can_send_lock = threading.Lock()
 
-        # 1. Create and start the receiver thread for udp messages
-        self.request_position_thread = threading.Thread(target=request_position_thread, args=(self,))
-        
+        # 1. Create and start a timer to continuously request the position of the arm motors at the requested update rate 
+        self.create_timer(
+            timer_period_sec=REQUESTED_ARM_UPDATE_RATE,
+            callback=self.request_position,
+        )        
 
     def __base_callback(self, msg: Float32):        
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
@@ -420,21 +422,17 @@ class Arm(Node):
                 self.__gripper_actual_ticks = can_message.signals["Position"].value
                 self.get_logger().info(f"Updated actual tick for gripper: {can_message.signals['Position'].value}")
 
+    def request_position(self):
+        if self.arm_enabled:
+            self.get_logger().info("Requesting position update from arm motors...")
+            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_BASE, int32(0), OPEN_CAN.ID.READ)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_SHOULDER, int32(0), OPEN_CAN.ID.READ)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_ELBOW, int32(0), OPEN_CAN.ID.READ)
+
     def run(self):
         self.get_logger().info("starting arm...")
         rclpy.spin(self)
         self.get_logger().info("stopping arm...")
-
-def request_position_thread(node: Arm):
-    rate = node.create_rate(REQUESTED_ARM_UPDATE_RATE)
-    while rclpy.ok():
-        # only request position if arm is enabled
-        if node.arm_enabled:
-            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_BASE, int32(0), OPEN_CAN.ID.READ)
-            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_SHOULDER, int32(0), OPEN_CAN.ID.READ)
-            node.__send_open_can_message(CAN_MESSAGE_IDS.READ_ELBOW, int32(0), OPEN_CAN.ID.READ)
-
-        rate.sleep()
 
 def main():
     rclpy.init()
