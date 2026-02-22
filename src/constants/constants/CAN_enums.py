@@ -18,6 +18,12 @@ class ArmDirection(IntEnum):
     Forward = 0
     Backward = 1
 
+class SubsystemsIDs(IntEnum):
+    GENERAL = 0
+    CHASSIS = 1
+    ARM = 2
+    SCIENCE = 3
+
 class CAN_MESSAGE_IDS(IntEnum):
     E_STOP = 0
     ROS_HEARTBEAT = 1

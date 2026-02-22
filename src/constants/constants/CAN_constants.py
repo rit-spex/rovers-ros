@@ -8,7 +8,7 @@
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
-from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection
+from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection, Subsystems_Names
 from constants.CAN_structs import DATA_TYPE, Signal, Message
 
 # Define subsystem names

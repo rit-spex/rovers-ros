@@ -91,7 +91,7 @@ class Signal:
 
     def toString(self) -> str:
         """Get the string representation of the signal."""
-        return f"Signal(type={self.__type}, value={self.__value}, default_value={self.__default_value})"
+        return f"Signal(type={str(self.__type)}, value={self.__value}, default_value={self.__default_value})"
 
 # Class representing a full can message with an ID, name, and signals.
 class Message:
@@ -151,4 +151,6 @@ class Message:
 
     def toString(self) -> str:
         """Get the string representation of the message."""
-        return f"Message(id={self.__id}, name={self.__name}, subsystem={self.__subsystem}, signals={self.__signals}, isforJetson={self.__isforJetson})"
+        signals_str = ", ".join([f"{name}: {signal.toString()}" for name, signal in self.__signals.items()])
+
+        return f"Message(id={str(self.__id)}, name={self.__name}, subsystem={self.__subsystem}, signals={signals_str}, isforJetson={self.__isforJetson})"
