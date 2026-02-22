@@ -89,11 +89,16 @@ class Basestation(Node):
             if key not in self.__publishers[id]:
                 continue
             
+            # only send data that has changed to avoid spamming the network
+            if self.__basestation_communications.get_messages()[id]['values'][key].get_value == value:
+                continue
+
+            self.__basestation_communications.get_messages()[id]['values'][key].set_value(value)
+            
             value_type = self.__valueTypes[
                 self.__basestation_communications.get_messages()[id]['values'][key].get_type]
 
             # self.get_logger().info(f"Publishing to /BASESTATION/{self.__basestation_communications.get_messages()[id]['name']}/{key}: {value}")
-
             self.__publishers[id][key].publish(value_type(data=value))
 
     def send_msg(self):

@@ -32,7 +32,7 @@ class xbee_udp(Node):
     def read_data(self, buffer_size: int) -> list[int] | None:
         try:
             data = self.__socket.recvfrom(buffer_size)
-            self.get_logger().info(f"got data :)")
+            # self.get_logger().info(f"got data :)")
 
         except Exception as e:
             err = e.args
