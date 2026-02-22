@@ -29,14 +29,28 @@ class Chassis(Node):
             qos_profile=10,
         )
 
-        self.__control_mode_publisher = self.create_publisher(UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", 10)
+        self.__control_mode_publisher = self.create_publisher(
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", 10
+        )
 
         # From controller (manual driving)
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_manual_callback, 10
+            Float32,
+            "/BASESTATION/"
+            + CONSTANTS.XBOX.NAME
+            + "/"
+            + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR,
+            self.__LY_manual_callback,
+            10,
         )
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_manual_callback, 10
+            Float32,
+            "/BASESTATION/"
+            + CONSTANTS.XBOX.NAME
+            + "/"
+            + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR,
+            self.__RY_manual_callback,
+            10,
         )
 
         # From Object Detection
@@ -109,37 +123,43 @@ class Chassis(Node):
     def __AR_RY_callback(self, msg: Float32):
         if self.__operation_type == 2:
             self.__RY_value = msg.data
-            self.__send_controller_data()  
+            self.__send_controller_data()
 
     # Control Mode Switching Functions -----------------
     def __xbox_b_callback(self, msg):
-        cm = UInt8()
-        cm.data = 0
-        self.__control_mode_publisher.publish(cm)
-    def __xbox_x_callback(self, msg):
-        cm = UInt8()
-        cm.data = 1
-        self.__control_mode_publisher.publish(cm)
-    def __xbox_a_callback(self, msg):
-        cm = UInt8()
-        cm.data = 2
-        self.__control_mode_publisher.publish(cm)
-    def __xbox_y_callback(self, msg):
-        cm = UInt8()
-        cm.data = 3
-        self.__control_mode_publisher.publish(cm)
+        if msg.data == True:
+            cm = UInt8()
+            cm.data = 0
+            self.__control_mode_publisher.publish(cm)
 
+    def __xbox_x_callback(self, msg):
+        if msg.data == True:
+            cm = UInt8()
+            cm.data = 1
+            self.__control_mode_publisher.publish(cm)
+
+    def __xbox_a_callback(self, msg):
+        if msg.data == True:
+            cm = UInt8()
+            cm.data = 2
+            self.__control_mode_publisher.publish(cm)
+
+    def __xbox_y_callback(self, msg):
+        if msg.data == True:
+            cm = UInt8()
+            cm.data = 3
+            self.__control_mode_publisher.publish(cm)
 
     def __send_controller_data(self):
-        #self.get_logger().info(f"LY: {self.__LY_value}")
-        #self.get_logger().info(f"RY: {self.__RY_value}")
+        # self.get_logger().info(f"LY: {self.__LY_value}")
+        # self.get_logger().info(f"RY: {self.__RY_value}")
         # self.get_logger().info(f"")
 
         ros_msg = Can()
         ros_msg.channel = self.__topic["channel"]
         ros_msg.id = self.__topic["id"]
         ros_msg.buf = [
-            int((self.__LY_value * 100) + 100),
+            int((self.__LY_value * -100) + 100),
             int((self.__RY_value * 100) + 100),
             0,
             0,
