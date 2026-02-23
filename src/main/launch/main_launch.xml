@@ -13,4 +13,7 @@
 	<node pkg="object_detection" exec="GPS_node" name="GPS_node"></node>
 	<node pkg="object_detection" exec="GPS_pathfinding_node" name="GPS_pathfinding"></node>
 	<node pkg="cameras" exec="cameras" name="cameras"></node>
+	<node pkg="unitree_lidar_ros2" exec="unitree_lidar_ros2_node" name="unilidar_node">
+		<param name="port" value="/dev/ttyUSB1"/>
+	</node>
 </launch>
