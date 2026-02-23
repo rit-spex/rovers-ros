@@ -3,7 +3,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import NavSatFix, Imu, LaserScan
 from geometry_msgs.msg import PointStamped
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, UInt8
 import math
 from rclpy.qos import qos_profile_sensor_data
 
@@ -28,7 +28,7 @@ class GPSIMUPathfinding(Node):
 
         # Obstacle Avoidance Parameters
         self.declare_parameter("safe_distance", 1.5)  # Distance to trigger avoidance
-        self.declare_parameter("obs_turn_gain", 0.6)  # Steering strength for dodging
+        self.declare_parameter("obs_turn_gain", 0.5)  # Steering strength for dodging
 
         self.base_speed = self.get_parameter("speed").value
         self.turn_gain = self.get_parameter("turn_gain").value
@@ -48,6 +48,9 @@ class GPSIMUPathfinding(Node):
         self.obstacle_override = False
         self.obs_turn_adjust = 0.0
 
+        # Control Mode
+        self.control_mode = 0
+
         # --- Subscribers ---
         self.create_subscription(NavSatFix, "/GPS/ROVER", self.gps_callback, 10)
         self.create_subscription(Imu, "/unilidar/imu", self.imu_callback, 10)
@@ -63,6 +66,10 @@ class GPSIMUPathfinding(Node):
             LaserScan, "/scan", self.lidar_callback, qos_profile_sensor_data
         )
 
+        self.create_subscription(
+            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.control_mode_callback, 10
+        )
+
         # --- Publishers ---
         self.pub_left = self.create_publisher(Float32, "/object_detection/GPS_LY", 10)
         self.pub_right = self.create_publisher(Float32, "/object_detection/GPS_RY", 10)
@@ -71,11 +78,19 @@ class GPSIMUPathfinding(Node):
         self.timer = self.create_timer(0.1, self.control_loop)
         self.get_logger().info("GPS + IMU + Obstacle Avoidance Node Started.")
 
+    def control_mode_callback(self, msg: UInt8):
+        self.control_mode = msg.data
+
     def lidar_callback(self, msg):
         """
         Reads the 2D LaserScan and determines if obstacles are too close in the
         Front, Left, or Right sectors.
         """
+
+        # Skip math if not in GPS mode
+        if not (self.control_mode == 3):
+            return
+
         ranges = msg.ranges
         num_rays = len(ranges)
         if num_rays == 0:
