@@ -12,7 +12,7 @@ class ObjectSearchAndFollow(Node):
         super().__init__("object_finder_control")
 
         # --- PARAMETERS ---
-        self.declare_parameter("enable_obstacle_avoidance", False)
+        self.declare_parameter("enable_obstacle_avoidance", True)
         self.declare_parameter("safe_distance", 1.5)
         self.declare_parameter("obs_turn_gain", 0.5)
 
@@ -63,7 +63,7 @@ class ObjectSearchAndFollow(Node):
         self.create_subscription(
             UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.control_mode_callback, 10
         )
-        
+
         # Lidar Subscriber using Sensor Data QoS
         self.scanSub = self.create_subscription(
             LaserScan, "/scan", self.lidar_callback, qos_profile_sensor_data
@@ -97,13 +97,19 @@ class ObjectSearchAndFollow(Node):
             return max(0, min(idx, num_rays - 1))
 
         def get_min_dist(slice_ranges):
-            valid_ranges = [r for r in slice_ranges if not math.isinf(r) and not math.isnan(r) and msg.range_min < r < msg.range_max]
-            return min(valid_ranges) if valid_ranges else float('inf')
+            valid_ranges = [
+                r
+                for r in slice_ranges
+                if not math.isinf(r)
+                and not math.isnan(r)
+                and msg.range_min < r < msg.range_max
+            ]
+            return min(valid_ranges) if valid_ranges else float("inf")
 
         idx_right_outer = angle_to_index(math.radians(-45))
         idx_right_inner = angle_to_index(math.radians(-15))
-        idx_left_inner  = angle_to_index(math.radians(15))
-        idx_left_outer  = angle_to_index(math.radians(45))
+        idx_left_inner = angle_to_index(math.radians(15))
+        idx_left_outer = angle_to_index(math.radians(45))
 
         if idx_right_outer > idx_left_outer:
             idx_right_outer, idx_left_outer = idx_left_outer, idx_right_outer
@@ -111,11 +117,11 @@ class ObjectSearchAndFollow(Node):
 
         right_slice = ranges[idx_right_outer:idx_right_inner]
         front_slice = ranges[idx_right_inner:idx_left_inner]
-        left_slice  = ranges[idx_left_inner:idx_left_outer]
+        left_slice = ranges[idx_left_inner:idx_left_outer]
 
         min_right = get_min_dist(right_slice)
         min_front = get_min_dist(front_slice)
-        min_left  = get_min_dist(left_slice)
+        min_left = get_min_dist(left_slice)
 
         self.obstacle_override = False
         self.obs_turn_adjust = 0.0
@@ -129,16 +135,16 @@ class ObjectSearchAndFollow(Node):
 
         if min_front < safe_dist or min_left < safe_dist or min_right < safe_dist:
             self.obstacle_override = True
-            
+
             if min_front < safe_dist:
                 if min_left > min_right:
-                    self.obs_turn_adjust = obs_gain   # Turn Left
+                    self.obs_turn_adjust = obs_gain  # Turn Left
                 else:
                     self.obs_turn_adjust = -obs_gain  # Turn Right
             elif min_left < safe_dist:
-                self.obs_turn_adjust = -obs_gain      # Dodge left object -> Turn Right
+                self.obs_turn_adjust = -obs_gain  # Dodge left object -> Turn Right
             elif min_right < safe_dist:
-                self.obs_turn_adjust = obs_gain       # Dodge right object -> Turn Left
+                self.obs_turn_adjust = obs_gain  # Dodge right object -> Turn Left
 
     def imu_callback(self, msg):
         q = msg.orientation
@@ -199,7 +205,7 @@ class ObjectSearchAndFollow(Node):
         # --- STATE 2: SEARCHING (IMU Sweep) ---
         else:
             if self.start_yaw is None:
-                return 
+                return
 
             t = current_time - self.start_time
             yaw_offset = self.SEARCH_AMPLITUDE * math.sin(
@@ -232,7 +238,7 @@ class ObjectSearchAndFollow(Node):
     def publish_velocity(self, left, right):
         l_msg = Float32()
         r_msg = Float32()
-        l_msg.data = -left 
+        l_msg.data = -left
         r_msg.data = -right
         self.velPubLeft.publish(l_msg)
         self.velPubRight.publish(r_msg)
@@ -252,6 +258,7 @@ def main(args=None):
         node.stop_robot()
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()

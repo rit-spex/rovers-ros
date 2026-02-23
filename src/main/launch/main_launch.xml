@@ -19,15 +19,16 @@
 	</node>
 
 	<node pkg="tf2_ros" exec="static_transform_publisher" name="static_transform_publisher"
-      args="--x 0 --y 0 --z 0 --roll 0 --pitch 0 --yaw -0.4 --frame-id base_link --child-frame-id unilidar_lidar" />
+      args="--x 0 --y 0 --z 0 --roll 0 --pitch 0 --yaw 2.74 --frame-id base_link --child-frame-id unilidar_lidar" />
 
 	<node pkg="pointcloud_to_laserscan" exec="pointcloud_to_laserscan_node" name="p2l_node">
 		<remap from="cloud_in" to="unilidar/cloud"/>
 		<param name="target_frame" value="base_link"/>
 		<param name="min_height" value="0.1"/>
 		<param name="max_height" value="2.0"/>
-		<param name="range_min" value="1.0"/>
+		<param name="range_min" value="0.75"/>
 		<param name="range_max" value="3.0"/>
+		<param name="scan_time" value="0.1"/>
 	</node>
 
 

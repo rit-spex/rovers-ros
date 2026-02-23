@@ -49,7 +49,7 @@ class GPSNode(Node):
 
                 # Check for the GNGGA (Global Navigation) or GPGGA (GPS only) sentence
                 if line.startswith("$GNGGA") or line.startswith("$GPGGA"):
-                    self.get_logger().info(line)
+                    # self.get_logger().info(line)
                     self.parse_and_publish(line)
 
         except Exception as e:
