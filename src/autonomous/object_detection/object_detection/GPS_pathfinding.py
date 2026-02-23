@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import NavSatFix, Imu
+from sensor_msgs.msg import NavSatFix, Imu, LaserScan
 from geometry_msgs.msg import PointStamped
 from std_msgs.msg import Float32
 import math
+from rclpy.qos import qos_profile_sensor_data
+
 
 # Paste into terminal and change lat and longitude to set target
 """
 ros2 topic pub --once /GPS/decimal_target sensor_msgs/msg/NavSatFix "{header: {frame_id: 'map'}, latitude: 43.0845, longitude: -77.6743, altitude: 153.0}"
+
+Use this for lidar cloud
+ros2 run tf2_ros static_transform_publisher 0 0 0 -0.4 0 0 map unilidar_lidar
 """
 
 
@@ -17,17 +22,19 @@ class GPSIMUPathfinding(Node):
         super().__init__("gps_imu_pathfinding")
 
         # --- Parameters ---
-        self.declare_parameter("speed", 0.25)  # Base speed
-        self.declare_parameter(
-            "turn_gain", 2.0
-        )  # Higher gain because IMU is responsive
+        self.declare_parameter("speed", 0.3)
+        self.declare_parameter("turn_gain", 2.0)
         self.declare_parameter("stop_distance", 2.0)
-        # self.declare_parameter('imu_offset', 0.0)    # DEGREES. Add this if 0 isn't North.
+
+        # Obstacle Avoidance Parameters
+        self.declare_parameter("safe_distance", 1.5)  # Distance to trigger avoidance
+        self.declare_parameter("obs_turn_gain", 0.6)  # Steering strength for dodging
 
         self.base_speed = self.get_parameter("speed").value
         self.turn_gain = self.get_parameter("turn_gain").value
         self.stop_dist = self.get_parameter("stop_distance").value
-        # self.imu_offset = self.get_parameter('imu_offset').value
+        self.safe_dist = self.get_parameter("safe_distance").value
+        self.obs_turn_gain = self.get_parameter("obs_turn_gain").value
         self.imu_offset = 0
 
         # --- State ---
@@ -35,22 +42,25 @@ class GPSIMUPathfinding(Node):
         self.current_lon = None
         self.target_lat = None
         self.target_lon = None
-        self.current_heading = 0.0  # -180 to 180 (0 = North, hopefully)
+        self.current_heading = 0.0
+
+        # Obstacle State
+        self.obstacle_override = False
+        self.obs_turn_adjust = 0.0
 
         # --- Subscribers ---
-        # 1. GPS Position
         self.create_subscription(NavSatFix, "/GPS/ROVER", self.gps_callback, 10)
-
-        # 2. IMU Heading (The new part!)
-        # Note: Check if your topic is 'unilidar/imu' or 'unilidar/IMU'
         self.create_subscription(Imu, "/unilidar/imu", self.imu_callback, 10)
-
-        # 3. Targets
         self.create_subscription(
             NavSatFix, "/GPS/decimal_target", self.decimal_target_callback, 10
         )
         self.create_subscription(
             PointStamped, "/GPS/map_target", self.map_target_callback, 10
+        )
+
+        # Lidar Subscriber (Assuming pointcloud_to_laserscan outputs to /scan)
+        self.create_subscription(
+            LaserScan, "/scan", self.lidar_callback, qos_profile_sensor_data
         )
 
         # --- Publishers ---
@@ -59,36 +69,90 @@ class GPSIMUPathfinding(Node):
 
         # --- Loop ---
         self.timer = self.create_timer(0.1, self.control_loop)
-        self.get_logger().info(
-            "GPS + IMU Node Started. Point robot NORTH before starting!"
-        )
+        self.get_logger().info("GPS + IMU + Obstacle Avoidance Node Started.")
+
+    def lidar_callback(self, msg):
+        """
+        Reads the 2D LaserScan and determines if obstacles are too close in the
+        Front, Left, or Right sectors.
+        """
+        ranges = msg.ranges
+        num_rays = len(ranges)
+        if num_rays == 0:
+            return
+
+        # Helper function to find a specific angle's index in the ranges array
+        def angle_to_index(angle_rad):
+            idx = int((angle_rad - msg.angle_min) / msg.angle_increment)
+            # Clamp index to array bounds
+            return max(0, min(idx, num_rays - 1))
+
+        # Helper function to safely get the minimum distance in a slice
+        def get_min_dist(slice_ranges):
+            valid_ranges = [
+                r
+                for r in slice_ranges
+                if not math.isinf(r)
+                and not math.isnan(r)
+                and msg.range_min < r < msg.range_max
+            ]
+            return min(valid_ranges) if valid_ranges else float("inf")
+
+        # Define sectors (Front 90 degrees total: -45 to +45)
+        idx_right_outer = angle_to_index(math.radians(-45))
+        idx_right_inner = angle_to_index(math.radians(-15))
+        idx_left_inner = angle_to_index(math.radians(15))
+        idx_left_outer = angle_to_index(math.radians(45))
+
+        # Handle potential backward indexing depending on lidar rotation
+        if idx_right_outer > idx_left_outer:
+            idx_right_outer, idx_left_outer = idx_left_outer, idx_right_outer
+            idx_right_inner, idx_left_inner = idx_left_inner, idx_right_inner
+
+        right_slice = ranges[idx_right_outer:idx_right_inner]
+        front_slice = ranges[idx_right_inner:idx_left_inner]
+        left_slice = ranges[idx_left_inner:idx_left_outer]
+
+        min_right = get_min_dist(right_slice)
+        min_front = get_min_dist(front_slice)
+        min_left = get_min_dist(left_slice)
+
+        self.obstacle_override = False
+        self.obs_turn_adjust = 0.0
+
+        # --- Avoidance Logic ---
+        # Note: In your current kinematic setup, positive turn_adjust increases Left Wheel
+        # and decreases Right Wheel -> Robot turns RIGHT.
+        if (
+            min_front < self.safe_dist
+            or min_left < self.safe_dist
+            or min_right < self.safe_dist
+        ):
+            self.obstacle_override = True
+
+            if min_front < self.safe_dist:
+                # Obstacle dead ahead. Turn toward the side with more space.
+                if min_left > min_right:
+                    self.obs_turn_adjust = -self.obs_turn_gain  # Turn Left
+                else:
+                    self.obs_turn_adjust = self.obs_turn_gain  # Turn Right
+            elif min_left < self.safe_dist:
+                self.obs_turn_adjust = (
+                    self.obs_turn_gain
+                )  # Dodging left object -> Turn Right
+            elif min_right < self.safe_dist:
+                self.obs_turn_adjust = (
+                    -self.obs_turn_gain
+                )  # Dodging right object -> Turn Left
 
     def imu_callback(self, msg):
-        """
-        Reads the quaternion from the Unitree Lidar IMU and converts to Yaw.
-        """
         q = msg.orientation
-
-        # Convert Quaternion (x,y,z,w) to Euler (Roll, Pitch, Yaw)
-        # We manually do the math to avoid importing tf_transformations (which is often missing)
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         yaw_rad = math.atan2(siny_cosp, cosy_cosp)
-
-        # Convert to degrees (-180 to 180)
         yaw_deg = math.degrees(yaw_rad)
 
-        # Apply Offset (if you didn't start facing North)
-        # GPS standard: 0=North, 90=East.
-        # ROS standard: 0=East, 90=North (CCW).
-        # We usually need to swap this.
-        # For now, let's assume the IMU outputs standard ROS yaw (0=East).
-        # To make it match GPS (0=North), we might need to subtract 90.
-        # TRY THIS FIRST:
-        # If your robot spins in circles, change this line to: self.current_heading = -yaw_deg
         self.current_heading = yaw_deg + self.imu_offset
-
-        # Normalize to -180 to 180
         self.current_heading = (self.current_heading + 180) % 360 - 180
 
     def gps_callback(self, msg):
@@ -108,7 +172,6 @@ class GPSIMUPathfinding(Node):
         if self.current_lat is None or self.target_lat is None:
             return
 
-        # 1. Distance & Bearing to Target
         distance = self.haversine_distance(
             self.current_lat, self.current_lon, self.target_lat, self.target_lon
         )
@@ -120,38 +183,31 @@ class GPSIMUPathfinding(Node):
             self.publish_velocities(0.0, 0.0)
             return
 
-        # 2. Heading Error
-        # GPS Bearing is usually 0=North, 90=East
-        # IMU Yaw is usually 0=East, 90=North (if ROS standard)
-        # We need to ensure these match.
+        # Choose between Obstacle Avoidance and GPS Tracking
+        if self.obstacle_override:
+            turn_adjust = self.obs_turn_adjust
+            current_speed = self.base_speed * 0.5  # Slow down by 50% while dodging
+            self.get_logger().debug("DODGING OBSTACLE")
+        else:
+            heading_error = target_bearing - self.current_heading
+            heading_error = (heading_error + 180) % 360 - 180
+            turn_adjust = heading_error * (self.turn_gain / 100.0)
+            current_speed = self.base_speed
 
-        heading_error = target_bearing - self.current_heading
-
-        # Normalize error (-180 to 180)
-        # This prevents the robot from doing a 350-degree turn when a 10-degree turn would work
-        heading_error = (heading_error + 180) % 360 - 180
-
-        # 3. P-Controller
-        turn_adjust = heading_error * (self.turn_gain / 100.0)  # Scaling factor
         turn_adjust = max(min(turn_adjust, 1.0), -1.0)
 
-        left = self.base_speed + turn_adjust
-        right = self.base_speed - turn_adjust
+        left = current_speed + turn_adjust
+        right = current_speed - turn_adjust
 
-        # Clamp
         left = max(min(left, 1.0), -1.0)
         right = max(min(right, 1.0), -1.0)
 
         self.publish_velocities(left, right)
 
-        # Debugging: Use this to calibrate your IMU Offset!
-        # self.get_logger().info(f"Head: {self.current_heading:.1f} | Targ: {target_bearing:.1f} | Err: {heading_error:.1f}")
-
     def publish_velocities(self, l, r):
         self.pub_left.publish(Float32(data=l))
         self.pub_right.publish(Float32(data=r))
 
-    # --- Math Helpers ---
     def haversine_distance(self, lat1, lon1, lat2, lon2):
         R = 6371000
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
@@ -164,7 +220,6 @@ class GPSIMUPathfinding(Node):
         return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
     def calculate_bearing(self, lat1, lon1, lat2, lon2):
-        # Calculates bearing where 0 = North, 90 = East
         y = math.sin(math.radians(lon2 - lon1)) * math.cos(math.radians(lat2))
         x = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(
             math.radians(lat1)
