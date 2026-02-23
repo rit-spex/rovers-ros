@@ -14,7 +14,7 @@ class GPSNode(Node):
         # Adjust these! '/dev/ttyACM0' is common for USB, '/dev/ttyTHS1' for UART pins
         self.declare_parameter("port", "/dev/ttyTHS1")
         self.declare_parameter(
-            "baudrate", 38400
+            "baudrate", 9600
         )  # MAX-M10s often defaults to 38400 or 9600
 
         port = self.get_parameter("port").get_parameter_value().string_value
@@ -45,9 +45,11 @@ class GPSNode(Node):
                 line = (
                     self.serial_conn.readline().decode("utf-8", errors="ignore").strip()
                 )
+                # self.get_logger().info(line)
 
                 # Check for the GNGGA (Global Navigation) or GPGGA (GPS only) sentence
                 if line.startswith("$GNGGA") or line.startswith("$GPGGA"):
+                    self.get_logger().info(line)
                     self.parse_and_publish(line)
 
         except Exception as e:
@@ -63,7 +65,7 @@ class GPSNode(Node):
         # specific check: verify we have a 'Fix Quality' > 0 (index 6)
         # If it's 0, the GPS doesn't have a lock yet.
         if len(parts) < 10 or parts[6] == "0":
-            self.get_logger().debug("No GPS fix yet...")
+            self.get_logger().info("No GPS fix yet...")
             return
 
         try:

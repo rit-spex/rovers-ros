@@ -6,13 +6,18 @@ from geometry_msgs.msg import PointStamped
 from std_msgs.msg import Float32
 import math
 
+# Paste into terminal and change lat and longitude to set target
+"""
+ros2 topic pub --once /GPS/decimal_target sensor_msgs/msg/NavSatFix "{header: {frame_id: 'map'}, latitude: 43.0845, longitude: -77.6743, altitude: 153.0}"
+"""
+
 
 class GPSIMUPathfinding(Node):
     def __init__(self):
         super().__init__("gps_imu_pathfinding")
 
         # --- Parameters ---
-        self.declare_parameter("speed", 0.3)  # Base speed
+        self.declare_parameter("speed", 0.25)  # Base speed
         self.declare_parameter(
             "turn_gain", 2.0
         )  # Higher gain because IMU is responsive

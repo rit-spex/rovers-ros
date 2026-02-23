@@ -15,9 +15,9 @@ class ObjectSearchAndFollow(Node):
         self.TARGET_AREA = 40000.0 / 4.0
 
         # Search Parameters
-        self.SEARCH_SPEED = 0.2  # Linear speed while searching (0 for rotate-in-place)
-        self.SEARCH_AMPLITUDE = 0.0  # Radians (~45 degrees) to sweep left/right
-        self.SEARCH_FREQ = 0.5  # How fast to sweep (Hz)
+        self.SEARCH_SPEED = 0.25  # Linear speed while searching (0 for rotate-in-place)
+        self.SEARCH_AMPLITUDE = 0.5  # Radians (~45 degrees) to sweep left/right
+        self.SEARCH_FREQ = 0.1 / 2.0  # How fast to sweep (Hz)
 
         # PID Gains
         self.KP_VISUAL = 0.002  # Camera turning gain
