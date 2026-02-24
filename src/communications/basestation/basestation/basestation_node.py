@@ -35,7 +35,7 @@ class Basestation(Node):
     def __init__(self):
         super().__init__("Basestation")
 
-        # Default to enabled â€” the basestation-ROS link exists specifically to
+        # Default to enabled — the basestation-ROS link exists specifically to
         # verify end-to-end communication, so tracing should be on unless
         # explicitly disabled.
         self._protocol_trace = (
@@ -117,11 +117,19 @@ class Basestation(Node):
             publisher = publishers.get(key)
             if publisher is None:
                 continue
+            
+            # only send data that has changed to avoid spamming the network
+            if self.__basestation_communications.get_messages()[id]['values'][key].get_value == value:
+                continue
+
+            self.__basestation_communications.get_messages()[id]['values'][key].set_value(value)
+            
+            value_type = self.__valueTypes[
+                self.__basestation_communications.get_messages()[id]['values'][key].get_type]
 
             signal = signal_defs.get(key)
             if signal is None:
                 continue
-
             # only send data that has changed to avoid spamming the network
             last_val_key = (message_id, key)
             if self.__last_values.get(last_val_key) == value:
