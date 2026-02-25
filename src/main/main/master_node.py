@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 
-from typing import Any
-
 from numpy import int32
 
 # ros imports
 import rclpy
 import rclpy.logging
-from rclpy.node import Node, Timer
+from rclpy.executors import ExternalShutdownException
+from rclpy.node import Node
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, UInt16
+from std_msgs.msg import Bool, UInt8, UInt16
 from custom_interfaces.msg import Can
 
 from constants.CommandCodes import CONSTANTS
@@ -30,6 +29,7 @@ class Master(Node):
     __arm_teensy_enable_publisher: rclpy.publisher.Publisher
     __science_node_enable_publisher: rclpy.publisher.Publisher # This is sent to other nodes to tell them to enable/disable the science subsystem
     __science_teensy_enable_publisher: rclpy.publisher.Publisher
+    __auto_state_publisher: rclpy.publisher.Publisher
 
     __ros_teensy_publisher: rclpy.publisher.Publisher # This is sent to the teensy to tell it that the ROS system is alive
 
@@ -38,6 +38,10 @@ class Master(Node):
     __current_basestation_heartbeat_time: UInt16
     __basestation_recieved_heartbeat: bool
 
+    # heartbeat tracking
+    __last_heartbeat_time: int
+    __current_heartbeat_time: int
+    __received_heartbeat: bool
     # subsystem status tracking
     __chassis_teensy_enabled: bool # we wait until the chassis teensy sends a heartbeat message before we consider the chassis enabled
     __chassis_node_enabled: bool   # wait until teensy knows it is enabled before we consider the chassis node enabled
@@ -60,6 +64,9 @@ class Master(Node):
         self.__current_basestation_heartbeat_time = UInt16()
         self.__basestation_recieved_heartbeat = False
 
+        self.__last_heartbeat_time = 0
+        self.__current_heartbeat_time = 0
+        self.__received_heartbeat = False
         self.__chassis_teensy_enabled = False
         self.__chassis_node_enabled = False
         self.__last_chassis_command = UInt16()
@@ -79,6 +86,11 @@ class Master(Node):
         self.__estop_publisher = self.create_publisher(
             msg_type=Bool,
             topic="/ESTOP",
+            qos_profile=10,
+        )
+        self.__auto_state_publisher = self.create_publisher(
+            msg_type=UInt8,
+            topic="/ROVER/AUTO_STATE",
             qos_profile=10,
         )
 
@@ -131,6 +143,7 @@ class Master(Node):
             callback=self.__on_quit_received,
             qos_profile=10,
         )
+
         self.create_subscription(
             msg_type=UInt16,
             topic="/BASESTATION/"
@@ -138,6 +151,12 @@ class Master(Node):
             + "/"
             + CONSTANTS.HEARTBEAT.TIMESTAMP_MESSAGE,
             callback=self.__on_basestation_heartbeat_received,
+            qos_profile=10,
+        )
+        self.create_subscription(
+            msg_type=UInt8,
+            topic="/BASESTATION/auto_state/auto_state",
+            callback=self.__on_auto_state_received,
             qos_profile=10,
         )
         self.create_subscription(
@@ -169,7 +188,6 @@ class Master(Node):
                 estop_msg = Bool()
                 estop_msg.data = True
                 self.__estop_publisher.publish(estop_msg)
-                return
             else:
                 self.__last_basestation_heartbeat_time = self.__current_basestation_heartbeat_time
 
@@ -309,6 +327,9 @@ class Master(Node):
 
         rclpy.shutdown()
 
+    def __on_auto_state_received(self, msg: UInt8):
+        self.__auto_state_publisher.publish(UInt8(data=msg.data))
+
     def run(self):
         self.get_logger().info("starting master node ...")
         rclpy.spin(self)
@@ -317,7 +338,14 @@ class Master(Node):
 def main():
     rclpy.init()
     master = Master()
-    master.run()
+    try:
+        master.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        master.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

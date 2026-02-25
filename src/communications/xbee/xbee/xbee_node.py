@@ -1,4 +1,5 @@
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from std_msgs.msg import UInt8MultiArray
@@ -43,22 +44,44 @@ class Xbee(Node):
 
     def run(self) -> None:
         self.get_logger().info("starting xbee...")
-        self.__xbee_device.open()
+        try:
+            self.__xbee_device.open()
+        except Exception as exc:
+            self.get_logger().warning(
+                f"xbee unavailable on {self.__port}; running without radio ({exc})"
+            )
+            rclpy.spin(self)
+            return
 
-        while True:
-            data = self.read_data()
-            if data is None:
-                self.get_logger().info("message was none")
-                break
-            if len(data) == 0:
-                continue
-            self.publish_data(data)
+        try:
+            while rclpy.ok():
+                data = self.read_data()
+                if data is None:
+                    self.get_logger().info("message was none")
+                    break
+                if len(data) == 0:
+                    continue
+                self.publish_data(data)
+        finally:
+            try:
+                self.__xbee_device.close()
+            except Exception:
+                pass
 
 
 def main() -> None:
     rclpy.init()
     xbee = Xbee()
-    xbee.run()
+    try:
+        xbee.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    except Exception as exc:
+        xbee.get_logger().error(f"xbee node failed: {exc}")
+    finally:
+        xbee.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
