@@ -158,8 +158,8 @@ class Arm(Node):
 
         self.arm_enabled = False
         self.__solenoid_engaged = False
-        self.__motors_target_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
-        self.__motors_actual_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
+        self.__motors_target_ticks = [float('nan')] * len(ARM_MOTOR_IDX)
+        self.__motors_actual_ticks = [float('nan')] * len(ARM_MOTOR_IDX)
         self.__open_can_send_lock = threading.Lock()
 
         # 1. Create and start a timer to continuously request the position of the arm motors at the requested update rate
@@ -394,6 +394,9 @@ class Arm(Node):
 
     def __on_new_CAN_message_received(self, msg: Can):
         # first try to decode the message into a CAN message object
+        if self.arm_enabled == False:
+            return
+
         can_message: Message | None
         try:
             can_message = TeensyCommunication.decode_can_packet(msg)
@@ -478,10 +481,12 @@ class Arm(Node):
                 self.__motors_actual_ticks[ARM_MOTOR_IDX.GRIPPER] = can_message.signals["Position"].value
                 self.__gripper_angle_publisher.publish(Float32(data=self.__motors_actual_ticks[ARM_MOTOR_IDX.GRIPPER] * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].ticks_2_rad))
                 self.get_logger().info(f"Updated actual tick for gripper: {can_message.signals['Position'].value}")
+            case _:
+                self.get_logger().warning(f"Received CAN message with unrecognized ID: {msg.id}")
+
 
     def request_position(self):
         if self.arm_enabled:
-            self.get_logger().info("Requesting position update from arm motors...")
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_BASE, int32(0), OPEN_CAN.ID.READ)
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_SHOULDER, int32(0), OPEN_CAN.ID.READ)
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_ELBOW, int32(0), OPEN_CAN.ID.READ)
