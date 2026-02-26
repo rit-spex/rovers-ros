@@ -42,26 +42,29 @@ class ARM_MOTOR_IDX(IntEnum):
     ELBOW       = 2
     BEND_WRIST  = 3
     TWIST_WRIST = 4
+    GRIPPER     = 5
 
 class arm_motor_params:
     rad_2_ticks: float
     ticks_2_rad: float
-    upper_limits_ticks: int
-    lower_limits_ticks: int
+    upper_limits_ticks: int32
+    lower_limits_ticks: int32
+    ticks_offset: int32
 
-    def __init__(self, rad_2_ticks: float, upper_limits_ticks: int, lower_limits_ticks: int):
+    def __init__(self, rad_2_ticks: float, upper_limits_ticks: int32, lower_limits_ticks: int32, ticks_offset: int32):
         self.rad_2_ticks = rad_2_ticks
         self.ticks_2_rad = 1 / rad_2_ticks
         self.upper_limits_ticks = upper_limits_ticks
         self.lower_limits_ticks = lower_limits_ticks
-
+        self.ticks_offset = ticks_offset
 
 ARM_MOTOR_PARAMS = [
-    arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651), # base
-    arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651), # shoulder
-    arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651), # elbow
-    arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651), # bend wrist
-    arm_motor_params(rad_2_ticks=651.8986, upper_limits_ticks=651, lower_limits_ticks=-651)  # twist wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # base
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # shoulder
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # elbow
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # bend wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)),  # twist wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0))  # gripper
 ]
 
 REQUESTED_ARM_UPDATE_RATE = 0.5 # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
@@ -70,11 +73,17 @@ class Arm(Node):
 
     __publishers: dict[CAN_MESSAGE_IDS, Publisher]
     
+    __base_angle_publisher: Publisher
+    __shoulder_angle_publisher: Publisher
+    __elbow_angle_publisher: Publisher
+    __wrist_bend_angle_publisher: Publisher
+    __wrist_twist_angle_publisher: Publisher
+    __gripper_angle_publisher: Publisher
+    __solenoid_state_publisher: Publisher
+
     # arm MUST be enabled to move, this is a safety feature to prevent the arm from moving unexpectedly
     arm_enabled: bool
-    __gripper_closed: bool
     __solenoid_engaged: bool
-    __gripper_actual_ticks: int32
     __motors_target_ticks: list[int32]
     __motors_actual_ticks: list[int32]
 
@@ -104,7 +113,22 @@ class Arm(Node):
                     callback=self.__on_new_CAN_message_received,
                     qos_profile=10
                 )
-        # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
+
+        # create subscribers for the arm motor angle commands
+        self.create_subscription(Float32, "/ARM/BASE/TARGET_ANGLE", self.__base_callback, 10)
+        self.create_subscription(Float32, "/ARM/SHOULDER/TARGET_ANGLE", self.__shoulder_callback, 10)
+        self.create_subscription(Float32, "/ARM/ELBOW/TARGET_ANGLE", self.__elbow_callback, 10)
+        self.create_subscription(Float32, "/ARM/WRIST_BEND/TARGET_ANGLE", self.__bend_wrist_callback, 10)
+        self.create_subscription(Float32, "/ARM/WRIST_TWIST/TARGET_ANGLE", self.__twist_wrist_callback, 10)
+        self.create_subscription(Float32, "/ARM/GRIPPER/TARGET_ANGLE", self.__gripper_callback, 10)
+
+        # create publishers for the arm motor angles 
+        self.__base_angle_publisher        = self.create_publisher(Float32, "/ARM/BASE/CURR_ANGLE", 10)
+        self.__shoulder_angle_publisher    = self.create_publisher(Float32, "/ARM/SHOULDER/CURR_ANGLE", 10)
+        self.__elbow_angle_publisher       = self.create_publisher(Float32, "/ARM/ELBOW/CURR_ANGLE", 10)
+        self.__wrist_bend_angle_publisher  = self.create_publisher(Float32, "/ARM/WRIST_BEND/CURR_ANGLE", 10)
+        self.__wrist_twist_angle_publisher = self.create_publisher(Float32, "/ARM/WRIST_TWIST/CURR_ANGLE", 10)
+        self.__gripper_angle_publisher     = self.create_publisher(Float32, "/ARM/GRIPPER/CURR_ANGLE", 10)
 
         self.create_subscription(Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10)
 
@@ -116,7 +140,6 @@ class Arm(Node):
         )
 
         self.arm_enabled = False
-        self.__gripper_closed = False
         self.__solenoid_engaged = False
         self.__motors_target_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
         self.__motors_actual_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
@@ -128,40 +151,29 @@ class Arm(Node):
             callback=self.request_position,
         )        
 
-    def __base_callback(self, msg: Float32):        
-        self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
+    def __base_callback(self, msg: Float32):     
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.BASE, ticks)
 
     def __shoulder_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.SHOULDER, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks))
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.SHOULDER, ticks)
 
     def __elbow_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks))
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
     def __bend_wrist_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].rad_2_ticks))
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, ticks)
 
-    def __twist_wrist_callback(self, msg: Bool):
-        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].rad_2_ticks))
+    def __twist_wrist_callback(self, msg: Float32):
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, ticks)
 
-    def __gripper_callback(self, msg: Bool):
-        # only send message if arm is enabled 
-        if not self.arm_enabled:
-            return
-
-        # reject message that are the same as current
-        if msg.data == self.__gripper_closed:
-            return
-        
-        self.__gripper_closed = msg.data
-
-        # try to send the message to the arm motor
-        try:
-            can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_CLAW]
-            can_message.signals["state"].set_value(self.__gripper_closed)
-            self.__send_CAN_data(can_message)
-        except KeyError as e:
-            self.get_logger().error(f"CAN message for moving the claw does not exist: {e}")
-            return
+    def __gripper_callback(self, msg: Float32):
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].ticks_offset
+        self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, ticks)
 
     def __solenoid_callback(self, msg: Bool):
         # only send message if arm is enabled 
@@ -223,6 +235,14 @@ class Arm(Node):
                     self.__send_CAN_data(can_message)
                 except KeyError as e:
                     self.get_logger().error(f"CAN message for twisting the wrist does not exist: {e}")
+                    return
+            case ARM_MOTOR_IDX.GRIPPER:
+                try:                    
+                    can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_CLAW]
+                    can_message.signals["Position"].set_value(target_tick)
+                    self.__send_CAN_data(can_message)
+                except KeyError as e:
+                    self.get_logger().error(f"CAN message for moving the claw does not exist: {e}")
                     return
 
     def __send_open_can_message(self, message_id: CAN_MESSAGE_IDS, value: int32, message_type: OPEN_CAN.ID):
@@ -378,6 +398,7 @@ class Arm(Node):
                         return
                     
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE] = actual_tick
+                    self.__base_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for base motor: {actual_tick}")
 
             case CAN_MESSAGE_IDS.READ_SHOULDER:
@@ -395,7 +416,9 @@ class Arm(Node):
                         return
                     
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.SHOULDER] = actual_tick
+                    self.__shoulder_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for shoulder motor: {actual_tick}")
+
             case CAN_MESSAGE_IDS.READ_ELBOW:
                 if can_message.signals["MESSAGE_TYPE"].value == OPEN_CAN.MESSAGE_TYPE.READ_GET and can_message.signals["OPCODE_LSB"].value == OPEN_CAN.OPCODE_LSB.READ:
                     # update the actual ticks of the base motor based on the data in the message
@@ -407,19 +430,32 @@ class Arm(Node):
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
                     
                     # do not update if the same value
-                    if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE]:
+                    if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW]:
                         return
                     
-                    self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE] = actual_tick
-                    self.get_logger().info(f"Updated actual tick for base motor: {actual_tick}")
+                    self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW] = actual_tick
+                    self.__elbow_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_2_rad))
+                    self.get_logger().info(f"Updated actual tick for elbow motor: {actual_tick}")   
+
             case CAN_MESSAGE_IDS.READ_WRIST_BEND:
+                # do not update if the same value to prevent spamming the topic with the same angle which can cause issues with the arm movement
+                if can_message.signals["Position"].value == self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST]:
+                    return
+                
                 self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST] = can_message.signals["Position"].value
+                self.__wrist_bend_angle_publisher.publish(Float32(data=self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST] * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].ticks_2_rad))
                 self.get_logger().info(f"Updated actual tick for bend wrist motor: {can_message.signals['Position'].value}")
             case CAN_MESSAGE_IDS.READ_WRIST_TWIST:
-                self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST] = can_message.signals["Position"].value
-                self.get_logger().info(f"Updated actual tick for bend wrist motor: {can_message.signals['Position'].value}")
+                if can_message.signals["Position"].value == self.__motors_actual_ticks[ARM_MOTOR_IDX.TWIST_WRIST]:
+                    return
+                self.__motors_actual_ticks[ARM_MOTOR_IDX.TWIST_WRIST] = can_message.signals["Position"].value
+                self.__wrist_twist_angle_publisher.publish(Float32(data=self.__motors_actual_ticks[ARM_MOTOR_IDX.TWIST_WRIST] * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].ticks_2_rad))
+                self.get_logger().info(f"Updated actual tick for twist wrist motor: {can_message.signals['Position'].value}")
             case CAN_MESSAGE_IDS.READ_CLAW:
-                self.__gripper_actual_ticks = can_message.signals["Position"].value
+                if can_message.signals["Position"].value == self.__motors_actual_ticks[ARM_MOTOR_IDX.GRIPPER]:
+                    return
+                self.__motors_actual_ticks[ARM_MOTOR_IDX.GRIPPER] = can_message.signals["Position"].value
+                self.__gripper_angle_publisher.publish(Float32(data=self.__motors_actual_ticks[ARM_MOTOR_IDX.GRIPPER] * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].ticks_2_rad))
                 self.get_logger().info(f"Updated actual tick for gripper: {can_message.signals['Position'].value}")
 
     def request_position(self):
