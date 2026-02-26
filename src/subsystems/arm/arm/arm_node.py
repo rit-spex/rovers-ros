@@ -482,9 +482,9 @@ class Arm(Node):
     def request_position(self):
         if self.arm_enabled:
             self.get_logger().info("Requesting position update from arm motors...")
-            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_BASE, int32(0), OPEN_CAN.ID.READ)
-            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_SHOULDER, int32(0), OPEN_CAN.ID.READ)
-            self.__send_open_can_message(CAN_MESSAGE_IDS.READ_ELBOW, int32(0), OPEN_CAN.ID.READ)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_BASE, int32(0), OPEN_CAN.ID.READ)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_SHOULDER, int32(0), OPEN_CAN.ID.READ)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_ELBOW, int32(0), OPEN_CAN.ID.READ)
 
     def run(self):
         self.get_logger().info("starting arm...")
