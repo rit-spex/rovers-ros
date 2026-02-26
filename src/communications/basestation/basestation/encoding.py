@@ -5,15 +5,6 @@ launches nodes with a different interpreter, falls back to the workspace
 submodule at ``lib/rovers-protocol``.
 """
 
-    def set_value(self, value: Any):
-        """Set the value of the signal."""
-        self.__value = value
-
-    @property
-    def default_value(self) -> Any:
-        """Get the default value of the signal."""
-        return self.__default_value
-
 import sys
 from pathlib import Path
 

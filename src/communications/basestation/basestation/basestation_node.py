@@ -93,7 +93,7 @@ class Basestation(Node):
                 ros_type = self.__value_types.get(signal_type)
                 if ros_type is None:
                     self.get_logger().warning(
-                        "Skipping publisher for unsupported signal type: %s", signal_name
+                        f"Skipping publisher for unsupported signal type: {signal_name}"
                     )
                     continue
 
@@ -148,6 +148,7 @@ class Basestation(Node):
             signal = signal_defs.get(key)
             if signal is None:
                 continue
+            
             # only send data that has changed to avoid spamming the network
             last_val_key = (message_id, key)
             if self.__last_values.get(last_val_key) == value:

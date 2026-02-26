@@ -93,11 +93,9 @@ class Master(Node):
             topic="/ROVER/AUTO_STATE",
             qos_profile=10,
         )
-        self.create_subscription(
 
         self.__chassis_node_enable_publisher = self.create_publisher(
             msg_type=Bool,
-            topic="/BASESTATION/" + CONSTANTS.QUIT.NAME + "/" + CONSTANTS.QUIT.QUIT_MESSAGE,
             topic="/CHASSIS/ENABLED",
             qos_profile=10,
         )
@@ -145,6 +143,7 @@ class Master(Node):
             callback=self.__on_quit_received,
             qos_profile=10,
         )
+
         self.create_subscription(
             msg_type=UInt16,
             topic="/BASESTATION/"
@@ -160,7 +159,6 @@ class Master(Node):
             callback=self.__on_auto_state_received,
             qos_profile=10,
         )
-        self.create_subscription(
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
