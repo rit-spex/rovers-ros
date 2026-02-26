@@ -132,52 +132,54 @@ def collision_protection(th0, th1, th2, th3, th4):
 
 def homingStep(homing, th0, th1, th2, th3, th4):
 
+    # NOTE: Not tested, will need collision avoidance, Ethan will do post-SAR
+
     # FIXME: Should these be input args, or parameters???
-    ang_des = [3.1415 / 2, 3.1415 / 2, 0, 0, 0]
-    d_ang = 1 / 100
-    max_diff = 1 / 40
+    # ang_des = [3.1415 / 2, 3.1415 / 2, 0, 0, 0]
+    # d_ang = 1 / 100
+    # max_diff = 1 / 40
 
-    if homing:
-        # Set shoulder angle
-        if abs(th1 - ang_des[1]) > max_diff:
-            if th1 < ang_des[1]:
-                th1 += d_ang
-            else:
-                th1 -= d_ang
+    # if homing:
+    #     # Set shoulder angle
+    #     if abs(th1 - ang_des[1]) > max_diff:
+    #         if th1 < ang_des[1]:
+    #             th1 += d_ang
+    #         else:
+    #             th1 -= d_ang
 
-        # Set elbow angle
-        elif abs(th2 - ang_des[2]) > max_diff:
-            if th2 < ang_des[2]:
-                th2 += d_ang
-            else:
-                th2 -= d_ang
+    #     # Set elbow angle
+    #     elif abs(th2 - ang_des[2]) > max_diff:
+    #         if th2 < ang_des[2]:
+    #             th2 += d_ang
+    #         else:
+    #             th2 -= d_ang
 
-        # Set wrist angle 1
-        elif abs(th3 - ang_des[3]) > max_diff:
-            if th3 < ang_des[3]:
-                th3 += d_ang
-            else:
-                th3 -= d_ang
+    #     # Set wrist angle 1
+    #     elif abs(th3 - ang_des[3]) > max_diff:
+    #         if th3 < ang_des[3]:
+    #             th3 += d_ang
+    #         else:
+    #             th3 -= d_ang
 
-        # Set wrist angle 2
-        elif abs(th4 - ang_des[4]) > max_diff:
-            if th4 < ang_des[4]:
-                th4 += d_ang
-            else:
-                th4 -= d_ang
+    #     # Set wrist angle 2
+    #     elif abs(th4 - ang_des[4]) > max_diff:
+    #         if th4 < ang_des[4]:
+    #             th4 += d_ang
+    #         else:
+    #             th4 -= d_ang
 
-        # Set base angle
-        elif abs(th0 - ang_des[0]) > max_diff:
-            if abs(th0) < math.pi / 2:
-                th0 += d_ang
-            else:
-                th0 -= d_ang
+    #     # Set base angle
+    #     elif abs(th0 - ang_des[0]) > max_diff:
+    #         if abs(th0) < math.pi / 2:
+    #             th0 += d_ang
+    #         else:
+    #             th0 -= d_ang
 
-            th0 = wrap_to_pi(th0)
+    #         th0 = wrap_to_pi(th0)
 
-        else:
-            homing = False
-            _, _, _, point = calc_joint_positions(th0, th1, th2, th3, False)
+    #     else:
+    #         homing = False
+    #         _, _, _, point = calc_joint_positions(th0, th1, th2, th3, False)
 
     return homing, th0, th1, th2, th3, th4
 

@@ -29,17 +29,17 @@ class OPEN_CAN:
         SET_SPEED   = int(0x23)
         SEND        = int(0x23)
         READ_SEND   = int(0x40)
-        READ_GET    = int(0x43)    
-    
+        READ_GET    = int(0x43)
+
     # these are the values for the OPCODE_LSB signal of the CAN messages, they are used to specify the type of the message being sent to the arm motors
     class OPCODE_LSB:
         ENABLE = int(0x40)
         SET_SPEED = int(0x81)
         SEND   = int(0x64)
-        READ   = int(0x7a)        
+        READ   = int(0x7a)
 
 
-class ARM_MOTOR_IDX(IntEnum):   
+class ARM_MOTOR_IDX(IntEnum):
     BASE        = 0
     SHOULDER    = 1
     ELBOW       = 2
@@ -63,6 +63,7 @@ class arm_motor_params:
         self.ticks_offset = ticks_offset
         self.max_speed = max_speed
 
+# REAL PARAMS BELOW
 ARM_MOTOR_PARAMS = [
     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # base
     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
@@ -72,12 +73,23 @@ ARM_MOTOR_PARAMS = [
     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
 ]
 
+# https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
+# ARM_MOTOR_PARAMS = [
+#     arm_motor_params(rad_2_ticks=-415000, upper_limits_ticks=int32(10850000), lower_limits_ticks=int32( 8220000), ticks_offset=int32(0), max_speed=int32(300)), # base
+#     arm_motor_params(rad_2_ticks=-262000, upper_limits_ticks=int32( 670700), lower_limits_ticks=int32(-244000), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
+#     arm_motor_params(rad_2_ticks=415000, upper_limits_ticks=int32(1300000), lower_limits_ticks=int32(-652821), ticks_offset=int32(0), max_speed=int32(300)), # elbow
+#     # NOTE: Following limits exist on teensy side, currently redundant, also the teensy expected floats in radians soooo yeah
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # bend wrist
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(2), lower_limits_ticks=int32(-2), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
+# ]
+
 REQUESTED_ARM_UPDATE_RATE = 0.5 # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
 
 class Arm(Node):
 
     __publishers: dict[CAN_MESSAGE_IDS, Publisher]
-    
+
     __base_angle_publisher: Publisher
     __shoulder_angle_publisher: Publisher
     __elbow_angle_publisher: Publisher
@@ -127,7 +139,7 @@ class Arm(Node):
         self.create_subscription(Float32, "/ARM/WRIST_TWIST/TARGET_ANGLE", self.__twist_wrist_callback, 10)
         self.create_subscription(Float32, "/ARM/GRIPPER/TARGET_ANGLE", self.__gripper_callback, 10)
 
-        # create publishers for the arm motor angles 
+        # create publishers for the arm motor angles
         self.__base_angle_publisher        = self.create_publisher(Float32, "/ARM/BASE/CURR_ANGLE", 10)
         self.__shoulder_angle_publisher    = self.create_publisher(Float32, "/ARM/SHOULDER/CURR_ANGLE", 10)
         self.__elbow_angle_publisher       = self.create_publisher(Float32, "/ARM/ELBOW/CURR_ANGLE", 10)
@@ -150,13 +162,13 @@ class Arm(Node):
         self.__motors_actual_ticks = [int32(0)] * len(ARM_MOTOR_IDX)
         self.__open_can_send_lock = threading.Lock()
 
-        # 1. Create and start a timer to continuously request the position of the arm motors at the requested update rate 
+        # 1. Create and start a timer to continuously request the position of the arm motors at the requested update rate
         self.create_timer(
             timer_period_sec=REQUESTED_ARM_UPDATE_RATE,
             callback=self.request_position,
-        )        
+        )
 
-    def __base_callback(self, msg: Float32):     
+    def __base_callback(self, msg: Float32):
         ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, ticks)
 
@@ -178,14 +190,14 @@ class Arm(Node):
         self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, msg.data)
 
     def __solenoid_callback(self, msg: Bool):
-        # only send message if arm is enabled 
+        # only send message if arm is enabled
         if not self.arm_enabled:
             return
 
         # reject message that are the same as current
         if msg.data == self.__solenoid_engaged:
             return
-        
+
         self.__solenoid_engaged = msg.data
 
         # try to send the message to the arm motor
@@ -198,19 +210,19 @@ class Arm(Node):
             return
 
     def __send_motor_command(self, motor_idx: ARM_MOTOR_IDX, target_tick: int32 | float):
-        # only send message if arm is enabled 
+        # only send message if arm is enabled
         if not self.arm_enabled:
             return
-        
+
         # check if the target angle is within the limits of the motor
         if target_tick < ARM_MOTOR_PARAMS[motor_idx].lower_limits_ticks or target_tick > ARM_MOTOR_PARAMS[motor_idx].upper_limits_ticks:
             self.get_logger().error(f"Target angle {target_tick} for motor {motor_idx.name} is out of limits. Limits: [{ARM_MOTOR_PARAMS[motor_idx].lower_limits_ticks}, {ARM_MOTOR_PARAMS[motor_idx].upper_limits_ticks}]")
             return
-        
+
         # reject message that are the same as current
         if self.__motors_target_ticks[motor_idx] == target_tick:
             return
-        
+
         # update the target angle of the motor
         self.__motors_target_ticks[motor_idx] = target_tick
 
@@ -239,7 +251,7 @@ class Arm(Node):
                     self.get_logger().error(f"CAN message for twisting the wrist does not exist: {e}")
                     return
             case ARM_MOTOR_IDX.GRIPPER:
-                try:                    
+                try:
                     can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_CLAW]
                     can_message.signals["Position"].set_value(target_tick)
                     self.__send_CAN_data(can_message)
@@ -252,7 +264,7 @@ class Arm(Node):
         if message_id not in self.__publishers:
             self.get_logger().error(f"Invalid message ID: {message_id}")
             return
-        
+
         can_message = TEENSY_CAN_MESSAGES[message_id]
 
         # lock before modifying the message to prevent multiple threads from modifying the message at the same time and
@@ -310,7 +322,7 @@ class Arm(Node):
                         can_message.signals["DATA1"].set_value(int(0x2f))
 
                     # make sure to reset the other data signals to default values
-                    can_message.signals["DATA2"].set_value(0)                    
+                    can_message.signals["DATA2"].set_value(0)
                     can_message.signals["DATA3"].set_value(0)
                     can_message.signals["DATA4"].set_value(0)
 
@@ -328,7 +340,7 @@ class Arm(Node):
             except KeyError as e:
                 self.get_logger().error(f"CAN message {can_message.name} failed to set value for signal: {e}")
                 return
-            
+
             # after setting up the message, send it to the arm motors
             self.__send_CAN_data(can_message)
 
@@ -358,11 +370,11 @@ class Arm(Node):
         rclpy.shutdown()
 
     def __on_arm_enable_received(self, msg: Bool):
-    
+
         # reject message that are the same as current
         if msg.data == self.arm_enabled:
             return
-    
+
         self.arm_enabled = msg.data
 
         # if arm is being enabled
@@ -390,7 +402,7 @@ class Arm(Node):
         except Exception as e:
             self.get_logger().error(f"Failed to decode CAN message: {e}")
             return
-        
+
         match(msg.id):
             case CAN_MESSAGE_IDS.READ_BASE:
                 if can_message.signals["MESSAGE_TYPE"].value == OPEN_CAN.MESSAGE_TYPE.READ_GET and can_message.signals["OPCODE_LSB"].value == OPEN_CAN.OPCODE_LSB.READ:
@@ -401,11 +413,11 @@ class Arm(Node):
                     data4 = can_message.signals["DATA4"].value
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
-                    
+
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE]:
                         return
-                    
+
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE] = actual_tick
                     self.__base_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for base motor: {actual_tick}")
@@ -419,11 +431,11 @@ class Arm(Node):
                     data4 = can_message.signals["DATA4"].value
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
-                    
+
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.SHOULDER]:
                         return
-                    
+
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.SHOULDER] = actual_tick
                     self.__shoulder_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for shoulder motor: {actual_tick}")
@@ -437,20 +449,20 @@ class Arm(Node):
                     data4 = can_message.signals["DATA4"].value
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
-                    
+
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW]:
                         return
-                    
+
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW] = actual_tick
                     self.__elbow_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_2_rad))
-                    self.get_logger().info(f"Updated actual tick for elbow motor: {actual_tick}")   
+                    self.get_logger().info(f"Updated actual tick for elbow motor: {actual_tick}")
 
             case CAN_MESSAGE_IDS.READ_WRIST_BEND:
                 # do not update if the same value to prevent spamming the topic with the same angle which can cause issues with the arm movement
                 if can_message.signals["Position"].value == self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST]:
                     return
-                
+
                 self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST] = can_message.signals["Position"].value
                 self.__wrist_bend_angle_publisher.publish(Float32(data=self.__motors_actual_ticks[ARM_MOTOR_IDX.BEND_WRIST] * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].ticks_2_rad))
                 self.get_logger().info(f"Updated actual tick for bend wrist motor: {can_message.signals['Position'].value}")
