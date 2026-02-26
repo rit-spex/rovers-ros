@@ -417,6 +417,9 @@ class Arm(Node):
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
 
+                    if actual_tick >= 2**31: # if the value is negative then convert it to a signed integer
+                        actual_tick -= 2**32
+
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE]:
                         return
@@ -435,6 +438,9 @@ class Arm(Node):
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
 
+                    if actual_tick >= 2**31: # if the value is negative then convert it to a signed integer
+                        actual_tick -= 2**32
+
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.SHOULDER]:
                         return
@@ -452,6 +458,9 @@ class Arm(Node):
                     data4 = can_message.signals["DATA4"].value
 
                     actual_tick = (data4 << 24) | (data3 << 16) | (data2 << 8) | data1
+
+                    if actual_tick >= 2**31: # if the value is negative then convert it to a signed integer
+                        actual_tick -= 2**32
 
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW]:

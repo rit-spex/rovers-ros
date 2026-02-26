@@ -240,7 +240,7 @@ def simple_clamp(angle, limits):
 # Now we get the gross stuff
 
 
-def inverse_kinematics(Pvect, current_angs, Rot, Node):
+def inverse_kinematics(Pvect, current_angs, Rot):
     """Solve Arm Angles using the principles of inverse kinematics
 
     Args:
@@ -308,7 +308,6 @@ def inverse_kinematics(Pvect, current_angs, Rot, Node):
         )
         th0, th1, th2, th3 = map(float, sol)
     except Exception as e:
-        Node.get_logger().info("HERE2.2")
         try:
             # Try 2D
             r = np.linalg.norm(Pvect - [0, 0, A0])
