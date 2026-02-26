@@ -126,42 +126,42 @@ class ArmController(Node):
 #topic = f"/BASESTATION/{message_name}/{signal_name}"
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_X_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_X_STR}",
             callback=self.__on_x_received,
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_Y_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_Y_STR}",
             callback=self.__on_y_received,
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_Z_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_Z_STR}",
             callback=self.__on_z_received,
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_RX_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_RX_STR}",
             callback=self.__on_rx_received,
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_RY_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_RY_STR}",
             callback=self.__on_ry_received,
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Int16,
-            topic=f"/BASESTATION/{CONSTANTS.SPACEMOUSE.NAME}/{CONSTANTS.SPACEMOUSE.AXIS_RZ_STR}",
+            topic=f"/BASESTATION/spacemouse/{CONSTANTS.SPACEMOUSE.AXIS_RZ_STR}",
             callback=self.__on_rz_received,
             qos_profile=10,
         )
