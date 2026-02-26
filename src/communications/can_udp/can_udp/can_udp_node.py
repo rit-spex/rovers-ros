@@ -94,8 +94,11 @@ class CAN_UDP(Node):
         rclpy.shutdown()
 
     def on_message_received(self, msg: Can):
-        self.get_logger().info(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
-        self.__publishers[msg.id].publish(msg)
+        try:
+            self.get_logger().info(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+            self.__publishers[msg.id].publish(msg)
+        except Exception as e:
+            self.get_logger().info(f"failed to publish can message: {e}")
 
 
     def send_msg(self, msg: Can):

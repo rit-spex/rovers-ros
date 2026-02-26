@@ -452,7 +452,7 @@ TEENSY_CAN_MESSAGES = {
             "DATA3": Signal(DATA_TYPES.UINT_8, 0),
             "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
-        isforJetson=False
+        isforJetson=True
     ),
     CAN_MESSAGE_IDS.READ_SHOULDER: Message(
         id=CAN_MESSAGE_IDS.READ_SHOULDER,
@@ -468,7 +468,7 @@ TEENSY_CAN_MESSAGES = {
             "DATA3": Signal(DATA_TYPES.UINT_8, 0),
             "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
-        isforJetson=False
+        isforJetson=True
     ),
     CAN_MESSAGE_IDS.READ_ELBOW: Message(
         id=CAN_MESSAGE_IDS.READ_ELBOW,
@@ -484,6 +484,6 @@ TEENSY_CAN_MESSAGES = {
             "DATA3": Signal(DATA_TYPES.UINT_8, 0),
             "DATA4": Signal(DATA_TYPES.UINT_8, 0),
         },
-        isforJetson=False
+        isforJetson=True
     ),
 }
