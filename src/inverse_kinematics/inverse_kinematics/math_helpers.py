@@ -3,7 +3,7 @@ import numpy as np
 
 
 def wrap_to_pi(angle):
-    """Constrain angles to the range [-pi, pi]
+    """Constrain angles to the range [-pi, pi)
 
     Args:
         angle (float): Angle in radians
@@ -11,7 +11,19 @@ def wrap_to_pi(angle):
     Returns:
         float: Wrapped angle
     """
-    return (angle + np.pi) % (2*np.pi) - np.pi
+    return np.remainder(angle + np.pi, 2*np.pi) - np.pi
+
+
+def wrap_to_minus_90(angle):
+    """Constrain angles to the range [-pi/2, 3pi/2)
+
+    Args:
+        angle (float): Angle in radians
+
+    Returns:
+        float: Wrapped angle
+    """
+    return np.remainder(angle + np.pi/2, 2*np.pi) - np.pi/2
 
 
 def angle_diff(a, b):

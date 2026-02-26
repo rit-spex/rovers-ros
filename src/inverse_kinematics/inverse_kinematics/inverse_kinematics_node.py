@@ -6,7 +6,7 @@ from linear_algebra import (
     inverse_kinematics,
     joint_limits,
 )
-from math_helpers import wrap_to_pi
+from math_helpers import wrap_to_pi, wrap_to_minus_90
 import rclpy
 # from space_mouse import (
 #     read_spacemouse,
@@ -98,16 +98,6 @@ class ArmController(Node):
     def __init__(self):
         super().__init__("Arm_inverse_kinematics")
 
-        # Arm initial parameters
-        # self.__initial_angles = [math.pi, math.pi / 2, -math.pi / 2, 0.0, 0.0]
-        # self.__iAs = self.__initial_angles
-        # self.__j0, self.__j1, self.__j2, self.__j3 = calc_joint_positions(
-        #     self.__iAs[0], self.__iAs[1], self.__iAs[2], self.__iAs[3], False
-        # )
-        # self.__th0, self.__th1, self.__th2, self.__th3, self.__th4 = self.__initial_angles
-
-        # General parameters
-        # self.__point = self.__j3
         self.__curr_th0 = float('nan')
         self.__curr_th1 = float('nan')
         self.__curr_th2 = float('nan')
@@ -179,7 +169,7 @@ class ArmController(Node):
         self.create_subscription(Float32, "/ARM/WRIST_BEND/CURR_ANGLE", self.__on_wrist_bend_angle_received, 10)
         self.create_subscription(Float32, "/ARM/WRIST_TWIST/CURR_ANGLE", self.__on_wrist_twist_angle_received, 10)
 
-        # create publishers for the arm motor angles 
+        # create publishers for the arm motor angles
         self.__base_angle_publisher        = self.create_publisher(Float32, "/ARM/BASE/TARGET_ANGLE", 10)
         self.__shoulder_angle_publisher    = self.create_publisher(Float32, "/ARM/SHOULDER/TARGET_ANGLE", 10)
         self.__elbow_angle_publisher       = self.create_publisher(Float32, "/ARM/ELBOW/TARGET_ANGLE", 10)
@@ -263,37 +253,37 @@ class ArmController(Node):
 
     def __on_base_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th0:
-            self.__curr_th0 = msg.data
+            self.__curr_th0 = wrap_to_pi(msg.data)
             self.__update_point_from_angles()
             self.__calculate_angles()
-    
+
     def __on_shoulder_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th1:
-            self.__curr_th1 = msg.data
+            self.__curr_th1 = wrap_to_pi(msg.data)
             self.__update_point_from_angles()
             self.__calculate_angles()
-    
+
     def __on_elbow_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th2:
-            self.__curr_th2 = msg.data
+            self.__curr_th2 = wrap_to_pi(msg.data)
             self.__update_point_from_angles()
             self.__calculate_angles()
 
     def __on_wrist_twist_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th3:
-            self.__curr_th3 = msg.data
+            self.__curr_th3 = wrap_to_pi(msg.data)
             self.__update_point_from_angles()
             self.__calculate_angles()
 
     def __on_wrist_bend_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th4:
-            self.__curr_th4 = msg.data
+            self.__curr_th4 = wrap_to_pi(msg.data)
             self.__update_point_from_angles()
             self.__calculate_angles()
 
     def __check_current_angles_valid(self) -> bool:
         return not any(math.isnan(angle) for angle in [self.__curr_th0, self.__curr_th1, self.__curr_th2, self.__curr_th3, self.__curr_th4])
-        
+
 
     def __update_point_from_angles(self):
         if not self.__check_current_angles_valid():
@@ -305,6 +295,7 @@ class ArmController(Node):
         )
 
     def __calculate_angles(self):
+        # Verify that all angles have been initialized
         if not self.__check_current_angles_valid():
             self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
@@ -411,11 +402,12 @@ class ArmController(Node):
         )
         self.__point = l2
 
-        self.__base_angle_publisher.publish(Float32(data=self.__target_th0))
-        self.__shoulder_angle_publisher.publish(Float32(data=self.__target_th1))
-        self.__elbow_angle_publisher.publish(Float32(data=self.__target_th2))
-        self.__wrist_twist_angle_publisher.publish(Float32(data=self.__target_th3))
-        self.__wrist_bend_angle_publisher.publish(Float32(data=self.__target_th4))        
+        # Must re-wrap some angles to prevent sign flips due to crossing the 180:-180 boundary
+        self.__base_angle_publisher.publish(       Float32(data=wrap_to_minus_90(self.__target_th0)))
+        self.__shoulder_angle_publisher.publish(   Float32(data=wrap_to_minus_90(self.__target_th1)))
+        self.__elbow_angle_publisher.publish(      Float32(data=wrap_to_pi(      self.__target_th2)))
+        self.__wrist_twist_angle_publisher.publish(Float32(data=wrap_to_pi(      self.__target_th3)))
+        self.__wrist_bend_angle_publisher.publish( Float32(data=wrap_to_pi(      self.__target_th4)))
     def run(self):
         self.get_logger().info("starting inverse kinematics node...")
         rclpy.spin(self)
