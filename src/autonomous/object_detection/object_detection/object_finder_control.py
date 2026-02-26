@@ -22,7 +22,7 @@ class ObjectSearchAndFollow(Node):
 
         # Search Parameters
         self.SEARCH_SPEED = 0.25  # Linear speed while searching (0 for rotate-in-place)
-        self.SEARCH_AMPLITUDE = 0.5  # Radians (~45 degrees) to sweep left/right
+        self.SEARCH_AMPLITUDE = 0.1  # Radians (~45 degrees) to sweep left/right
         self.SEARCH_FREQ = 0.1 / 2.0  # How fast to sweep (Hz)
 
         # PID Gains
@@ -35,7 +35,7 @@ class ObjectSearchAndFollow(Node):
 
         # State Variables
         self.last_detection_time = 0.0
-        self.detection_timeout = 0.5  # Seconds to wait before switching back to search
+        self.detection_timeout = 1.0  # Seconds to wait before switching back to search
         self.current_yaw = 0.0
         self.start_yaw = None  # Will store the yaw when we first start up
         self.object_visible = False

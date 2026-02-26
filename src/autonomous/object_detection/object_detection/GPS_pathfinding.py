@@ -23,7 +23,7 @@ class GPSIMUPathfinding(Node):
 
         # --- Parameters ---
         self.declare_parameter("speed", 0.3)
-        self.declare_parameter("turn_gain", 2.0)
+        self.declare_parameter("turn_gain", 0.4)
         self.declare_parameter("stop_distance", 2.0)
 
         # Obstacle Avoidance Parameters
@@ -209,7 +209,7 @@ class GPSIMUPathfinding(Node):
             turn_adjust = heading_error * (self.turn_gain / 100.0)
             current_speed = self.base_speed
 
-        turn_adjust = max(min(turn_adjust, 1.0), -1.0)
+        turn_adjust = max(min(turn_adjust, 0.4), -0.4)
 
         left = current_speed + turn_adjust
         right = current_speed - turn_adjust

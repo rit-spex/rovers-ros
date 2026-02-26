@@ -18,7 +18,7 @@ class GeneratePath(Node):
         )
         self.velPubRight = self.create_publisher(Float32, "/object_detection/AR_LY", 10)
         self.velPubLeft = self.create_publisher(Float32, "/object_detection/AR_RY", 10)
-        #self.pointPub = self.create_publisher(Point, "/auto/measured_point", 10)
+        # self.pointPub = self.create_publisher(Point, "/auto/measured_point", 10)
         self.outputVelLeft = Float32()
         self.outputVelRight = Float32()
         self.prevVelLeft = Float32()
@@ -56,7 +56,7 @@ class GeneratePath(Node):
                 # Try to get to point as fast as possible.
                 dt = dP / self.MAX_LINEAR_VELOCITY
 
-                angularVel = dPhi / dt
+                angularVel = dPhi / dt * 2.0
                 linearVel = dP / dt
                 rightVel = (
                     linearVel + (self.WHEEL_SEPERATION / 2) * angularVel
@@ -91,14 +91,14 @@ class GeneratePath(Node):
         self.prevVelRight.data = self.outputVelRight.data
         self.prevVelLeft.data = self.outputVelLeft.data
 
-        #self.pointPub.publish(self.measPoint)
+        # self.pointPub.publish(self.measPoint)
         self.velPubRight.publish(self.outputVelRight)
         self.velPubLeft.publish(self.outputVelLeft)
         #     self.velPubLeft.publish(self.outputVelLeft)
         # for i in range(10):
         #     self.velPubRight.publish(self.outputVelRight)
         #     self.velPubLeft.publish(self.outputVelLeft)
-        #time.sleep(3)
+        # time.sleep(3)
 
 
 def main(args=None):
