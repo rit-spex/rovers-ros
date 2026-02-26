@@ -114,6 +114,13 @@ class ArmController(Node):
         self.__curr_th3 = float('nan')
         self.__curr_th4 = float('nan')
 
+        self.__x = 0
+        self.__y = 0
+        self.__z = 0
+        self.__rx = 0
+        self.__ry = 0
+        self.__rz = 0
+
         self.__trans_sens = 0.004
         self.__rotate_sens = 0.00005
 
