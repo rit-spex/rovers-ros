@@ -125,7 +125,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="BEND_WRIST",
         signals={
-            "position": Signal(DATA_TYPES.INT_32, 0),
+            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=False
     ),
@@ -134,7 +134,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="TWIST_WRIST",
         signals={
-            "position": Signal(DATA_TYPES.INT_32, 0),
+            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=False
     ),
@@ -143,7 +143,8 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="MOVE_CLAW",
         signals={
-            "state":     Signal(DATA_TYPES.UINT_8, 0),
+            "State":        Signal(DATA_TYPES.UINT_8, 0),
+            "Position":     Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=False
     ),
@@ -152,7 +153,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="MOVE_SOLENOID",
         signals={
-            "enabled":     Signal(DATA_TYPES.UINT_8, 0),
+            "Enabled":     Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
     ),
@@ -161,7 +162,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="READ_WRIST_BEND",
         signals={
-            "Position": Signal(DATA_TYPES.INT_32, 0),
+            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=True
     ),
@@ -170,7 +171,7 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.ARM,
         name="READ_WRIST_TWIST",
         signals={
-            "Position": Signal(DATA_TYPES.INT_32, 0),
+            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=True
     ),
@@ -180,7 +181,7 @@ TEENSY_CAN_MESSAGES = {
         name="READ_CLAW",
         signals={
             "State": Signal(DATA_TYPES.UINT_8, 0),
-            "Position":  Signal(DATA_TYPES.INT_32, 0),
+            "Position":  Signal(DATA_TYPES.FLOAT_32, 0),
 
         },
         isforJetson=True

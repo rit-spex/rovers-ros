@@ -89,8 +89,8 @@ class Arm(Node):
     # arm MUST be enabled to move, this is a safety feature to prevent the arm from moving unexpectedly
     arm_enabled: bool
     __solenoid_engaged: bool
-    __motors_target_ticks: list[int32]
-    __motors_actual_ticks: list[int32]
+    __motors_target_ticks: list[int32 | float]
+    __motors_actual_ticks: list[int32 | float]
 
     # this thread will continuously request the position of the can open motors
     request_position_thread: threading.Thread
@@ -169,16 +169,13 @@ class Arm(Node):
         self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
     def __bend_wrist_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BEND_WRIST].ticks_offset
-        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, ticks)
+        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, msg.data)
 
     def __twist_wrist_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.TWIST_WRIST].ticks_offset
-        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, ticks)
+        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, msg.data)
 
     def __gripper_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.GRIPPER].ticks_offset
-        self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, ticks)
+        self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, msg.data)
 
     def __solenoid_callback(self, msg: Bool):
         # only send message if arm is enabled 
@@ -200,7 +197,7 @@ class Arm(Node):
             self.get_logger().error(f"CAN message for moving the claw does not exist: {e}")
             return
 
-    def __send_motor_command(self, motor_idx: ARM_MOTOR_IDX, target_tick: int32):
+    def __send_motor_command(self, motor_idx: ARM_MOTOR_IDX, target_tick: int32 | float):
         # only send message if arm is enabled 
         if not self.arm_enabled:
             return
