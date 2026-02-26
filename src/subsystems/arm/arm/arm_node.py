@@ -19,12 +19,14 @@ class OPEN_CAN:
     # these are the values for the ID signal of the CAN messages, they are used to specify the type of the message being sent to the arm motors
     class ID(IntEnum):
         ENABLE = 0
+        SET_SPEED = 1
         SEND   = 1
         READ   = 2
 
     # these are the values for the MESSAGE_TYPE signal of the CAN messages, the return data from the motors
     class MESSAGE_TYPE:
         ENABLE      = int(0x2b)
+        SET_SPEED   = int(0x23)
         SEND        = int(0x23)
         READ_SEND   = int(0x40)
         READ_GET    = int(0x43)    
@@ -32,6 +34,7 @@ class OPEN_CAN:
     # these are the values for the OPCODE_LSB signal of the CAN messages, they are used to specify the type of the message being sent to the arm motors
     class OPCODE_LSB:
         ENABLE = int(0x40)
+        SET_SPEED = int(0x81)
         SEND   = int(0x64)
         READ   = int(0x7a)        
 
@@ -50,21 +53,23 @@ class arm_motor_params:
     upper_limits_ticks: int32
     lower_limits_ticks: int32
     ticks_offset: int32
+    max_speed: int32
 
-    def __init__(self, rad_2_ticks: float, upper_limits_ticks: int32, lower_limits_ticks: int32, ticks_offset: int32):
+    def __init__(self, rad_2_ticks: float, upper_limits_ticks: int32, lower_limits_ticks: int32, ticks_offset: int32, max_speed: int32):
         self.rad_2_ticks = rad_2_ticks
         self.ticks_2_rad = 1 / rad_2_ticks
         self.upper_limits_ticks = upper_limits_ticks
         self.lower_limits_ticks = lower_limits_ticks
         self.ticks_offset = ticks_offset
+        self.max_speed = max_speed
 
 ARM_MOTOR_PARAMS = [
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # base
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # shoulder
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # elbow
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)), # bend wrist
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0)),  # twist wrist
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0))  # gripper
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # base
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # elbow
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # bend wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
 ]
 
 REQUESTED_ARM_UPDATE_RATE = 0.5 # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
@@ -264,6 +269,8 @@ class Arm(Node):
                     can_message.signals["MESSAGE_TYPE"].set_value(OPEN_CAN.MESSAGE_TYPE.SEND)
                 elif message_type == OPEN_CAN.ID.READ:
                     can_message.signals["MESSAGE_TYPE"].set_value(OPEN_CAN.MESSAGE_TYPE.READ_SEND)
+                elif message_type == OPEN_CAN.ID.SET_SPEED:
+                    can_message.signals["MESSAGE_TYPE"].set_value(OPEN_CAN.MESSAGE_TYPE.SET_SPEED)
             except KeyError as e:
                 self.get_logger().error(f"CAN message {can_message.name} does not have a MESSAGE_TYPE signal.")
                 return
@@ -276,6 +283,8 @@ class Arm(Node):
                     can_message.signals["OPCODE_LSB"].set_value(OPEN_CAN.OPCODE_LSB.SEND)
                 elif message_type == OPEN_CAN.ID.READ:
                     can_message.signals["OPCODE_LSB"].set_value(OPEN_CAN.OPCODE_LSB.READ)
+                elif message_type == OPEN_CAN.ID.SET_SPEED:
+                    can_message.signals["OPCODE_LSB"].set_value(OPEN_CAN.OPCODE_LSB.SET_SPEED)
             except KeyError as e:
                 self.get_logger().error(f"CAN message {can_message.name} does not have a OPCODE_LSB signal.")
                 return
@@ -308,7 +317,7 @@ class Arm(Node):
                     can_message.signals["DATA3"].set_value(0)
                     can_message.signals["DATA4"].set_value(0)
 
-                elif message_type == OPEN_CAN.ID.SEND:
+                elif message_type == OPEN_CAN.ID.SEND or message_type == OPEN_CAN.ID.SET_SPEED:
                     can_message.signals["DATA1"].set_value((value >> 0) & 0xFF) # set DATA1 to the least significant byte of the value
                     can_message.signals["DATA2"].set_value((value >> 8) & 0xFF) # set DATA2 to the second least significant byte of the value
                     can_message.signals["DATA3"].set_value((value >> 16) & 0xFF) # set DATA3 to the third least significant byte of the value
@@ -364,6 +373,9 @@ class Arm(Node):
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_BASE,     int32(1), OPEN_CAN.ID.ENABLE)
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_SHOULDER, int32(1), OPEN_CAN.ID.ENABLE)
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_ELBOW,    int32(1), OPEN_CAN.ID.ENABLE)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_BASE,     ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].max_speed, OPEN_CAN.ID.SET_SPEED)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_SHOULDER, ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].max_speed, OPEN_CAN.ID.SET_SPEED)
+            self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_ELBOW,    ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].max_speed, OPEN_CAN.ID.SET_SPEED)
             self.get_logger().info("Enabling arm...")
         else:
             self.__send_open_can_message(CAN_MESSAGE_IDS.SEND_BASE,     int32(0), OPEN_CAN.ID.ENABLE)
