@@ -2,7 +2,7 @@ from constants.CommandCodes import CONSTANTS
 from constants.can_encoding import TeensyCommunication
 from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names
 from constants.CAN_structs import Signal, Message
-from custom_interfaces.msg import Can
+from custom_interfaces.msg import Can, SpaceMouse
 
 from numpy import uint8, int32
 import rclpy
@@ -106,6 +106,13 @@ class Arm(Node):
                 )
         # self.create_subscription(Bool, "/BASESTATION/" + CONSTANTS.N64.NAME + "/" + CONSTANTS.N64.BUTTON.L_STR       , self.__base_forward_callback, 10)
 
+        self.create_subscription(
+            msg_type=SpaceMouse,
+            topic="/BASESTATION/spacemouse",
+            callback=self.__on_spacemouse_received,
+            qos_profile=10,
+        )
+
         self.create_subscription(Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10)
 
         self.create_subscription(
@@ -127,6 +134,23 @@ class Arm(Node):
             timer_period_sec=REQUESTED_ARM_UPDATE_RATE,
             callback=self.request_position,
         )        
+
+    def __on_spacemouse_received(self, msg: SpaceMouse):
+        """Handle incoming SpaceMouse 6DOF input for arm control.
+
+        msg.x/y/z  – translation axes (-1.0 to 1.0)
+        msg.rx/ry/rz – rotation axes  (-1.0 to 1.0)
+        msg.buttons  – bitmask of SpaceMouse button states
+
+        TODO: map axes to arm motors here.
+        """
+        if not self.arm_enabled:
+            return
+
+        self.get_logger().debug(
+            "SpaceMouse: x=%.3f y=%.3f z=%.3f rx=%.3f ry=%.3f rz=%.3f buttons=%d",
+            msg.x, msg.y, msg.z, msg.rx, msg.ry, msg.rz, msg.buttons,
+        )
 
     def __base_callback(self, msg: Float32):        
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))

@@ -13,6 +13,7 @@ import rclpy.subscription
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, UInt8, UInt8MultiArray, UInt16
+from custom_interfaces.msg import SpaceMouse
 
 
 def _ensure_local_package_path() -> None:
@@ -31,11 +32,12 @@ from encoding import MessageEncoder
 class Basestation(Node):
     __encoder: MessageEncoder
     __publishers: dict[int, dict[str, rclpy.publisher.Publisher]]
+    __spacemouse_publisher: rclpy.publisher.Publisher
 
     def __init__(self):
         super().__init__("Basestation")
 
-        # Default to enabled — the basestation-ROS link exists specifically to
+        # Default to enabled ï¿½ the basestation-ROS link exists specifically to
         # verify end-to-end communication, so tracing should be on unless
         # explicitly disabled.
         self._protocol_trace = (
@@ -56,6 +58,11 @@ class Basestation(Node):
         }
 
         self._create_publishers_from_protocol()
+        self.__spacemouse_publisher = self.create_publisher(
+            msg_type=SpaceMouse,
+            topic="/BASESTATION/spacemouse",
+            qos_profile=10,
+        )
 
         self.create_subscription(
             msg_type=UInt8MultiArray,
@@ -72,7 +79,13 @@ class Basestation(Node):
         )
 
     def _create_publishers_from_protocol(self) -> None:
+        spacemouse_id = CONSTANTS.COMPACT_MESSAGES.SPACEMOUSE_ID
         for message_id, message in self.__encoder.get_messages().items():
+            # SpaceMouse is published as one combined message; skip per-signal topics.
+            if message_id == spacemouse_id:
+                self.__publishers[message_id] = {}
+                continue
+
             self.__publishers[message_id] = {}
             message_name = message["name"]
             for signal_name, signal in message["values"].items():
@@ -108,6 +121,20 @@ class Basestation(Node):
                 % (message_id, message_name, decoded_data, raw_bytes.hex(" "))
             )
 
+        # SpaceMouse: publish as one combined message instead of per-signal topics.
+        if message_id == CONSTANTS.COMPACT_MESSAGES.SPACEMOUSE_ID:
+            sm_msg = SpaceMouse(
+                x=float(decoded_data.get("x", 0)),
+                y=float(decoded_data.get("y", 0)),
+                z=float(decoded_data.get("z", 0)),
+                rx=float(decoded_data.get("rx", 0)),
+                ry=float(decoded_data.get("ry", 0)),
+                rz=float(decoded_data.get("rz", 0)),
+                buttons=int(decoded_data.get("buttons", 0)),
+            )
+            self.__spacemouse_publisher.publish(sm_msg)
+            return
+
         publishers = self.__publishers.get(message_id, {})
         signal_defs = self.__encoder.get_messages().get(message_id, {}).get(
             "values", {}
@@ -117,15 +144,6 @@ class Basestation(Node):
             publisher = publishers.get(key)
             if publisher is None:
                 continue
-            
-            # only send data that has changed to avoid spamming the network
-            if self.__basestation_communications.get_messages()[id]['values'][key].get_value == value:
-                continue
-
-            self.__basestation_communications.get_messages()[id]['values'][key].set_value(value)
-            
-            value_type = self.__valueTypes[
-                self.__basestation_communications.get_messages()[id]['values'][key].get_type]
 
             signal = signal_defs.get(key)
             if signal is None:
