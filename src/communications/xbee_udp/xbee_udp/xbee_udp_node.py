@@ -33,7 +33,7 @@ class xbee_udp(Node):
         try:
             data, addr = self.__socket.recvfrom(buffer_size)
             payload = list(data)
-            self.get_logger().info(
+            self.get_logger().debug(
                 f"received {len(payload)} bytes from {addr[0]}:{addr[1]}: "
                 f"{data.hex(' ')}"
             )

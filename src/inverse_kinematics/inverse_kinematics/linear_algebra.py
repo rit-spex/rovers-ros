@@ -240,7 +240,7 @@ def simple_clamp(angle, limits):
 # Now we get the gross stuff
 
 
-def inverse_kinematics(Pvect, current_angs, Rot):
+def inverse_kinematics(Pvect, current_angs, Rot, Node):
     """Solve Arm Angles using the principles of inverse kinematics
 
     Args:
@@ -277,13 +277,38 @@ def inverse_kinematics(Pvect, current_angs, Rot):
 
     # --- Numerical Solve (vector nsolve) ---
     current_angs_sym = tuple(sp.Float(a) for a in current_angs)
+    # try:
+    #     raise Exception
+        
+    #     Node.get_logger().info("HERE2.0.0")
+    #     sol = sp.nsolve(
+    #         eqs, (t0, t1, t2, t3), current_angs_sym, tol=tolerance, maxsteps=250
+    #     )
+    #     Node.get_logger().info("HERE2.0.1")
+    #     th1, th2, th3 = map(float, sol)
+    #     # print("Original works")
+    #     Node.get_logger().info("HERE2.0.2")
+    # except Exception as e:
     try:
+        # Try 2D
+        r = np.linalg.norm(Pvect - [0, 0, A0])
+        c = (r**2 - A1**2 - A2**2) / (2 * A1 * A2)
+        c = max(-1.0, min(1.0, c))
+        tht2 = math.acos(c)
+        tht1 = math.atan2((A2 * math.sin(tht2)), (A1 + A2 * math.cos(tht2)))
+        tht0 = np.arctan2(Pvect[1], Pvect[0]) - math.pi / 2
+
+        # sol = sp.nsolve(eqs, (t0, t1, t2, t3), [tht0, tht1, tht2, current_angs_sym[3]], tol=tolerance, maxsteps=2500)
         sol = sp.nsolve(
-            eqs, (t0, t1, t2, t3), current_angs_sym, tol=tolerance, maxsteps=250
+            eqs,
+            (t0, t1, t2, t3),
+            [tht0, tht1, tht2, 0],
+            tol=tolerance,
+            maxsteps=1000,
         )
-        th1, th2, th3 = map(float, sol)
-        # print("Original works")
+        th0, th1, th2, th3 = map(float, sol)
     except Exception as e:
+        Node.get_logger().info("HERE2.2")
         try:
             # Try 2D
             r = np.linalg.norm(Pvect - [0, 0, A0])
@@ -293,6 +318,7 @@ def inverse_kinematics(Pvect, current_angs, Rot):
             tht1 = math.atan2((A2 * math.sin(tht2)), (A1 + A2 * math.cos(tht2)))
             tht0 = np.arctan2(Pvect[1], Pvect[0]) - math.pi / 2
 
+            tht0, tht1, tht2 = flip_shoulder(tht0, tht1, tht2)
             # sol = sp.nsolve(eqs, (t0, t1, t2, t3), [tht0, tht1, tht2, current_angs_sym[3]], tol=tolerance, maxsteps=2500)
             sol = sp.nsolve(
                 eqs,
@@ -303,39 +329,19 @@ def inverse_kinematics(Pvect, current_angs, Rot):
             )
             th0, th1, th2, th3 = map(float, sol)
         except Exception as e:
-            try:
-                # Try 2D
-                r = np.linalg.norm(Pvect - [0, 0, A0])
-                c = (r**2 - A1**2 - A2**2) / (2 * A1 * A2)
-                c = max(-1.0, min(1.0, c))
-                tht2 = math.acos(c)
-                tht1 = math.atan2((A2 * math.sin(tht2)), (A1 + A2 * math.cos(tht2)))
-                tht0 = np.arctan2(Pvect[1], Pvect[0]) - math.pi / 2
+            # Try 2D
+            r = np.linalg.norm(Pvect - [0, 0, A0])
+            c = (r**2 - A1**2 - A2**2) / (2 * A1 * A2)
+            c = max(-1.0, min(1.0, c))
+            tht2 = math.acos(c)
+            tht1 = math.atan2((A2 * math.sin(tht2)), (A1 + A2 * math.cos(tht2)))
+            tht0 = np.arctan2(Pvect[1], Pvect[0]) - math.pi / 2
 
-                tht0, tht1, tht2 = flip_shoulder(tht0, tht1, tht2)
-                # sol = sp.nsolve(eqs, (t0, t1, t2, t3), [tht0, tht1, tht2, current_angs_sym[3]], tol=tolerance, maxsteps=2500)
-                sol = sp.nsolve(
-                    eqs,
-                    (t0, t1, t2, t3),
-                    [tht0, tht1, tht2, 0],
-                    tol=tolerance,
-                    maxsteps=1000,
-                )
-                th0, th1, th2, th3 = map(float, sol)
-            except Exception as e:
-                # Try 2D
-                r = np.linalg.norm(Pvect - [0, 0, A0])
-                c = (r**2 - A1**2 - A2**2) / (2 * A1 * A2)
-                c = max(-1.0, min(1.0, c))
-                tht2 = math.acos(c)
-                tht1 = math.atan2((A2 * math.sin(tht2)), (A1 + A2 * math.cos(tht2)))
-                tht0 = np.arctan2(Pvect[1], Pvect[0]) - math.pi / 2
+            tht0, tht1, tht2 = flip_shoulder(tht0, tht1, tht2)
 
-                tht0, tht1, tht2 = flip_shoulder(tht0, tht1, tht2)
+            print(f"x{tht0*57.3:10.4f}\t\t{tht1*57.3:10.4f}\t\t{tht2*57.3:10.4f}")
 
-                print(f"x{tht0*57.3:10.4f}\t\t{tht1*57.3:10.4f}\t\t{tht2*57.3:10.4f}")
-
-                raise Exception("Failed to calculate positions")
+            raise Exception("Failed to calculate positions")
 
     # Initial values
     th0 = round(wrap_to_pi(th0), 4)

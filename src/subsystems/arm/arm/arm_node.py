@@ -64,25 +64,25 @@ class arm_motor_params:
         self.max_speed = max_speed
 
 # REAL PARAMS BELOW
-ARM_MOTOR_PARAMS = [
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # base
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # elbow
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # bend wrist
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
-    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
-]
-
-# https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
 # ARM_MOTOR_PARAMS = [
-#     arm_motor_params(rad_2_ticks=-415000, upper_limits_ticks=int32(10850000), lower_limits_ticks=int32( 8220000), ticks_offset=int32(0), max_speed=int32(300)), # base
-#     arm_motor_params(rad_2_ticks=-262000, upper_limits_ticks=int32( 670700), lower_limits_ticks=int32(-244000), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
-#     arm_motor_params(rad_2_ticks=415000, upper_limits_ticks=int32(1300000), lower_limits_ticks=int32(-652821), ticks_offset=int32(0), max_speed=int32(300)), # elbow
-#     # NOTE: Following limits exist on teensy side, currently redundant, also the teensy expected floats in radians soooo yeah
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # base
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # shoulder
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # elbow
 #     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # bend wrist
-#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(2), lower_limits_ticks=int32(-2), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
+#     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
 #     arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
 # ]
+
+# https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
+ARM_MOTOR_PARAMS = [
+    arm_motor_params(rad_2_ticks=-415000, upper_limits_ticks=int32(10850000), lower_limits_ticks=int32( 8220000), ticks_offset=int32(9900000), max_speed=int32(300)), # base
+    arm_motor_params(rad_2_ticks=-262000, upper_limits_ticks=int32( 670700), lower_limits_ticks=int32(-244000), ticks_offset=int32(625000), max_speed=int32(100)), # shoulder
+    arm_motor_params(rad_2_ticks=415000,  upper_limits_ticks=int32(1300000), lower_limits_ticks=int32(-652821), ticks_offset=int32(325000), max_speed=int32(300)), # elbow
+    # NOTE: Following limits exist on teensy side, currently redundant, also the teensy expected floats in radians soooo yeah
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100)), # bend wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(2), lower_limits_ticks=int32(-2), ticks_offset=int32(0), max_speed=int32(100)),  # twist wrist
+    arm_motor_params(rad_2_ticks=1, upper_limits_ticks=int32(1), lower_limits_ticks=int32(-1), ticks_offset=int32(0), max_speed=int32(100))  # gripper
+]
 
 REQUESTED_ARM_UPDATE_RATE = 0.5 # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
 
@@ -169,15 +169,15 @@ class Arm(Node):
         )
 
     def __base_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks) + ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, ticks)
 
     def __shoulder_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_offset
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].rad_2_ticks) + ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_offset
         self.__send_motor_command(ARM_MOTOR_IDX.SHOULDER, ticks)
 
     def __elbow_callback(self, msg: Float32):
-        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks) - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_offset
+        ticks = int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].rad_2_ticks) + ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_offset
         self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
     def __bend_wrist_callback(self, msg: Float32):
@@ -422,7 +422,7 @@ class Arm(Node):
                         return
 
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.BASE] = actual_tick
-                    self.__base_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_2_rad))
+                    self.__base_angle_publisher.publish(Float32(data=(actual_tick - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset) * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for base motor: {actual_tick}")
 
             case CAN_MESSAGE_IDS.READ_SHOULDER:
@@ -440,7 +440,7 @@ class Arm(Node):
                         return
 
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.SHOULDER] = actual_tick
-                    self.__shoulder_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_2_rad))
+                    self.__shoulder_angle_publisher.publish(Float32(data=(actual_tick - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_offset) * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.SHOULDER].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for shoulder motor: {actual_tick}")
 
             case CAN_MESSAGE_IDS.READ_ELBOW:
@@ -458,7 +458,7 @@ class Arm(Node):
                         return
 
                     self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW] = actual_tick
-                    self.__elbow_angle_publisher.publish(Float32(data=actual_tick * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_2_rad))
+                    self.__elbow_angle_publisher.publish(Float32(data=(actual_tick - ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_offset) * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.ELBOW].ticks_2_rad))
                     self.get_logger().info(f"Updated actual tick for elbow motor: {actual_tick}")
 
             case CAN_MESSAGE_IDS.READ_WRIST_BEND:
