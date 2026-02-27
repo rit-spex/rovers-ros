@@ -1,6 +1,7 @@
 import os
 import can
-import gpiod
+
+# import gpiod
 import time
 
 INTERFACE = "socketcan"
@@ -47,9 +48,10 @@ def can_rx_loop(bus: can.bus.BusABC):
 
 
 def main():
-    reset_network()
+    # reset_network()
     can.util.set_logging_level("info")
-    bus = can.Bus(CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True)
+    bus = can.Bus(CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=False)
+    print(bus.state)
 
     while True:
         can_tx(bus, 3)
