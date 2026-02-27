@@ -37,7 +37,7 @@ class Basestation(Node):
     def __init__(self):
         super().__init__("Basestation")
 
-        # Default to enabled � the basestation-ROS link exists specifically to
+        # Default to enabled the basestation-ROS link exists specifically to
         # verify end-to-end communication, so tracing should be on unless
         # explicitly disabled.
         self._protocol_trace = (

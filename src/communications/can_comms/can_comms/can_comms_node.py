@@ -30,7 +30,7 @@ class CAN(Node):
         can.rc["bitrate"] = BIT_RATE
 
         self.bus = can.Bus(
-            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True
+            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=False
         )
         can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
@@ -103,6 +103,7 @@ class JETSON_LISTENER(can.Listener):
     def __init__(self, node) -> None:
         super().__init__()
         self.__node = node
+        self.__publishers = {}
 
         # This is for messages coming in
         for (id, message) in TEENSY_CAN_MESSAGES.items():
@@ -116,6 +117,8 @@ class JETSON_LISTENER(can.Listener):
             )
 
     def on_message_received(self, msg: can.Message) -> None:
+        if msg.arbitration_id not in self.__publishers:
+            return
         ros_msg = Can(
             id=msg.arbitration_id,
             buf=msg.data,
