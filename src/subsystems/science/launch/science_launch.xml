@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="science" exec="science_node" name="science"></node>
+</launch>

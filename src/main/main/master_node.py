@@ -66,10 +66,7 @@ class Master(Node):
         self.__last_basestation_heartbeat_time = UInt16()
         self.__current_basestation_heartbeat_time = UInt16()
         self.__basestation_recieved_heartbeat = False
-
-        self.__last_heartbeat_time = 0
-        self.__current_heartbeat_time = 0
-        self.__received_heartbeat = False
+        
         self.__chassis_teensy_enabled = False
         self.__chassis_node_enabled = False
         self.__last_chassis_command = UInt16()
