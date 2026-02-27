@@ -351,7 +351,7 @@ class ArmController(Node):
                 self.__target_th3,
                 self.__target_th4,
             )
-        elif self.__mode == ARM_MODES.RAW_CONTROL:
+        elif self.__mode == ARM_MODES.POINT_CONTROL:
             self.__target_th0 = wrap_to_pi(
                 self.__target_th0 + self.__rx * self.__rotate_sens
             )
@@ -372,7 +372,7 @@ class ArmController(Node):
             _, _, _, self.__point = calc_joint_positions(
                 self.__target_th0, self.__target_th1, self.__target_th2, self.__target_th3, False
             )
-        elif self.__mode == ARM_MODES.POINT_CONTROL:
+        elif self.__mode == ARM_MODES.RAW_CONTROL:
 
             # Move point inside cube
             self.__point[0] += self.__x * self.__trans_sens
@@ -389,7 +389,7 @@ class ArmController(Node):
 
             except Exception as e:
                 self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
-                return
+                
         elif self.__mode == ARM_MODES.GRIPPER_CONTROL:
             # x rotates the gripper
             self.__target_th3 += self.__rx * self.__rotate_sens
@@ -408,7 +408,6 @@ class ArmController(Node):
 
             except Exception as e:
                 self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
-                return
 
         # # Reset state variable
         # for key in self.__state:
