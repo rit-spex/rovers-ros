@@ -5,12 +5,12 @@ import time
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
-BIT_RATE = 500000
+BIT_RATE = 1000000
 
 
 def reset_network():
     os.system("sudo ifconfig can0 down")
-    os.system("sudo ip link set can0 up type can bitrate 500000")
+    os.system("sudo ip link set can0 up type can bitrate 1000000")
     os.system("sudo ip link set can0 up")
 
 
