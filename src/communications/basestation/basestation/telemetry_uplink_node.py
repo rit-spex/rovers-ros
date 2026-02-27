@@ -105,8 +105,8 @@ class TelemetryUplink(Node):
         self._sub_s16_angle("/ARM/BASE/CURR_ANGLE", self._arm_encoders, "arm_base_position")
         self._sub_s16_angle("/ARM/SHOULDER/CURR_ANGLE", self._arm_encoders, "shoulder_position")
         self._sub_s16_angle("/ARM/ELBOW/CURR_ANGLE", self._arm_encoders, "elbow_position")
-        self._sub_s16_angle("/ARM/BEND_WRIST/CURR_ANGLE", self._arm_encoders, "wrist_bend_position")
-        self._sub_s16_angle("/ARM/TWIST_WRIST/CURR_ANGLE", self._arm_encoders, "wrist_twist_position")
+        self._sub_s16_angle("/ARM/WRIST_BEND/CURR_ANGLE", self._arm_encoders, "wrist_bend_position")
+        self._sub_s16_angle("/ARM/WRIST_TWIST/CURR_ANGLE", self._arm_encoders, "wrist_twist_position")
         self._sub_s16_angle("/ARM/GRIPPER/CURR_ANGLE", self._arm_encoders, "gripper_position")
 
         self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_LEFT", self._drive_imu, "drive_speed_left")
