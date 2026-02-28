@@ -83,7 +83,7 @@ class CAN(Node):
         rclpy.shutdown()
 
     def send_msg(self, msg: Can):
-        self.get_logger().debug(
+        self.get_logger().info(
             f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
         bus_msg = can.Message(

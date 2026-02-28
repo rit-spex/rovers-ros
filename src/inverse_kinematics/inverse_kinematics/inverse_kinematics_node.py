@@ -44,7 +44,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 0.5  # seconds
+UPDATE_RATE_SEC = 1  # seconds
 
 
 class ARM_MODES(IntEnum):
@@ -127,7 +127,7 @@ class ArmController(Node):
         self.__rz = 0
 
         self.__trans_sens = 0.004
-        self.__rotate_sens = 0.001
+        self.__rotate_sens = 0.002
 
         self.create_subscription(
             msg_type=Bool,
@@ -345,7 +345,7 @@ class ArmController(Node):
     def __calculate_angles(self):
         # Verify that all angles have been initialized
         self._logger.info(
-            f"Current angles: {self.__curr_th0}, {self.__curr_th1}, {self.__curr_th2}, {self.__curr_th3}, {self.__curr_th4}, {self.__curr_th5}"
+            f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
         )
         if any(
             math.isnan(angle)
@@ -361,9 +361,6 @@ class ArmController(Node):
             # self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
 
-        self._logger.info(
-            f"Current angles: {self.__curr_th0}, {self.__curr_th1}, {self.__curr_th2}, {self.__curr_th3}, {self.__curr_th4}, {self.__curr_th5}"
-        )
         self._logger.info(
             f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
         )

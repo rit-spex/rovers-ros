@@ -3,7 +3,7 @@
 # ------------------------------------------------------------------
 # file name     : CAN_constants.py
 # purpose       : contains constants for communication between the teensy4.1 and rover.
-#                   
+#
 # authors       : Tyler Halifax
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
@@ -194,7 +194,7 @@ TEENSY_CAN_MESSAGES = {
             "Enabled": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
-    ),   
+    ),
     CAN_MESSAGE_IDS.MOVE_AUGER: Message(
         id=CAN_MESSAGE_IDS.MOVE_AUGER,
         subsystem=Subsystems_Names.SCIENCE,
@@ -204,7 +204,7 @@ TEENSY_CAN_MESSAGES = {
             "home": Signal(DATA_TYPES.UINT_8, 0)
         },
         isforJetson=False
-    ),   
+    ),
     CAN_MESSAGE_IDS.ENABLE_DRILL: Message(
         id=CAN_MESSAGE_IDS.ENABLE_DRILL,
         subsystem=Subsystems_Names.SCIENCE,
@@ -213,7 +213,7 @@ TEENSY_CAN_MESSAGES = {
             "Enabled": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
-    ),   
+    ),
     CAN_MESSAGE_IDS.MOVE_SLIDE: Message(
         id=CAN_MESSAGE_IDS.MOVE_SLIDE,
         subsystem=Subsystems_Names.SCIENCE,
@@ -222,7 +222,7 @@ TEENSY_CAN_MESSAGES = {
             "stage": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
-    ),  
+    ),
     CAN_MESSAGE_IDS.ENABLE_PUMP1: Message(
         id=CAN_MESSAGE_IDS.ENABLE_PUMP1,
         subsystem=Subsystems_Names.SCIENCE,
@@ -231,7 +231,7 @@ TEENSY_CAN_MESSAGES = {
             "Enabled": Signal(DATA_TYPES.UINT_8, 0),
         },
         isforJetson=False
-    ), 
+    ),
     CAN_MESSAGE_IDS.ENABLE_PUMP2: Message(
         id=CAN_MESSAGE_IDS.ENABLE_PUMP2,
         subsystem=Subsystems_Names.SCIENCE,
