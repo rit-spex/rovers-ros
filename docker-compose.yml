@@ -24,8 +24,10 @@ services:
             # Workspace with persistent build cache
             - workspace:/home/ws
 
-            # Copy repo to container
-            - .:/home/ws
+            # Copy important files from repo to container
+            - ./src:/home/ws/src
+            - ./requirements.txt:/home/ws/requirements.txt
+            - ./source.sh:/home/ws/source.sh
 
             # X11 for GUI applications
             - /tmp/.X11-unix:/tmp/.X11-unix

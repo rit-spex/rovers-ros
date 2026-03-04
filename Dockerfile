@@ -18,6 +18,7 @@ RUN apt-get update && apt-get upgrade -y
 RUN apt-get install -y ament-cmake
 RUN apt-get install -y ccls
 RUN apt-get install -y python3-colcon-common-extensions
+RUN apt-get install -y python3-venv
 RUN apt-get install -y python3-pip
 RUN apt-get install -y vim
 RUN apt-get install -y clang
@@ -32,7 +33,7 @@ RUN apt-get install -y virtualenv
 RUN mkdir /home/ws
 
 # Create virtual environment
-RUN virtualenv .venv
+RUN python3 -m venv /home/ws/.venv
 
 # RUN echo "source /opt/ros/humble/setup.bash" >> /home/$USERNAME/.bashrc
 ENV SHELL=/bin/bash
