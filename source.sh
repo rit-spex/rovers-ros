@@ -7,7 +7,6 @@ python_path="/opt/ros/humble/lib/python3.10/site-packages:/opt/ros/humble/local/
 for pkg_path in ${pkgs[@]}
 do
 	sub_directories="$(ls "$pkg_path")"
-	echo $sub_directories
 	if echo $sub_directories | grep -q "local"; then
 		python_path="${python_path}:${dir}/${pkg_path}local/lib/python3.10/dist-packages"
 	elif echo $sub_directories | grep -q "lib"; then
