@@ -57,7 +57,7 @@ class ARM_MOTOR_IDX(IntEnum):
 class arm_motor_params:
     rad_2_ticks: float
     ticks_2_rad: float
-    upper_limits_ticks: int32
+    upper_limits_ticks: int32 | float
     lower_limits_ticks: int32
     ticks_offset: int32
     max_speed: int32
@@ -65,7 +65,7 @@ class arm_motor_params:
     def __init__(
         self,
         rad_2_ticks: float,
-        upper_limits_ticks: int32,
+        upper_limits_ticks: int32 | float,
         lower_limits_ticks: int32,
         ticks_offset: int32,
         max_speed: int32,
@@ -95,41 +95,41 @@ ARM_MOTOR_PARAMS = [
         upper_limits_ticks=int32(10225000),
         lower_limits_ticks=int32(8596000),
         ticks_offset=int32(9900000),
-        max_speed=int32(300),
+        max_speed=int32(100),
     ),  # base
     arm_motor_params(
         rad_2_ticks=-262000,
         upper_limits_ticks=int32(670700),
         lower_limits_ticks=int32(-244000),
         ticks_offset=int32(625000),
-        max_speed=int32(100),
+        max_speed=int32(30),
     ),  # shoulder
     arm_motor_params(
         rad_2_ticks=415000,
         upper_limits_ticks=int32(1300000 + 268000),
         lower_limits_ticks=int32(-652821 + 268000),
         ticks_offset=int32(325000 + 268000),
-        max_speed=int32(300),
+        max_speed=int32(100),
     ),  # elbow
     # NOTE: Following limits exist on teensy side, currently redundant, also the teensy expected floats in radians soooo yeah
     arm_motor_params(
         rad_2_ticks=1,
-        upper_limits_ticks=int32(1),
-        lower_limits_ticks=int32(-1),
+        upper_limits_ticks=int32(10),
+        lower_limits_ticks=int32(-10),
         ticks_offset=int32(0),
         max_speed=int32(100),
     ),  # bend wrist
     arm_motor_params(
         rad_2_ticks=1,
-        upper_limits_ticks=int32(2),
-        lower_limits_ticks=int32(-2),
+        upper_limits_ticks=int32(20),
+        lower_limits_ticks=int32(-20),
         ticks_offset=int32(0),
         max_speed=int32(100),
     ),  # twist wrist
     arm_motor_params(
         rad_2_ticks=1,
-        upper_limits_ticks=int32(1),
-        lower_limits_ticks=int32(-1),
+        upper_limits_ticks=15.7,
+        lower_limits_ticks=int32(0),
         ticks_offset=int32(0),
         max_speed=int32(100),
     ),  # gripper
@@ -199,6 +199,9 @@ class Arm(Node):
         )
         self.create_subscription(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", self.__gripper_callback, 10
+        )
+        self.create_subscription(
+            Float32, "/ARM/SOLENOID/TARGET", self.__solenoid_callback, 10
         )
 
         # create publishers for the arm motor angles

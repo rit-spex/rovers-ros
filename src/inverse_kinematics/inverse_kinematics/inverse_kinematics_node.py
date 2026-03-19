@@ -102,6 +102,7 @@ class ArmController(Node):
     __wrist_bend_angle_publisher: Publisher
     __wrist_twist_angle_publisher: Publisher
     __gripper_angle_publisher: Publisher
+    __solenoid_publisher: Publisher
 
     # Space mouse
     # __device: Any
@@ -127,7 +128,7 @@ class ArmController(Node):
         self.__rz = 0
 
         self.__trans_sens = 0.004
-        self.__rotate_sens = 0.002
+        self.__rotate_sens = 0.0007
 
         self.create_subscription(
             msg_type=Bool,
@@ -222,6 +223,9 @@ class ArmController(Node):
         self.__gripper_angle_publisher = self.create_publisher(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", 10
         )
+        self.__solenoid_publisher = self.create_publisher(
+            Bool, "ARM/SOLENOID/TARGET", 10
+        )
 
         # Update values periodically
         self.create_timer(
@@ -295,16 +299,19 @@ class ArmController(Node):
                 self.get_logger().info("Point control mode enabled.")
             else:
                 self.get_logger().info("Gripper control mode enabled.")
-        else:
+        elif not msg.data & 0b10:
             self.__mode_toggled = False
 
         if (msg.data & 0b01) and not self.__homing_toggled:
             self.__homing = bool(msg.data & 0b01)
             self.__homing_toggled = True
+            self.__solenoid_publisher.publish(msg=self.__homing)
             if msg.data:
                 self.get_logger().info("Homing initiated.")
             else:
                 self.get_logger().info("Homing cleared.")
+        elif not msg.data & 0b01:
+            self.__homing_toggled = False
 
     def __on_base_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th0:
