@@ -1,4 +1,8 @@
-from typing import Any
+from typing import Any, Callable, Dict
+
+from pygame import key
+
+from pygame import key
 from constants.CommandCodes import CONSTANTS
 from constants.CAN_structs import Message
 from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsystems_Names
@@ -18,6 +22,18 @@ class Science(Node):
     def __init__(self):
         super().__init__("science_node")
 
+        self._life_detection = {
+            "move_auger_up": 0,
+            "move_auger_down": 0,
+            "limit_switch_2": False,
+            "auger_depth": 0,
+            "pump_output_level": 0,
+            "slide_position": 0,
+            "selected_tube": 0,
+            "spec_slide_position": 0,
+            "spec_color_sensor": 0,
+        }
+
         self.__publishers = {}
         for (message_id, message) in TEENSY_CAN_MESSAGES.items():
             if(message.subsystem == Subsystems_Names.SCIENCE):
@@ -27,13 +43,13 @@ class Science(Node):
                         topic=message.topic_name,
                         qos_profile=10
                     )
-                else:
-                    self.create_subscription(
-                        msg_type=Can,
-                        topic=message.topic_name,
-                        callback=self.__on_can_message_received,
-                        qos_profile=10,
-                    )
+                # else:
+                #     self.create_subscription(
+                #         msg_type=Can,
+                #         topic=message.topic_name,
+                #         callback=self.__on_can_message_received,
+                #         qos_profile=10,
+                #     )
 
         self.create_subscription(
             msg_type=Bool,
@@ -42,9 +58,18 @@ class Science(Node):
             qos_profile=10,
         )
 
-    def __on_can_message_received(self, msg: Can):
+        def _sub_u8(self, topic: str, target: Dict, key: str) -> None:
+            self.create_subscription(Bool, topic, self._setter(target, key), 10)
+
+        def _setter(self, target: Dict, key: str) -> Callable:
+            def _callback(msg):
+                target[key] = msg.data
+
+            return _callback
+
+    # def __on_can_message_received(self, msg: Can):
         
-        self.get_logger().info(f"Received CAN message on topic {msg.topic}")
+    #     self.get_logger().info(f"Received CAN message on topic {msg.topic}")
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping science..")
