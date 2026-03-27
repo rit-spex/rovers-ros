@@ -9,6 +9,7 @@ from constants.CAN_constants import (
 )
 from constants.CAN_structs import Signal, Message
 from custom_interfaces.msg import Can
+from custom_interfaces.msg import ArmWrist
 
 from numpy import uint8, int32
 import rclpy
@@ -191,17 +192,16 @@ class Arm(Node):
         self.create_subscription(
             Float32, "/ARM/ELBOW/TARGET_ANGLE", self.__elbow_callback, 10
         )
+
         self.create_subscription(
-            Float32, "/ARM/WRIST_BEND/TARGET_ANGLE", self.__bend_wrist_callback, 10
+            ArmWrist, "/ARM/WRIST/TARGET_ANGLE", self.__wrist_callback, 10
         )
-        self.create_subscription(
-            Float32, "/ARM/WRIST_TWIST/TARGET_ANGLE", self.__twist_wrist_callback, 10
-        )
+
         self.create_subscription(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", self.__gripper_callback, 10
         )
         self.create_subscription(
-            Float32, "/ARM/SOLENOID/TARGET", self.__solenoid_callback, 10
+            Bool, "/ARM/SOLENOID/ENABLED", self.__solenoid_callback, 10
         )
 
         # create publishers for the arm motor angles
@@ -268,12 +268,18 @@ class Arm(Node):
         )
         self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
-    def __bend_wrist_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.BEND_WRIST, msg.data)
-
-    def __twist_wrist_callback(self, msg: Float32):
-        self.__send_motor_command(ARM_MOTOR_IDX.TWIST_WRIST, msg.data)
-
+    def __wrist_callback(self, msg: ArmWrist):
+        try:
+            can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_WRIST]
+            can_message.signals["Position_Bend"].set_value(msg.wrist_bend)
+            can_message.signals["Position_Twist"].set_value(msg.wrist_twist)
+            self.__send_CAN_data(can_message)
+        except KeyError as e:
+            self.get_logger().error(
+                f"CAN message for moving the wrist does not exist: {e}"
+            )
+            return
+        
     def __gripper_callback(self, msg: Float32):
         self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, msg.data)
 
@@ -341,26 +347,6 @@ class Arm(Node):
                 self.__send_open_can_message(
                     CAN_MESSAGE_IDS.SEND_ELBOW, int32(target_tick), OPEN_CAN.ID.SEND
                 )
-            case ARM_MOTOR_IDX.BEND_WRIST:
-                try:
-                    can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.BEND_WRIST]
-                    can_message.signals["Position"].set_value(target_tick)
-                    self.__send_CAN_data(can_message)
-                except KeyError as e:
-                    self.get_logger().error(
-                        f"CAN message for bending the wrist does not exist: {e}"
-                    )
-                    return
-            case ARM_MOTOR_IDX.TWIST_WRIST:
-                try:
-                    can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.TWIST_WRIST]
-                    can_message.signals["Position"].set_value(target_tick)
-                    self.__send_CAN_data(can_message)
-                except KeyError as e:
-                    self.get_logger().error(
-                        f"CAN message for twisting the wrist does not exist: {e}"
-                    )
-                    return
             case ARM_MOTOR_IDX.GRIPPER:
                 try:
                     can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_CLAW]

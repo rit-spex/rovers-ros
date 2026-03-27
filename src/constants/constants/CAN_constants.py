@@ -117,21 +117,13 @@ TEENSY_CAN_MESSAGES = {
     #     },
     #     isforJetson=False
     # ),
-    CAN_MESSAGE_IDS.BEND_WRIST: Message(
-        id=CAN_MESSAGE_IDS.BEND_WRIST,
+    CAN_MESSAGE_IDS.MOVE_WRIST: Message(
+        id=CAN_MESSAGE_IDS.MOVE_WRIST,
         subsystem=Subsystems_Names.ARM,
-        name="BEND_WRIST",
+        name="MOVE_WRIST",
         signals={
-            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
-        },
-        isforJetson=False,
-    ),
-    CAN_MESSAGE_IDS.TWIST_WRIST: Message(
-        id=CAN_MESSAGE_IDS.TWIST_WRIST,
-        subsystem=Subsystems_Names.ARM,
-        name="TWIST_WRIST",
-        signals={
-            "Position": Signal(DATA_TYPES.FLOAT_32, 0),
+            "Position_Bend": Signal(DATA_TYPES.FLOAT_32, 0),
+            "Position_Twist": Signal(DATA_TYPES.FLOAT_32, 0),
         },
         isforJetson=False,
     ),

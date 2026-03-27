@@ -27,6 +27,8 @@ from std_msgs.msg import Bool, Float32, Int16, UInt16
 from enum import IntEnum
 
 from constants.CommandCodes import CONSTANTS
+from custom_interfaces.msg import ArmWrist
+
 
 """
 Controls
@@ -99,8 +101,7 @@ class ArmController(Node):
     __base_angle_publisher: Publisher
     __shoulder_angle_publisher: Publisher
     __elbow_angle_publisher: Publisher
-    __wrist_bend_angle_publisher: Publisher
-    __wrist_twist_angle_publisher: Publisher
+    __wrist_angle_publisher: Publisher
     __gripper_angle_publisher: Publisher
     __solenoid_publisher: Publisher
 
@@ -214,17 +215,14 @@ class ArmController(Node):
         self.__elbow_angle_publisher = self.create_publisher(
             Float32, "/ARM/ELBOW/TARGET_ANGLE", 10
         )
-        self.__wrist_bend_angle_publisher = self.create_publisher(
-            Float32, "/ARM/WRIST_BEND/TARGET_ANGLE", 10
-        )
-        self.__wrist_twist_angle_publisher = self.create_publisher(
-            Float32, "/ARM/WRIST_TWIST/TARGET_ANGLE", 10
+        self.__wrist_angle_publisher = self.create_publisher(
+            Float32, "/ARM/WRIST/TARGET_ANGLE", 10
         )
         self.__gripper_angle_publisher = self.create_publisher(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", 10
         )
         self.__solenoid_publisher = self.create_publisher(
-            Bool, "ARM/SOLENOID/TARGET", 10
+            Bool, "/ARM/SOLENOID/ENABLED", 10
         )
 
         # Update values periodically
@@ -549,11 +547,8 @@ class ArmController(Node):
         self.__elbow_angle_publisher.publish(
             Float32(data=wrap_to_pi(self.__target_th2))
         )
-        self.__wrist_twist_angle_publisher.publish(
-            Float32(data=wrap_to_pi(self.__target_th3))
-        )
-        self.__wrist_bend_angle_publisher.publish(
-            Float32(data=wrap_to_pi(self.__target_th4))
+        self.__wrist_angle_publisher.publish(
+            ArmWrist(wrist_bend=wrap_to_pi(self.__target_th3), wrist_twist=wrap_to_pi(self.__target_th4))
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
 
