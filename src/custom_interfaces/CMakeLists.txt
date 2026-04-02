@@ -16,6 +16,7 @@ set(msg_files
     "msg/Can.msg"
     "msg/CanFD.msg"
     "msg/UDPPacket.msg"
+    "msg/ArmWrist.msg"
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
