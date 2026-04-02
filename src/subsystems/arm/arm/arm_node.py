@@ -8,12 +8,8 @@ from constants.CAN_constants import (
     Subsystems_Names,
 )
 from constants.CAN_structs import Signal, Message
-<<<<<<< HEAD
 from custom_interfaces.msg import Can, SpaceMouse
-=======
-from custom_interfaces.msg import Can
 from custom_interfaces.msg import ArmWrist
->>>>>>> e2673ceeac7c1a127f77ba035f11358e90329448
 
 from numpy import uint8, int32
 import rclpy
@@ -186,7 +182,6 @@ class Arm(Node):
                     qos_profile=10,
                 )
 
-<<<<<<< HEAD
         self.create_subscription(
             msg_type=SpaceMouse,
             topic="/BASESTATION/spacemouse",
@@ -195,7 +190,6 @@ class Arm(Node):
         )
 
         self.create_subscription(Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10)
-=======
         # create subscribers for the arm motor angle commands
         self.create_subscription(
             Float32, "/ARM/BASE/TARGET_ANGLE", self.__base_callback, 10
@@ -241,7 +235,6 @@ class Arm(Node):
         self.create_subscription(
             Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10
         )
->>>>>>> e2673ceeac7c1a127f77ba035f11358e90329448
 
         self.create_subscription(
             msg_type=Bool,
@@ -262,13 +255,12 @@ class Arm(Node):
             callback=self.request_position,
         )
 
-<<<<<<< HEAD
     def __on_spacemouse_received(self, msg: SpaceMouse):
         """Handle incoming SpaceMouse 6DOF input for arm control.
 
-        msg.x/y/z  â€“ translation axes (-1.0 to 1.0)
-        msg.rx/ry/rz â€“ rotation axes  (-1.0 to 1.0)
-        msg.buttons  â€“ bitmask of SpaceMouse button states
+        msg.x/y/z  – translation axes (-1.0 to 1.0)
+        msg.rx/ry/rz – rotation axes  (-1.0 to 1.0)
+        msg.buttons  – bitmask of SpaceMouse button states
 
         TODO: map axes to arm motors here.
         """
@@ -282,14 +274,12 @@ class Arm(Node):
 
     def __base_callback(self, msg: Float32):        
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
-=======
     def __base_callback(self, msg: Float32):
         ticks = (
             int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks)
             + ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].ticks_offset
         )
         self.__send_motor_command(ARM_MOTOR_IDX.BASE, ticks)
->>>>>>> e2673ceeac7c1a127f77ba035f11358e90329448
 
     def __shoulder_callback(self, msg: Float32):
         ticks = (
