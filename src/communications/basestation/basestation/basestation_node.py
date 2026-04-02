@@ -12,7 +12,7 @@ import rclpy.publisher
 import rclpy.subscription
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32, UInt8, UInt8MultiArray, UInt16
+from std_msgs.msg import Bool, Float32, UInt8, UInt8MultiArray, Int16, UInt16
 from custom_interfaces.msg import SpaceMouse
 
 
@@ -53,6 +53,7 @@ class Basestation(Node):
             CONSTANTS.COMPACT_MESSAGES.UINT_2_BOOL: Bool,
             CONSTANTS.COMPACT_MESSAGES.UINT_8: UInt8,
             CONSTANTS.COMPACT_MESSAGES.UINT_16: UInt16,
+            CONSTANTS.COMPACT_MESSAGES.INT_16: Int16,
             CONSTANTS.COMPACT_MESSAGES.UINT_8_JOYSTICK: Float32,
             CONSTANTS.COMPACT_MESSAGES.BOOLEAN: Bool,
         }

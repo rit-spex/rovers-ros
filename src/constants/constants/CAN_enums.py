@@ -36,8 +36,8 @@ class CAN_MESSAGE_IDS(IntEnum):
     # MOVE_BASE = 21
     # MOVE_SHOULDER = 22
     # MOVE_ELBOW = 23
-    BEND_WRIST = 24
-    TWIST_WRIST = 25
+    MOVE_WRIST = 24
+
     MOVE_CLAW = 26
     MOVE_SOLENOID = 27
 

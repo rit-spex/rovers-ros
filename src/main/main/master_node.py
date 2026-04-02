@@ -16,9 +16,12 @@ from constants.CommandCodes import CONSTANTS
 from constants.can_encoding import TeensyCommunication
 from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names, SubsystemsIDs
 from constants.CAN_structs import Signal, Message
+import time
+
+# delay start up to ensure everything else is up and running before the master starts sending messages to the teensy
+DELAY_STARTUP_SEC = 5 # seconds
 
 timeout_duration = 1  # seconds
-
 
 class Master(Node):
 
@@ -179,6 +182,9 @@ class Master(Node):
                     callback=self.__on_new_CAN_message_received,
                     qos_profile=10
                 )
+
+        # delay start up to ensure everything else is up and running before the master starts sending messages to the teensy
+        time.sleep(DELAY_STARTUP_SEC)
 
     def __check_timeout(self) -> None:
         # check for basestation heartbeat timeout

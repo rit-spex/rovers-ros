@@ -11,7 +11,7 @@ from typing import Callable, Dict
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32, UInt8, UInt16
+from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16
 
 
 def _ensure_local_package_path() -> None:
@@ -64,8 +64,9 @@ class TelemetryUplink(Node):
             "arm_base_position": 0,
             "shoulder_position": 0,
             "elbow_position": 0,
-            "wrist_position": 0,
-            "claw_encoder": 0,
+            "wrist_bend_position": 0,
+            "wrist_twist_position": 0,
+            "gripper_position": 0,
         }
         self._drive_imu = {
             "drive_speed_left": 0.0,
@@ -100,11 +101,13 @@ class TelemetryUplink(Node):
         self._sub_u8("/ROVER/TELEMETRY/LIFE/SPEC_SLIDE_POSITION", self._life_detection, "spec_slide_position")
         self._sub_u8("/ROVER/TELEMETRY/LIFE/SPEC_COLOR_SENSOR", self._life_detection, "spec_color_sensor")
 
-        self._sub_u16("/ROVER/TELEMETRY/ARM/BASE", self._arm_encoders, "arm_base_position")
-        self._sub_u16("/ROVER/TELEMETRY/ARM/SHOULDER", self._arm_encoders, "shoulder_position")
-        self._sub_u16("/ROVER/TELEMETRY/ARM/ELBOW", self._arm_encoders, "elbow_position")
-        self._sub_u16("/ROVER/TELEMETRY/ARM/WRIST", self._arm_encoders, "wrist_position")
-        self._sub_u16("/ROVER/TELEMETRY/ARM/CLAW", self._arm_encoders, "claw_encoder")
+        # Arm encoder values can be large, so use UInt16 instead of UInt8
+        self._sub_s16_angle("/ARM/BASE/CURR_ANGLE", self._arm_encoders, "arm_base_position")
+        self._sub_s16_angle("/ARM/SHOULDER/CURR_ANGLE", self._arm_encoders, "shoulder_position")
+        self._sub_s16_angle("/ARM/ELBOW/CURR_ANGLE", self._arm_encoders, "elbow_position")
+        self._sub_s16_angle("/ARM/WRIST_BEND/CURR_ANGLE", self._arm_encoders, "wrist_bend_position")
+        self._sub_s16_angle("/ARM/WRIST_TWIST/CURR_ANGLE", self._arm_encoders, "wrist_twist_position")
+        self._sub_s16_angle("/ARM/GRIPPER/CURR_ANGLE", self._arm_encoders, "gripper_position")
 
         self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_LEFT", self._drive_imu, "drive_speed_left")
         self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_RIGHT", self._drive_imu, "drive_speed_right")
@@ -112,16 +115,22 @@ class TelemetryUplink(Node):
         self._sub_u16("/ROVER/TELEMETRY/IMU/PITCH", self._drive_imu, "pitch")
         self._sub_u16("/ROVER/TELEMETRY/IMU/ROLL", self._drive_imu, "roll")
 
-        self._sub_bool("/ESTOP", self._rover_estop, "rover_estop")
-
-        self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/ARM_ENABLED", self._subsystem_enabled, "arm_enabled")
+        self._sub_bool("/ARM/ENABLED", self._subsystem_enabled, "arm_enabled")
         self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/AUTO_ENABLED", self._subsystem_enabled, "auto_enabled")
         self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/LIFE_ENABLED", self._subsystem_enabled, "life_enabled")
+
+        self._sub_bool("/ESTOP", self._rover_estop, "rover_estop")
 
         self._sub_u8("/ROVER/TELEMETRY/CONTROL_MODE", self._control_mode, "control_mode")
 
     def _sub_u8(self, topic: str, target: Dict, key: str) -> None:
         self.create_subscription(UInt8, topic, self._setter(target, key), 10)
+
+    def _sub_s16(self, topic: str, target: Dict, key: str) -> None:
+        self.create_subscription(Int16, topic, self._setter(target, key), 10)
+
+    def _sub_s16_angle(self, topic: str, target: Dict, key: str) -> None:
+        self.create_subscription(Float32, topic, self._angle_setter(target, key), 10)
 
     def _sub_u16(self, topic: str, target: Dict, key: str) -> None:
         self.create_subscription(UInt16, topic, self._setter(target, key), 10)
@@ -136,6 +145,13 @@ class TelemetryUplink(Node):
         def _callback(msg):
             target[key] = msg.data
 
+        return _callback
+
+    def _angle_setter(self, target: Dict, key: str) -> Callable:
+        def _callback(msg):
+            # Convert from degrees to the protocol's expected centi-degrees
+            target[key] = int(msg.data * 180 / 3.141592653589793)
+            self.get_logger().info(f"Angle update received for {key}: {msg.data} radians -> {target[key]} centi-degrees")
         return _callback
 
     # ------------------------------------------------------------------

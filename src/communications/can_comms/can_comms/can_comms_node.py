@@ -14,7 +14,7 @@ from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
-BIT_RATE = 1000000 # 1 Mbps
+BIT_RATE = 1000000  # 1 Mbps
 
 
 class CAN(Node):
@@ -37,17 +37,17 @@ class CAN(Node):
         self.__can_tx_subscriptions = {}
 
         # This is for messages coming in
-        for (id, message) in TEENSY_CAN_MESSAGES.items():
-            if(message.isforJetson):
+        for id, message in TEENSY_CAN_MESSAGES.items():
+            if message.isforJetson:
                 continue
 
             self.__can_tx_subscriptions[id] = self.create_subscription(
                 msg_type=Can,
                 topic=message.topic_name,
                 callback=self.send_msg,
-                qos_profile=10
+                qos_profile=10,
             )
-        
+
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -66,9 +66,11 @@ class CAN(Node):
         for subscription in self.__can_tx_subscriptions.values():
             self.destroy_subscription(subscription)
 
-        self.get_logger().info("CAN_node: sending default messages before shutting down")
+        self.get_logger().info(
+            "CAN_node: sending default messages before shutting down"
+        )
         # clear out all of the messages with default values
-        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+        for message_id, message in TEENSY_CAN_MESSAGES.items():
             # Set all of the value to default
             message.reset()
             can_packet = TeensyCommunication.encode_can_message(message)
@@ -81,7 +83,9 @@ class CAN(Node):
         rclpy.shutdown()
 
     def send_msg(self, msg: Can):
-        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.get_logger().info(
+            f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
+        )
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
         )
@@ -103,27 +107,39 @@ class JETSON_LISTENER(can.Listener):
     def __init__(self, node) -> None:
         super().__init__()
         self.__node = node
+
         self.__publishers = {}
 
         # This is for messages coming in
-        for (id, message) in TEENSY_CAN_MESSAGES.items():
-            if(not message.isforJetson):
+        for id, message in TEENSY_CAN_MESSAGES.items():
+            if not message.isforJetson:
                 continue
 
             self.__publishers[id] = self.__node.create_publisher(
-                msg_type=Can,
-                topic=message.topic_name,
-                qos_profile=10
+                msg_type=Can, topic=message.topic_name, qos_profile=10
             )
 
     def on_message_received(self, msg: can.Message) -> None:
-        if msg.arbitration_id not in self.__publishers:
-            return
-        ros_msg = Can(
-            id=msg.arbitration_id,
-            buf=msg.data,
-        )
-        self.__publishers[msg.arbitration_id].publish(ros_msg)
+        if msg.arbitration_id in self.__publishers:
+            buf = [0] * 8  # Initialize buffer with 8 zeros
+            for i in range(msg.dlc):
+                buf[i] = msg.data[i]
+
+            ros_msg = Can(
+                id=msg.arbitration_id,
+                buf=buf,
+            )
+            self.__node.get_logger().debug(
+                f"ID {msg.arbitration_id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.arbitration_id)].name}): {msg.data}"
+            )
+
+            self.__publishers[msg.arbitration_id].publish(ros_msg)
+        else:
+            # Optional: Log a warning instead of crashing
+            self.__node.get_logger().debug(
+                f"Received unknown CAN ID: {msg.arbitration_id}"
+            )
+
 
 def main():
     rclpy.init()
