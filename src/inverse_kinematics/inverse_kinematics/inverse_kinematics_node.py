@@ -216,7 +216,7 @@ class ArmController(Node):
             Float32, "/ARM/ELBOW/TARGET_ANGLE", 10
         )
         self.__wrist_angle_publisher = self.create_publisher(
-            Float32, "/ARM/WRIST/TARGET_ANGLE", 10
+            ArmWrist, "/ARM/WRIST/TARGET_ANGLE", 10
         )
         self.__gripper_angle_publisher = self.create_publisher(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", 10
@@ -248,6 +248,8 @@ class ArmController(Node):
         # self.__device = setup_spacemouse()
         # self.__state = {"x": 0, "y": 0, "z": 0, "rx": 0, "ry": 0, "rz": 0, "buttons": 0}
         # self.__buttonz = [False, False]
+        self.__solenoid = False
+        self.__solenoid_toggled = False
         self.__homing = False
         self.__homing_toggled = False
         self.__mode = ARM_MODES.RAW_CONTROL
@@ -303,7 +305,9 @@ class ArmController(Node):
         if (msg.data & 0b01) and not self.__homing_toggled:
             self.__homing = bool(msg.data & 0b01)
             self.__homing_toggled = True
-            self.__solenoid_publisher.publish(msg=self.__homing)
+            new_msg = Bool()
+            new_msg.data = self.__homing
+            self.__solenoid_publisher.publish(msg=new_msg)
             if msg.data:
                 self.get_logger().info("Homing initiated.")
             else:
@@ -548,7 +552,10 @@ class ArmController(Node):
             Float32(data=wrap_to_pi(self.__target_th2))
         )
         self.__wrist_angle_publisher.publish(
-            ArmWrist(wrist_bend=wrap_to_pi(self.__target_th3), wrist_twist=wrap_to_pi(self.__target_th4))
+            ArmWrist(
+                wrist_bend=wrap_to_pi(self.__target_th3),
+                wrist_twist=wrap_to_pi(self.__target_th4),
+            )
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
 
