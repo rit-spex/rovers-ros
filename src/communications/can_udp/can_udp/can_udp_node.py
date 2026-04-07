@@ -94,15 +94,18 @@ class CAN_UDP(Node):
         rclpy.shutdown()
 
     def on_message_received(self, msg: Can):
-        self.get_logger().info(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
-        self.__publishers[msg.id].publish(msg)
+        try:
+            self.get_logger().debug(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+            self.__publishers[msg.id].publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"failed to publish can message: {e}")
 
 
     def send_msg(self, msg: Can):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.get_logger().debug(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):
@@ -122,7 +125,7 @@ class CAN_UDP(Node):
             if(err[0] == errno.EWOULDBLOCK):
                 pass
             else:
-                self.get_logger().info(f"failed to send can udp packet: {e}")
+                self.get_logger().error(f"failed to send can udp packet: {e}")
 
     def run(self):
         # start the socket so we can send and recv messages
