@@ -216,7 +216,7 @@ class ArmController(Node):
             Float32, "/ARM/ELBOW/TARGET_ANGLE", 10
         )
         self.__wrist_angle_publisher = self.create_publisher(
-            Float32, "/ARM/WRIST/TARGET_ANGLE", 10
+            ArmWrist, "/ARM/WRIST/TARGET_ANGLE", 10
         )
         self.__gripper_angle_publisher = self.create_publisher(
             Float32, "/ARM/GRIPPER/TARGET_ANGLE", 10
