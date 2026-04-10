@@ -89,6 +89,8 @@ class ArmController(Node):
     __rz: float
     __homing: bool
     __homing_toggled: bool
+    __solenoid: bool
+    __solenoid_toggled: bool
     __mode: ARM_MODES  # Buttonz
     __mode_toggled: bool
 
@@ -302,18 +304,17 @@ class ArmController(Node):
         elif not msg.data & 0b10:
             self.__mode_toggled = False
 
-        if (msg.data & 0b01) and not self.__homing_toggled:
-            self.__homing = bool(msg.data & 0b01)
-            self.__homing_toggled = True
+        if (msg.data & 0b01) and not self.__solenoid_toggled:
+            self.__solenoid = not self.__solenoid
             new_msg = Bool()
-            new_msg.data = self.__homing
+            new_msg.data = self.__solenoid
             self.__solenoid_publisher.publish(msg=new_msg)
-            if msg.data:
-                self.get_logger().info("Homing initiated.")
+            if self.__solenoid:
+                self.get_logger().info("Solenoid set.")
             else:
-                self.get_logger().info("Homing cleared.")
-        elif not msg.data & 0b01:
-            self.__homing_toggled = False
+                self.get_logger().info("Solenoid cleared.")
+        elif not (msg.data & 0b01):
+            self.__solenoid_toggled = False
 
     def __on_base_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th0:
