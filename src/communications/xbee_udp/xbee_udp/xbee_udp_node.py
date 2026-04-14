@@ -25,9 +25,11 @@ class xbee_udp(Node):
 
         self.__address = CONSTANTS.COMMUNICATION.UDP_HOST
         self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
+        self.__basestation_port = CONSTANTS.COMMUNICATION.UDP_BASESTATION_PORT
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES/RX", 10)
+        self.create_subscription(UInt8MultiArray, "/XBEE/MESSAGES/TX", self.send_msg, 10)
 
     def read_data(self, buffer_size: int) -> list[int]:
         try:
@@ -41,6 +43,19 @@ class xbee_udp(Node):
             self.get_logger().error(f"failed to receive data: {e}")
             return []
         return payload
+
+    def send_msg(self, msg: UInt8MultiArray) -> None:
+        """
+        pack and send the message to the basestation
+        """
+        try:
+            self.__socket.sendto(bytes(msg.data), (self.__address, self.__basestation_port))
+            self.get_logger().debug(
+                f"sent {len(msg.data)} bytes to {self.__address}:{self.__basestation_port}: "
+                f"{bytes(msg.data).hex(' ')}"
+            )
+        except Exception as e:
+            self.get_logger().error(f"failed to send data: {e}")
 
     def publish_data(self, data: list[int]) -> None:
         msg = UInt8MultiArray()
