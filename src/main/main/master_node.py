@@ -47,8 +47,8 @@ class Heartbeat_Manager:
     __node_enabled_pub: rclpy.publisher.Publisher
     __node_enabled: bool  # wait until teensy knows it is enabled before we consider the science node enabled
 
-    __last_timestamp: UInt16
-    __curr_timestamp: UInt16
+    __last_timestamp: int
+    __curr_timestamp: int
 
     def __init__(
         self,
@@ -69,8 +69,8 @@ class Heartbeat_Manager:
         self.__node_enabled_pub = node_enable_pub
         self.__node_enabled = False
 
-        self.__last_timestamp = UInt16()
-        self.__curr_timestamp = UInt16()
+        self.__last_timestamp = 0
+        self.__curr_timestamp = 0
 
     def __pack_enable_message_to_teensy(
         self, message_id: CAN_MESSAGE_IDS, enabled: bool
@@ -119,7 +119,7 @@ class Heartbeat_Manager:
             else:
                 self.__last_timestamp = self.__curr_timestamp
 
-    def on_teensy_enable_message(self, enabled: bool, timestamp):
+    def on_teensy_enable_message(self, enabled: bool, timestamp: int):
 
         # kill all messages with timestamp being the same
         if timestamp == self.__curr_timestamp:
@@ -389,7 +389,7 @@ class Master(Node):
                     f"Failed to decode source signal from heartbeat message: {e}"
                 )
                 return
-            
+
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-Stop message received, shutting down ...")
 

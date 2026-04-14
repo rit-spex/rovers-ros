@@ -46,7 +46,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 1  # seconds
+UPDATE_RATE_SEC = 0.1  # seconds
 
 
 class ARM_MODES(IntEnum):
