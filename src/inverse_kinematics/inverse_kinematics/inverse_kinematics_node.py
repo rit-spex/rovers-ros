@@ -8,6 +8,7 @@ from linear_algebra import (
 )
 from math_helpers import wrap_to_pi, wrap_to_minus_90
 import rclpy
+import time
 
 # from space_mouse import (
 #     read_spacemouse,
@@ -46,7 +47,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 0.1  # seconds
+UPDATE_RATE_SEC = 0.2  # seconds
 
 
 class ARM_MODES(IntEnum):
@@ -353,6 +354,9 @@ class ArmController(Node):
             self.__curr_th5 = msg.data
 
     def __calculate_angles(self):
+
+        start_time = time.time()
+
         # Verify that all angles have been initialized
         self._logger.info(
             f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
@@ -401,6 +405,9 @@ class ArmController(Node):
         # Check if anything is going on
         # if (not all(v == 0 for v in self.__state.values())) or self.__homing:
         # Okay well what is going on
+        end_time = time.time()
+        self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
+
         if self.__homing:
             (
                 self.__homing,
@@ -474,7 +481,6 @@ class ArmController(Node):
 
             except Exception as e:
                 self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
-
         elif self.__mode == ARM_MODES.GRIPPER_CONTROL:
             # x rotates the gripper
             self.__target_th3 += self.__rx * self.__rotate_sens
@@ -504,6 +510,9 @@ class ArmController(Node):
         # # Reset state variable
         # for key in self.__state:
         #     self.__state[key] = 0
+
+        end_time = time.time()
+        self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
 
         # Update stuff
         (
@@ -559,6 +568,8 @@ class ArmController(Node):
             )
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
+        end_time = time.time()
+        self.get_logger().info(f"Time To update: {end_time - start_time}:.3f")
 
     def run(self):
         self.get_logger().info("starting inverse kinematics node...")

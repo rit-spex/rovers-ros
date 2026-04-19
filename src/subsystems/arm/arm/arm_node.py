@@ -136,7 +136,7 @@ ARM_MOTOR_PARAMS = [
     ),  # gripper
 ]
 
-REQUESTED_ARM_UPDATE_RATE = 0.5  # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
+REQUESTED_ARM_UPDATE_RATE = 0.1  # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
 
 
 class Arm(Node):
