@@ -79,3 +79,31 @@ class CAN_MESSAGE_IDS(IntEnum):
     SEND_BASE = 1537 # 0x601
     SEND_SHOULDER = 1538 # 0x602
     SEND_ELBOW = 1539 # 0x603
+
+class ODRIVE_IDS(IntEnum):
+    FRONT_R = 12
+    BACK_R = 13
+    FRONT_L = 14
+    BACK_L = 15
+
+class ODRIVE_CMD(IntEnum):
+    HEARTBEAT = 0x01
+    SET_VEL = 0x0D
+
+def get_odrive_ids() -> type[IntEnum]:
+    # 1. Generate and append the new ODrive IDs
+    all_data = {}
+    for odrive_id in ODRIVE_IDS:
+        for cmd in ODRIVE_CMD:
+            new_name = f"{odrive_id.name}_{cmd.name}"
+            new_value = (odrive_id.value << 5) | cmd.value
+            all_data[new_name] = new_value
+    
+    # 2. Create and return a completely new IntEnum with the combined data
+    return IntEnum('ODRIVE_MESSAGE_IDS', all_data)
+
+ODRIVE_MESSAGE_IDS = get_odrive_ids()
+
+print(*ODRIVE_MESSAGE_IDS, '\n')
+print(*CAN_MESSAGE_IDS)
+

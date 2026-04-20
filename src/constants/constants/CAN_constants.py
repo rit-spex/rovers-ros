@@ -8,7 +8,7 @@
 # created on    : 12/4/2025 - Tyler
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
-from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection, SubsystemsIDs
+from constants.CAN_enums import CAN_MESSAGE_IDS, ODRIVE_MESSAGE_IDS, ArmState, ArmDirection, SubsystemsIDs
 from constants.CAN_structs import DATA_TYPE, Signal, Message
 
 
@@ -18,6 +18,7 @@ class Subsystems_Names:
     CHASSIS = "CHASSIS"
     ARM = "ARM"
     SCIENCE = "SCIENCE"
+    ODRIVE = "ODRIVE"
 
 
 # Define data types for can bus communication
@@ -493,3 +494,37 @@ TEENSY_CAN_MESSAGES = {
         isforJetson=True,
     ),
 }
+
+def generate_odrive_can_msgs():
+    ODRIVE_CAN_MESSAGES = {}
+    for member in ODRIVE_MESSAGE_IDS:
+        name = member.name
+        id = member.value
+
+        if 'SET_VEL' in name:
+            ODRIVE_CAN_MESSAGES[ODRIVE_MESSAGE_IDS(id)] = Message(
+                id=ODRIVE_MESSAGE_IDS(id),
+                name=name,
+                subsystem=Subsystems_Names.ODRIVE,
+                signals={
+                    'vel_cmd': Signal(DATA_TYPES.FLOAT_32, 0.0)
+                },
+                isforJetson=False
+            )
+        if 'HEARTBEAT' in name:
+            ODRIVE_CAN_MESSAGES[ODRIVE_MESSAGE_IDS(id)] = Message(
+                id=ODRIVE_MESSAGE_IDS(id),
+                name=name,
+                subsystem=Subsystems_Names.ODRIVE,
+                signals={
+                    'error': Signal(DATA_TYPES.UINT_32, 0.0),
+                    'state': Signal(DATA_TYPES.UINT_8, 0.0),
+                    'result': Signal(DATA_TYPES.UINT_8, 0.0),
+                    'isTrajDone': Signal(DATA_TYPES.UINT_8, 0.0)
+                },
+                isforJetson=True
+            )
+    
+    return ODRIVE_CAN_MESSAGES
+
+ODRIVE_CAN_MESSAGES = generate_odrive_can_msgs()
