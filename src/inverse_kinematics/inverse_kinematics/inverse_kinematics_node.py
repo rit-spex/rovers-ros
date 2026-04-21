@@ -11,11 +11,12 @@ from math_helpers import wrap_to_pi, wrap_to_minus_90
 from fast_IK import forward_kin, fast_IK_solve
 import rclpy
 import time
+from numpy import sign
 
 # Typing
 from rclpy.node import Node
 from typing import Any
-from numpy import dtype, ndarray
+from numpy import dtype, ndarray, sign
 
 import rclpy
 from rclpy.node import Node
@@ -402,40 +403,51 @@ class ArmController(Node):
             )
             self.__initialized = True
 
+            self.__target_th0 = self.__curr_th0
+            self.__target_th1 = self.__curr_th1
+            self.__target_th2 = self.__curr_th2
             self.__target_th3 = self.__curr_th3
             self.__target_th4 = self.__curr_th4
             self.__target_th5 = self.__curr_th5
 
-            self._logger.info("")
+            self._logger.info("Arm Initialized")
 
         self._logger.info(
             f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
         )
 
-        self.__target_th0 = self.__curr_th0
-        self.__target_th1 = self.__curr_th1
-        self.__target_th2 = self.__curr_th2
-        # self.__target_th3 = self.__curr_th3
-        # self.__target_th4 = self.__curr_th4
-        # self.__target_th5 = self.__curr_th5
-
         end_time = time.time()
         self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
 
         if self.__mode == ARM_MODES.POINT_CONTROL:
+            if abs(self.__rx) < 50.0:
+                self.__target_th3 = self.__curr_th3
+                # self.__rx = 0.0
+            else:
+                rx = (abs(self.__rx) - 50.0) * float(sign(self.__rx))
+                self.__target_th3 += (rx * self.__rotate_sens) * UPDATE_RATE_SEC
+                self.__target_th3 = min(max(self.__target_th3, -0.5), 0.5)
+
+            if abs(self.__rz) < 50.0:
+                self.__target_th4 = self.__curr_th4
+                # self.__rz = 0.0
+            else:
+                rz = (abs(self.__rz) - 50.0) * float(sign(self.__rz))
+                self.__target_th4 += (rz * self.__rotate_sens) * UPDATE_RATE_SEC
+                self.__target_th4 = min(max(self.__target_th4, -1.5), 1.5)
+
+            if abs(self.__ry) < 50.0:
+                self.__target_th5 = self.__curr_th5
+                # self.__ry = 0.0
+            else:
+                ry = (abs(self.__ry) - 50.0) * float(sign(self.__ry))
+                self.__target_th5 += (ry * self.__rotate_sens) * UPDATE_RATE_SEC
+                self.__target_th5 = min(max(self.__target_th5, 0.0), 1.57)
+
             # P_new = P_old + (Velocity_Command * dt)
             self.__point[0] += (self.__x * self.__trans_sens) * UPDATE_RATE_SEC
             self.__point[1] += (self.__y * self.__trans_sens) * UPDATE_RATE_SEC
             self.__point[2] += (self.__z * self.__trans_sens) * UPDATE_RATE_SEC
-
-            self.__target_th3 += (self.__rx * self.__rotate_sens) * UPDATE_RATE_SEC
-            self.__target_th3 = min(max(self.__target_th3, -0.5), 0.5)
-
-            self.__target_th4 += (self.__rz * self.__rotate_sens) * UPDATE_RATE_SEC
-            self.__target_th4 = min(max(self.__target_th4, -1.5), 1.5)
-
-            self.__target_th5 += (self.__ry * self.__rotate_sens) * UPDATE_RATE_SEC
-            self.__target_th5 = min(max(self.__target_th5, 0), 1.57)
 
             # IK Logic
             current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
