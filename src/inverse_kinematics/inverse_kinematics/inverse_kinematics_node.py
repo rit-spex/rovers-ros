@@ -6,14 +6,11 @@ from linear_algebra import (
     inverse_kinematics,
     joint_limits,
 )
+
 from math_helpers import wrap_to_pi, wrap_to_minus_90
+from fast_IK import forward_kin, fast_IK_solve
 import rclpy
 import time
-
-# from space_mouse import (
-#     read_spacemouse,
-#     setup_spacemouse,
-# )
 
 # Typing
 from rclpy.node import Node
@@ -47,7 +44,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 0.2  # seconds
+UPDATE_RATE_SEC = 0.02  # seconds
 
 
 class ARM_MODES(IntEnum):
@@ -96,7 +93,7 @@ class ArmController(Node):
     __mode_toggled: bool
 
     # General parameters
-    __point: ndarray[tuple[int], dtype[Any]]
+    __point: list[float]#ndarray[tuple[int], dtype[Any]]
     __trans_sens: float
     __rotate_sens: float
 
@@ -124,6 +121,13 @@ class ArmController(Node):
         self.__curr_th4 = float("nan")
         self.__curr_th5 = float("nan")
 
+        self.A0 = 6.5 / 39.0        # Elevation of shoulder joint from base [in]
+        self.A1 = 18.5 / 39.0         # Upper arm length [in]
+        self.A2 = 19.75 / 39.0         # Fore-arm length [in]
+        self.A3 = 11.5 / 39.0      # Gripper length [in]
+
+        self.__initialized = False
+
         self.__x = 0
         self.__y = 0
         self.__z = 0
@@ -131,8 +135,8 @@ class ArmController(Node):
         self.__ry = 0
         self.__rz = 0
 
-        self.__trans_sens = 0.004
-        self.__rotate_sens = 0.0007
+        self.__trans_sens = 0.1 * (1.0 / 350.0)
+        self.__rotate_sens = 0.1 * (1.0 / 350.0)
 
         self.create_subscription(
             msg_type=Bool,
@@ -255,7 +259,7 @@ class ArmController(Node):
         self.__solenoid_toggled = False
         self.__homing = False
         self.__homing_toggled = False
-        self.__mode = ARM_MODES.RAW_CONTROL
+        self.__mode = ARM_MODES.POINT_CONTROL
         self.__mode_toggled = False
 
     def __on_estop_received(self, msg: Bool):
@@ -353,8 +357,8 @@ class ArmController(Node):
             self.get_logger().info(f"Gripper angle update received: {msg.data} radians")
             self.__curr_th5 = msg.data
 
-    def __calculate_angles(self):
 
+    def __calculate_angles(self):
         start_time = time.time()
 
         # Verify that all angles have been initialized
@@ -374,6 +378,13 @@ class ArmController(Node):
         ):
             # self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
+        
+        if not self.__initialized:
+            self.__point = forward_kin(
+                [self.__curr_th0, self.__curr_th1, self.__curr_th2, self.__curr_th3],
+                self.A0, self.A1, self.A2, self.A3)
+            self.__initialized = True
+            self._logger.info('')
 
         self._logger.info(
             f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
@@ -386,130 +397,31 @@ class ArmController(Node):
         self.__target_th4 = self.__curr_th4
         self.__target_th5 = self.__curr_th5
 
-        _, _, self.__point, _ = calc_joint_positions(
-            self.__target_th0,
-            self.__target_th1,
-            self.__target_th2,
-            self.__target_th3,
-            False,
-        )
 
-        # Read mouse data
-        # read_spacemouse(self.__device, self.__state)
-
-        # if int(self.__state["buttons"]) == 1:
-        #     self.__homing = True
-        # if int(self.__state["buttons"]) == 2:
-        # self.__buttonz[1] = not (self.__buttonz[1])
-
-        # Check if anything is going on
-        # if (not all(v == 0 for v in self.__state.values())) or self.__homing:
-        # Okay well what is going on
         end_time = time.time()
         self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
 
-        if self.__homing:
-            (
-                self.__homing,
-                self.__target_th0,
-                self.__target_th1,
-                self.__target_th2,
-                self.__target_th3,
-                self.__target_th4,
-            ) = homingStep(
-                self.__homing,
-                self.__target_th0,
-                self.__target_th1,
-                self.__target_th2,
-                self.__target_th3,
-                self.__target_th4,
-            )
-        elif self.__mode == ARM_MODES.POINT_CONTROL:
-            self.__target_th0 = wrap_to_pi(
-                self.__target_th0 + self.__rx * self.__rotate_sens
-            )
-            _, _, _, self.__point = calc_joint_positions(
-                self.__target_th0,
-                self.__target_th1,
-                self.__target_th2,
-                self.__target_th3,
-                False,
-            )
+        if self.__mode == ARM_MODES.POINT_CONTROL:
+            # P_new = P_old + (Velocity_Command * dt)
+            self.__point[0] += (self.__x * self.__trans_sens) * UPDATE_RATE_SEC
+            self.__point[1] += (self.__y * self.__trans_sens) * UPDATE_RATE_SEC
+            self.__point[2] += (self.__z * self.__trans_sens) * UPDATE_RATE_SEC
 
-            self.__target_th1 = wrap_to_pi(
-                self.__target_th1 + self.__ry * self.__rotate_sens
-            )
-            _, _, _, self.__point = calc_joint_positions(
-                self.__target_th0,
-                self.__target_th1,
-                self.__target_th2,
-                self.__target_th3,
-                False,
-            )
+            self.__target_th3 += (self.__rx * self.__rotate_sens) * UPDATE_RATE_SEC
+            self.__target_th3 = min(max(self.__target_th3, -0.5), 0.5)
 
-            self.__target_th2 = wrap_to_pi(
-                self.__target_th2 + self.__rz * self.__rotate_sens
-            )
-            _, _, _, self.__point = calc_joint_positions(
-                self.__target_th0,
-                self.__target_th1,
-                self.__target_th2,
-                self.__target_th3,
-                False,
-            )
+            # IK Logic
+            current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
+            self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(current_ang, self._logger, self.__point, self.__target_th3, 
+                                                                                                   self.A0, self.A1, self.A2, self.A3)
+
         elif self.__mode == ARM_MODES.RAW_CONTROL:
+            self.__mode = ARM_MODES.POINT_CONTROL
+            return
 
-            # Move point inside cube
-            self.__point[0] += self.__x * self.__trans_sens
-            self.__point[1] += self.__y * self.__trans_sens
-            self.__point[2] += self.__z * self.__trans_sens
-
-            # Compute arm joints
-            try:
-                self.__target_th0, self.__target_th1, self.__target_th2, _ = (
-                    inverse_kinematics(
-                        self.__point,
-                        [
-                            self.__target_th0,
-                            self.__target_th1,
-                            self.__target_th2,
-                            self.__target_th3,
-                        ],
-                        self.__target_th4,
-                    )
-                )
-
-            except Exception as e:
-                self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
         elif self.__mode == ARM_MODES.GRIPPER_CONTROL:
-            # x rotates the gripper
-            self.__target_th3 += self.__rx * self.__rotate_sens
-            # z spins the gripper
-            self.__target_th4 += self.__rz * self.__rotate_sens
-            # y closes gripper
-            self.__target_th5 += self.__ry * self.__rotate_sens
-
-            # Compute arm joints
-            try:
-                self.__target_th0, self.__target_th1, self.__target_th2, _ = (
-                    inverse_kinematics(
-                        self.__point,
-                        [
-                            self.__target_th0,
-                            self.__target_th1,
-                            self.__target_th2,
-                            self.__target_th3,
-                        ],
-                        self.__target_th4,
-                    )
-                )
-
-            except Exception as e:
-                self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
-
-        # # Reset state variable
-        # for key in self.__state:
-        #     self.__state[key] = 0
+            self.__mode = ARM_MODES.POINT_CONTROL
+            return
 
         end_time = time.time()
         self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
@@ -530,7 +442,7 @@ class ArmController(Node):
             not (self.__mode == ARM_MODES.POINT_CONTROL),
         )
 
-        (
+        '''(
             self.__target_th0,
             self.__target_th1,
             self.__target_th2,
@@ -542,32 +454,31 @@ class ArmController(Node):
             self.__target_th2,
             self.__target_th3,
             self.__target_th4,
-        )
-        _, _, l2, _ = calc_joint_positions(
-            self.__target_th0, self.__target_th1, self.__target_th2, self.__target_th3
-        )
-        self.__point = l2
+        )'''
 
-        # Must re-wrap some angles to prevent sign flips due to crossing the 180:-180 boundary
+        # Publish Calculated Angles
         self._logger.info(
-            f"Calculated target angles: {wrap_to_minus_90(self.__target_th0)}, {wrap_to_minus_90(self.__target_th1)}, {wrap_to_pi(self.__target_th2)}, {wrap_to_pi(self.__target_th3)}, {wrap_to_pi(self.__target_th4)}, {wrap_to_pi(self.__target_th5)}"
+            f"Calculated target angles: {(self.__target_th0)}, {(self.__target_th1)}, {(self.__target_th2)}, {(self.__target_th3)}, {(self.__target_th4)}, {(self.__target_th5)}"
         )
+
         self.__base_angle_publisher.publish(
-            Float32(data=wrap_to_minus_90(self.__target_th0))
+            Float32(data=self.__target_th0)
         )
         self.__shoulder_angle_publisher.publish(
-            Float32(data=wrap_to_minus_90(self.__target_th1))
+            Float32(data=self.__target_th1)
         )
         self.__elbow_angle_publisher.publish(
-            Float32(data=wrap_to_pi(self.__target_th2))
+            Float32(data=self.__target_th2)
         )
         self.__wrist_angle_publisher.publish(
             ArmWrist(
-                wrist_bend=wrap_to_pi(self.__target_th3),
-                wrist_twist=wrap_to_pi(self.__target_th4),
+                wrist_bend=self.__target_th3,
+                wrist_twist=self.__target_th4,
             )
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
+
+        # Timing
         end_time = time.time()
         self.get_logger().info(f"Time To update: {end_time - start_time}:.3f")
 

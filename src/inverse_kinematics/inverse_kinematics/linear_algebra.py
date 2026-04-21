@@ -66,6 +66,7 @@ def joint_limits(th0, th1, th2, th3, th4, fix_elbow=False):
         -math.pi * (1 - range_low),
         -math.pi * range_low,
     ]  # Must stay between [-45, 225] *** INCORRECT ANGLES
+    '''
     if th1 < 0:
         if th1 > -math.pi / 2:
             diff = abs(angle_diff(th1, th1_lims[1]))
@@ -78,7 +79,8 @@ def joint_limits(th0, th1, th2, th3, th4, fix_elbow=False):
             if th1 > th1_lims[0]:
                 th1 = th1_lims[0]
                 if fix_elbow:
-                    th2 += diff
+                    th2 += diff'''
+    th1 = simple_clamp(th1, [0.0, math.pi * 3 / 4])
 
     # === Elbow Limits ===
     th2 = simple_clamp(th2, [-math.pi * 3 / 4, math.pi * 3 / 4])
