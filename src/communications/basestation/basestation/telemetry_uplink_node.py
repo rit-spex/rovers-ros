@@ -74,6 +74,8 @@ class TelemetryUplink(Node):
             "wrist_bend_position": 0,
             "wrist_twist_position": 0,
             "gripper_position": 0,
+            "arm_solenoid_toggle": 0,
+            "arm_operation_mode": 0,
         }
         self._drive_imu = {
             "ID": CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID,
@@ -167,6 +169,10 @@ class TelemetryUplink(Node):
         self._sub_s16_angle(
             "/ARM/GRIPPER/CURR_ANGLE", self._arm_encoders, "gripper_position"
         )
+        self._sub_bool(
+            "/ARM/SOLENOID/ENABLED", self._arm_encoders, "arm_solenoid_toggle"
+        )
+        self._sub_u8("/ARM/MODE", self._arm_encoders, "arm_operation_mode")
 
         self._sub_f32(
             "/ROVER/TELEMETRY/DRIVE/SPEED_LEFT", self._drive_imu, "drive_speed_left"

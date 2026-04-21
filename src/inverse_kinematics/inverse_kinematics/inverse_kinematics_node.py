@@ -24,7 +24,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
-from std_msgs.msg import Bool, Float32, Int16, UInt16
+from std_msgs.msg import Bool, Float32, Int16, UInt16, UInt8
 from enum import IntEnum
 
 from constants.CommandCodes import CONSTANTS
@@ -107,6 +107,7 @@ class ArmController(Node):
     __wrist_angle_publisher: Publisher
     __gripper_angle_publisher: Publisher
     __solenoid_publisher: Publisher
+    __operation_mode_publisher: Publisher
 
     # Space mouse
     # __device: Any
@@ -227,6 +228,7 @@ class ArmController(Node):
         self.__solenoid_publisher = self.create_publisher(
             Bool, "/ARM/SOLENOID/ENABLED", 10
         )
+        self.__operation_mode_publisher = self.create_publisher(UInt8, "/ARM/MODE", 10)
 
         # Update values periodically
         self.create_timer(
@@ -295,6 +297,9 @@ class ArmController(Node):
         # Make it a toggle
         if msg.data & 0b10 and not self.__mode_toggled:
             self.__mode = ARM_MODES((self.__mode + 1) % 3)
+            new_msg = Int8()
+            new_msg.data = self.__mode
+            self.__operation_mode_publisher.publish(msg=new_msg)
             self.__mode_toggled = True
             if self.__mode == ARM_MODES.RAW_CONTROL:
                 self.get_logger().info("Raw control mode enabled.")
