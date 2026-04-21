@@ -131,8 +131,8 @@ class ArmController(Node):
         self.__ry = 0
         self.__rz = 0
 
-        self.__trans_sens = 0.004
-        self.__rotate_sens = 0.0007
+        self.__trans_sens = 0.0015 * UPDATE_RATE_SEC
+        self.__rotate_sens = 0.003 * UPDATE_RATE_SEC
 
         self.create_subscription(
             msg_type=Bool,
@@ -334,17 +334,17 @@ class ArmController(Node):
             self.get_logger().info(f"Elbow angle update received: {msg.data} radians")
             self.__curr_th2 = wrap_to_pi(msg.data)
 
-    def __on_wrist_twist_angle_received(self, msg: Float32):
-        if msg.data != self.__curr_th3:
-            self.get_logger().info(
-                f"Wrist twist angle update received: {msg.data} radians"
-            )
-            self.__curr_th3 = wrap_to_pi(msg.data)
-
     def __on_wrist_bend_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th4:
             self.get_logger().info(
                 f"Wrist bend angle update received: {msg.data} radians"
+            )
+            self.__curr_th3 = wrap_to_pi(msg.data)
+
+    def __on_wrist_twist_angle_received(self, msg: Float32):
+        if msg.data != self.__curr_th3:
+            self.get_logger().info(
+                f"Wrist twist angle update received: {msg.data} radians"
             )
             self.__curr_th4 = wrap_to_pi(msg.data)
 
@@ -361,6 +361,7 @@ class ArmController(Node):
         self._logger.info(
             f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
         )
+
         if any(
             math.isnan(angle)
             for angle in [
@@ -375,9 +376,9 @@ class ArmController(Node):
             # self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
 
-        self._logger.info(
-            f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
-        )
+        # self._logger.info(
+        #    f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
+        # )
 
         self.__target_th0 = self.__curr_th0
         self.__target_th1 = self.__curr_th1
@@ -405,8 +406,8 @@ class ArmController(Node):
         # Check if anything is going on
         # if (not all(v == 0 for v in self.__state.values())) or self.__homing:
         # Okay well what is going on
-        end_time = time.time()
-        self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
+        # end_time = time.time()
+        # self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
 
         if self.__homing:
             (
@@ -490,29 +491,29 @@ class ArmController(Node):
             self.__target_th5 += self.__ry * self.__rotate_sens
 
             # Compute arm joints
-            try:
-                self.__target_th0, self.__target_th1, self.__target_th2, _ = (
-                    inverse_kinematics(
-                        self.__point,
-                        [
-                            self.__target_th0,
-                            self.__target_th1,
-                            self.__target_th2,
-                            self.__target_th3,
-                        ],
-                        self.__target_th4,
-                    )
-                )
+            # try:
+            #     self.__target_th0, self.__target_th1, self.__target_th2, _ = (
+            #         inverse_kinematics(
+            #             self.__point,
+            #             [
+            #                 self.__target_th0,
+            #                 self.__target_th1,
+            #                 self.__target_th2,
+            #                 self.__target_th3,
+            #             ],
+            #             self.__target_th4,
+            #         )
+            #     )
 
-            except Exception as e:
-                self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
+            # except Exception as e:
+            #     self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
 
         # # Reset state variable
         # for key in self.__state:
         #     self.__state[key] = 0
 
-        end_time = time.time()
-        self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
+        # end_time = time.time()
+        # self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
 
         # Update stuff
         (
