@@ -51,7 +51,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 0.02  # seconds
+UPDATE_RATE_SEC = 1.0 / 18.0  # seconds
 
 
 class ARM_MODES(IntEnum):
@@ -100,7 +100,7 @@ class ArmController(Node):
     __mode_toggled: bool
 
     # General parameters
-    __point: list[float]#ndarray[tuple[int], dtype[Any]]
+    __point: list[float]  # ndarray[tuple[int], dtype[Any]]
     __trans_sens: float
     __rotate_sens: float
 
@@ -128,10 +128,14 @@ class ArmController(Node):
         self.__curr_th4 = float("nan")
         self.__curr_th5 = float("nan")
 
-        self.A0 = 6.5 / 39.0        # Elevation of shoulder joint from base [in]
-        self.A1 = 18.5 / 39.0         # Upper arm length [in]
-        self.A2 = 19.75 / 39.0         # Fore-arm length [in]
-        self.A3 = 11.5 / 39.0      # Gripper length [in]
+        self.__target_th3 = float("nan")
+        self.__target_th4 = float("nan")
+        self.__target_th5 = float("nan")
+
+        self.A0 = 6.5 / 39.0  # Elevation of shoulder joint from base [in]
+        self.A1 = 18.5 / 39.0  # Upper arm length [in]
+        self.A2 = 19.75 / 39.0  # Fore-arm length [in]
+        self.A3 = 11.5 / 39.0  # Gripper length [in]
 
         self.__initialized = False
 
@@ -143,7 +147,7 @@ class ArmController(Node):
         self.__rz = 0
 
         self.__trans_sens = 0.1 * (1.0 / 350.0)
-        self.__rotate_sens = 0.1 * (1.0 / 350.0)
+        self.__rotate_sens = 1.0 * (1.0 / 350.0)
 
         self.create_subscription(
             msg_type=Bool,
@@ -238,7 +242,9 @@ class ArmController(Node):
         self.__solenoid_publisher = self.create_publisher(
             Bool, "/ARM/SOLENOID/ENABLED", 10
         )
-        self.__joint_state_publisher = self.create_publisher(JointState, "/joint_states", 10)
+        self.__joint_state_publisher = self.create_publisher(
+            JointState, "/joint_states", 10
+        )
 
         # Update values periodically
         self.create_timer(
@@ -347,24 +353,23 @@ class ArmController(Node):
             self.__curr_th2 = wrap_to_pi(msg.data)
 
     def __on_wrist_twist_angle_received(self, msg: Float32):
-        if msg.data != self.__curr_th3:
+        if msg.data != self.__curr_th4:
             self.get_logger().info(
                 f"Wrist twist angle update received: {msg.data} radians"
             )
-            self.__curr_th3 = wrap_to_pi(msg.data)
+            self.__curr_th4 = wrap_to_pi(msg.data)
 
     def __on_wrist_bend_angle_received(self, msg: Float32):
-        if msg.data != self.__curr_th4:
+        if msg.data != self.__curr_th3:
             self.get_logger().info(
                 f"Wrist bend angle update received: {msg.data} radians"
             )
-            self.__curr_th4 = wrap_to_pi(msg.data)
+            self.__curr_th3 = wrap_to_pi(msg.data)
 
     def __on_gripper_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th5:
             self.get_logger().info(f"Gripper angle update received: {msg.data} radians")
             self.__curr_th5 = msg.data
-
 
     def __calculate_angles(self):
         start_time = time.time()
@@ -386,13 +391,22 @@ class ArmController(Node):
         ):
             # self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
-        
+
         if not self.__initialized:
             self.__point = forward_kin(
                 [self.__curr_th0, self.__curr_th1, self.__curr_th2, self.__curr_th3],
-                self.A0, self.A1, self.A2, self.A3)
+                self.A0,
+                self.A1,
+                self.A2,
+                self.A3,
+            )
             self.__initialized = True
-            self._logger.info('')
+
+            self.__target_th3 = self.__curr_th3
+            self.__target_th4 = self.__curr_th4
+            self.__target_th5 = self.__curr_th5
+
+            self._logger.info("")
 
         self._logger.info(
             f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
@@ -401,10 +415,9 @@ class ArmController(Node):
         self.__target_th0 = self.__curr_th0
         self.__target_th1 = self.__curr_th1
         self.__target_th2 = self.__curr_th2
-        self.__target_th3 = self.__curr_th3
-        self.__target_th4 = self.__curr_th4
-        self.__target_th5 = self.__curr_th5
-
+        # self.__target_th3 = self.__curr_th3
+        # self.__target_th4 = self.__curr_th4
+        # self.__target_th5 = self.__curr_th5
 
         end_time = time.time()
         self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
@@ -418,10 +431,24 @@ class ArmController(Node):
             self.__target_th3 += (self.__rx * self.__rotate_sens) * UPDATE_RATE_SEC
             self.__target_th3 = min(max(self.__target_th3, -0.5), 0.5)
 
+            self.__target_th4 += (self.__rz * self.__rotate_sens) * UPDATE_RATE_SEC
+            self.__target_th4 = min(max(self.__target_th4, -1.5), 1.5)
+
+            self.__target_th5 += (self.__ry * self.__rotate_sens) * UPDATE_RATE_SEC
+            self.__target_th5 = min(max(self.__target_th5, 0), 1.57)
+
             # IK Logic
             current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
-            self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(current_ang, self._logger, self.__point, self.__target_th3, 
-                                                                                                   self.A0, self.A1, self.A2, self.A3)
+            self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(
+                current_ang,
+                self._logger,
+                self.__point,
+                self.__target_th3,
+                self.A0,
+                self.A1,
+                self.A2,
+                self.A3,
+            )
 
         elif self.__mode == ARM_MODES.RAW_CONTROL:
             self.__mode = ARM_MODES.POINT_CONTROL
@@ -450,7 +477,7 @@ class ArmController(Node):
             not (self.__mode == ARM_MODES.POINT_CONTROL),
         )
 
-        '''(
+        """(
             self.__target_th0,
             self.__target_th1,
             self.__target_th2,
@@ -462,40 +489,36 @@ class ArmController(Node):
             self.__target_th2,
             self.__target_th3,
             self.__target_th4,
-        )'''
+        )"""
 
         # Publish Calculated Angles
         self._logger.info(
             f"Calculated target angles: {(self.__target_th0)}, {(self.__target_th1)}, {(self.__target_th2)}, {(self.__target_th3)}, {(self.__target_th4)}, {(self.__target_th5)}"
         )
 
-        self.__base_angle_publisher.publish(
-            Float32(data=self.__target_th0)
-        )
-        self.__shoulder_angle_publisher.publish(
-            Float32(data=self.__target_th1)
-        )
-        self.__elbow_angle_publisher.publish(
-            Float32(data=self.__target_th2)
-        )
+        self.__base_angle_publisher.publish(Float32(data=self.__target_th0))
+        self.__shoulder_angle_publisher.publish(Float32(data=self.__target_th1))
+        self.__elbow_angle_publisher.publish(Float32(data=self.__target_th2))
         self.__wrist_angle_publisher.publish(
             ArmWrist(
                 wrist_bend=self.__target_th3,
                 wrist_twist=self.__target_th4,
             )
         )
-        self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
+        self.__gripper_angle_publisher.publish(
+            Float32(data=float(self.__target_th5 * 1.00001))
+        )
 
         js_msg = JointState()
         js_msg.header.stamp = self.get_clock().now().to_msg()
         # These names MUST match the <joint name="..."> in your custom_arm.urdf
-        js_msg.name = ['joint0_base', 'joint1_shoulder', 'joint2_elbow', 'joint3_wrist']
+        js_msg.name = ["joint0_base", "joint1_shoulder", "joint2_elbow", "joint3_wrist"]
         # Map your calculated IK angles to those joints
         js_msg.position = [
-            float(self.__target_th0), 
-            float(self.__target_th1), 
-            float(self.__target_th2), 
-            float(self.__target_th3)
+            float(self.__target_th0),
+            float(self.__target_th1),
+            float(self.__target_th2),
+            float(self.__target_th3),
         ]
         self.__joint_state_publisher.publish(js_msg)
 

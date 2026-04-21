@@ -269,9 +269,9 @@ class Arm(Node):
         self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
     def __wrist_callback(self, msg: ArmWrist):
-        self.get_logger().info(
-            f"Target Wrist Bend: {msg.wrist_bend}, Twist: {msg.wrist_twist}"
-        )
+        # self.get_logger().info(
+        #    f"Target Wrist Bend: {msg.wrist_bend}, Twist: {msg.wrist_twist}"
+        # )
         try:
             can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_WRIST]
             can_message.signals["Position_Bend"].set_value(msg.wrist_bend)
@@ -315,9 +315,9 @@ class Arm(Node):
         if not self.arm_enabled:
             return
 
-        self.get_logger().info(
-            f"Target angle {target_tick} for motor {motor_idx.name}]"
-        )
+        # self.get_logger().info(
+        #    f"Target angle {target_tick} for motor {motor_idx.name}]"
+        # )
 
         # check if the target angle is within the limits of the motor
         if (
