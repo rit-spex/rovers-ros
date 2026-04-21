@@ -20,6 +20,8 @@ from numpy import dtype, ndarray
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
+from sensor_msgs.msg import JointState
+
 from rclpy.subscription import Subscription
 from std_msgs.msg import Bool, Float32, Int16, UInt16
 from enum import IntEnum
@@ -29,6 +31,11 @@ from custom_interfaces.msg import ArmWrist
 
 
 """
+
+Run this to viz arm
+sudo apt install ros-humble-urdf-tutorial
+ros2 launch urdf_tutorial display.launch.py model:=$(pwd)/arm.urdf jsp_gui:=false
+
 Controls
 - No Buttons (Position Drive)
     - Tx : Translation of wrist along x-axis
@@ -231,6 +238,7 @@ class ArmController(Node):
         self.__solenoid_publisher = self.create_publisher(
             Bool, "/ARM/SOLENOID/ENABLED", 10
         )
+        self.__joint_state_publisher = self.create_publisher(JointState, "/joint_states", 10)
 
         # Update values periodically
         self.create_timer(
@@ -477,6 +485,19 @@ class ArmController(Node):
             )
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
+
+        js_msg = JointState()
+        js_msg.header.stamp = self.get_clock().now().to_msg()
+        # These names MUST match the <joint name="..."> in your custom_arm.urdf
+        js_msg.name = ['joint0_base', 'joint1_shoulder', 'joint2_elbow', 'joint3_wrist']
+        # Map your calculated IK angles to those joints
+        js_msg.position = [
+            float(self.__target_th0), 
+            float(self.__target_th1), 
+            float(self.__target_th2), 
+            float(self.__target_th3)
+        ]
+        self.__joint_state_publisher.publish(js_msg)
 
         # Timing
         end_time = time.time()
