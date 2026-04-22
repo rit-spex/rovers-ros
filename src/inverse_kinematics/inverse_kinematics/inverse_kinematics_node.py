@@ -138,6 +138,8 @@ class ArmController(Node):
         self.A2 = 19.75 / 39.0  # Fore-arm length [in]
         self.A3 = 11.5 / 39.0  # Gripper length [in]
 
+        self.__DZ = 50.0
+
         self.__initialized = False
 
         self.__x = 0
@@ -147,8 +149,8 @@ class ArmController(Node):
         self.__ry = 0
         self.__rz = 0
 
-        self.__trans_sens = 0.1 * (1.0 / 350.0)
-        self.__rotate_sens = 1.0 * (1.0 / 350.0)
+        self.__trans_sens = 0.1 * (1.0 / 300.0)
+        self.__rotate_sens = 1.0 * (1.0 / 300.0)
 
         self.create_subscription(
             msg_type=Bool,
@@ -420,47 +422,64 @@ class ArmController(Node):
         self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
 
         if self.__mode == ARM_MODES.POINT_CONTROL:
-            if abs(self.__rx) < 50.0:
+            if abs(self.__rx) < self.__DZ:
                 self.__target_th3 = self.__curr_th3
-                # self.__rx = 0.0
             else:
-                rx = (abs(self.__rx) - 50.0) * float(sign(self.__rx))
+                rx = (abs(self.__rx) - self.__DZ) * float(sign(self.__rx))
                 self.__target_th3 += (rx * self.__rotate_sens) * UPDATE_RATE_SEC
                 self.__target_th3 = min(max(self.__target_th3, -0.5), 0.5)
 
-            if abs(self.__rz) < 50.0:
+            if abs(self.__rz) < self.__DZ:
                 self.__target_th4 = self.__curr_th4
-                # self.__rz = 0.0
             else:
-                rz = (abs(self.__rz) - 50.0) * float(sign(self.__rz))
+                rz = (abs(self.__rz) - self.__DZ) * float(sign(self.__rz))
                 self.__target_th4 += (rz * self.__rotate_sens) * UPDATE_RATE_SEC
                 self.__target_th4 = min(max(self.__target_th4, -1.5), 1.5)
 
-            if abs(self.__ry) < 50.0:
+            if abs(self.__ry) < self.__DZ:
                 self.__target_th5 = self.__curr_th5
-                # self.__ry = 0.0
             else:
-                ry = (abs(self.__ry) - 50.0) * float(sign(self.__ry))
+                ry = (abs(self.__ry) - self.__DZ) * float(sign(self.__ry))
                 self.__target_th5 += (ry * self.__rotate_sens) * UPDATE_RATE_SEC
                 self.__target_th5 = min(max(self.__target_th5, 0.0), 1.57)
 
-            # P_new = P_old + (Velocity_Command * dt)
-            self.__point[0] += (self.__x * self.__trans_sens) * UPDATE_RATE_SEC
-            self.__point[1] += (self.__y * self.__trans_sens) * UPDATE_RATE_SEC
-            self.__point[2] += (self.__z * self.__trans_sens) * UPDATE_RATE_SEC
+            # No spacemouse input -> set target to current
+            if (abs(self.__x) < self.__DZ) and (abs(self.__y) < self.__DZ) and (abs(self.__z) < self.__DZ):
+                self.__target_th0 = self.__curr_th0
+                self.__target_th1 = self.__curr_th1
+                self.__target_th2 = self.__curr_th2
 
-            # IK Logic
-            current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
-            self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(
-                current_ang,
-                self._logger,
-                self.__point,
-                self.__target_th3,
+                # Reset target point to current arm position
+                self.__point = forward_kin(
+                [self.__curr_th0, self.__curr_th1, self.__curr_th2, self.__curr_th3],
                 self.A0,
                 self.A1,
                 self.A2,
                 self.A3,
             )
+            else:
+                # Apply deadzone
+                x = (abs(self.__x) > self.__DZ) * (abs(self.__x) - self.__DZ) * float(sign(self.__x))
+                y = (abs(self.__y) > self.__DZ) * (abs(self.__y) - self.__DZ) * float(sign(self.__y))
+                z = (abs(self.__z) > self.__DZ) * (abs(self.__z) - self.__DZ) * float(sign(self.__z))
+
+                # P_new = P_old + (Velocity_Command * dt)
+                self.__point[0] += (x * self.__trans_sens) * UPDATE_RATE_SEC
+                self.__point[1] += (y * self.__trans_sens) * UPDATE_RATE_SEC
+                self.__point[2] += (z * self.__trans_sens) * UPDATE_RATE_SEC
+
+                # IK Logic
+                current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
+                self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(
+                    current_ang,
+                    self._logger,
+                    self.__point,
+                    self.__target_th3,
+                    self.A0,
+                    self.A1,
+                    self.A2,
+                    self.A3,
+                )
 
         elif self.__mode == ARM_MODES.RAW_CONTROL:
             self.__mode = ARM_MODES.POINT_CONTROL
@@ -473,6 +492,7 @@ class ArmController(Node):
         end_time = time.time()
         self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
 
+        """
         # Update stuff
         (
             self.__target_th0,
@@ -489,7 +509,7 @@ class ArmController(Node):
             not (self.__mode == ARM_MODES.POINT_CONTROL),
         )
 
-        """(
+        (
             self.__target_th0,
             self.__target_th1,
             self.__target_th2,
@@ -521,6 +541,7 @@ class ArmController(Node):
             Float32(data=float(self.__target_th5 * 1.00001))
         )
 
+        # Publish target joint positions for simulation in RViz2
         js_msg = JointState()
         js_msg.header.stamp = self.get_clock().now().to_msg()
         # These names MUST match the <joint name="..."> in your custom_arm.urdf

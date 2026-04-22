@@ -16,6 +16,7 @@ setup(
         ("lib/" + package_name, [package_name + "/math_helpers.py"]),
         ("lib/" + package_name, [package_name + "/pygame_graphics.py"]),
         ("lib/" + package_name, [package_name + "/space_mouse.py"]),
+        ("lib/" + package_name, [package_name + "/fast_IK.py"]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
