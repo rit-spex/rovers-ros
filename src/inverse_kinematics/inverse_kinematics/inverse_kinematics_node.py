@@ -1,12 +1,4 @@
 import math
-from linear_algebra import (
-    calc_joint_positions,
-    collision_protection,
-    homingStep,
-    inverse_kinematics,
-    joint_limits,
-)
-
 from math_helpers import wrap_to_pi, wrap_to_minus_90
 from fast_IK import forward_kin, fast_IK_solve
 import rclpy
@@ -138,7 +130,8 @@ class ArmController(Node):
         self.A2 = 19.75 / 39.0  # Fore-arm length [in]
         self.A3 = 11.5 / 39.0  # Gripper length [in]
 
-        self.__DZ = 50.0
+        self.__DZ = 75.0
+        self.__THROTTLE_SEC = 0.5
 
         self.__initialized = False
 
@@ -149,8 +142,15 @@ class ArmController(Node):
         self.__ry = 0
         self.__rz = 0
 
-        self.__trans_sens = 0.1 * (1.0 / 300.0)
-        self.__rotate_sens = 1.0 * (1.0 / 300.0)
+        self.__trans_sens_base = 0.25 * (1.0 / (350 - self.__DZ))
+        self.__rotate_sens_base = 0.66 * (1.0 / (350 - self.__DZ))
+        self.__gripper_sens_base = 0.66 * (1.0 / (350 - self.__DZ))
+
+        self.__trans_sens = self.__trans_sens_base
+        self.__rotate_sens = self.__rotate_sens_base
+        self.__gripper_sens = self.__gripper_sens_base
+
+        self.__joint_mode_sens = 0.01 * (1.0 / (350 - self.__DZ))
 
         self.create_subscription(
             msg_type=Bool,
@@ -313,6 +313,28 @@ class ArmController(Node):
     def __buttons_callback(self, msg: UInt16):
         self.get_logger().info(f"Button state received: {msg.data}")
 
+        if msg.data == 0:
+            new_msg = Bool()
+            new_msg.data = False
+            self.__solenoid_publisher.publish(msg=new_msg)
+        elif msg.data == 1:
+            new_msg = Bool()
+            new_msg.data = True
+            self.__solenoid_publisher.publish(msg=new_msg)
+        elif msg.data == 2:
+            self.__trans_sens = self.__trans_sens_base
+            self.__rotate_sens = self.__rotate_sens_base
+        elif msg.data == 4:
+            self.__trans_sens = self.__trans_sens_base / 6.0
+            self.__rotate_sens = self.__rotate_sens_base / 6.0
+        elif msg.data == 8:
+            self.__trans_sens = 0.0
+            self.__rotate_sens = 0.0
+        elif msg.data == 16:
+            self.__gripper_sens = self.__gripper_sens_base
+        elif msg.data == 32:
+            self.__gripper_sens = 0.0
+
         # Make it a toggle
         if msg.data & 0b10 and not self.__mode_toggled:
             self.__mode = ARM_MODES((self.__mode + 1) % 3)
@@ -326,52 +348,64 @@ class ArmController(Node):
         elif not msg.data & 0b10:
             self.__mode_toggled = False
 
-        if (msg.data & 0b01) and not self.__solenoid_toggled:
-            self.__solenoid = not self.__solenoid
-            new_msg = Bool()
-            new_msg.data = self.__solenoid
-            self.__solenoid_publisher.publish(msg=new_msg)
-            if self.__solenoid:
-                self.get_logger().info("Solenoid set.")
-            else:
-                self.get_logger().info("Solenoid cleared.")
-        elif not (msg.data & 0b01):
-            self.__solenoid_toggled = False
+        # if (msg.data & 0b01) and not self.__solenoid_toggled:
+        #     self.__solenoid = not self.__solenoid
+        #     new_msg = Bool()
+        #     new_msg.data = self.__solenoid
+        #     self.__solenoid_publisher.publish(msg=new_msg)
+        #     if self.__solenoid:
+        #         self.get_logger().info("Solenoid set.")
+        #     else:
+        #         self.get_logger().info("Solenoid cleared.")
+        # elif not (msg.data & 0b01):
+        #     self.__solenoid_toggled = False
 
     def __on_base_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th0:
-            self.get_logger().info(f"Base angle update received: {msg.data} radians")
-            self.__curr_th0 = wrap_to_pi(msg.data)
+            self.get_logger().info(
+                f"Base angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
+            )
+            self.__curr_th0 = wrap_to_minus_90(msg.data)
 
     def __on_shoulder_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th1:
             self.get_logger().info(
-                f"Shoulder angle update received: {msg.data} radians"
+                f"Shoulder angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
             )
-            self.__curr_th1 = wrap_to_pi(msg.data)
+            self.__curr_th1 = wrap_to_minus_90(msg.data)
 
     def __on_elbow_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th2:
-            self.get_logger().info(f"Elbow angle update received: {msg.data} radians")
+            self.get_logger().info(
+                f"Elbow angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
+            )
             self.__curr_th2 = wrap_to_pi(msg.data)
 
     def __on_wrist_twist_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th4:
             self.get_logger().info(
-                f"Wrist twist angle update received: {msg.data} radians"
+                f"Wrist twist angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
             )
             self.__curr_th4 = wrap_to_pi(msg.data)
 
     def __on_wrist_bend_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th3:
             self.get_logger().info(
-                f"Wrist bend angle update received: {msg.data} radians"
+                f"Wrist bend angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
             )
             self.__curr_th3 = wrap_to_pi(msg.data)
 
     def __on_gripper_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th5:
-            self.get_logger().info(f"Gripper angle update received: {msg.data} radians")
+            self.get_logger().info(
+                f"Gripper angle update received: {msg.data} radians",
+                throttle_duration_sec=self.__THROTTLE_SEC,
+            )
             self.__curr_th5 = msg.data
 
     def __calculate_angles(self):
@@ -379,7 +413,8 @@ class ArmController(Node):
 
         # Verify that all angles have been initialized
         self._logger.info(
-            f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
+            f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}",
+            throttle_duration_sec=self.__THROTTLE_SEC,
         )
         if any(
             math.isnan(angle)
@@ -415,11 +450,12 @@ class ArmController(Node):
             self._logger.info("Arm Initialized")
 
         self._logger.info(
-            f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
+            f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}",
+            throttle_duration_sec=self.__THROTTLE_SEC,
         )
 
         end_time = time.time()
-        self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
+        # self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
 
         if self.__mode == ARM_MODES.POINT_CONTROL:
             if abs(self.__rx) < self.__DZ:
@@ -440,45 +476,82 @@ class ArmController(Node):
                 self.__target_th5 = self.__curr_th5
             else:
                 ry = (abs(self.__ry) - self.__DZ) * float(sign(self.__ry))
-                self.__target_th5 += (ry * self.__rotate_sens) * UPDATE_RATE_SEC
+                self.__target_th5 += (ry * self.__gripper_sens) * UPDATE_RATE_SEC
                 self.__target_th5 = min(max(self.__target_th5, 0.0), 1.57)
 
             # No spacemouse input -> set target to current
-            if (abs(self.__x) < self.__DZ) and (abs(self.__y) < self.__DZ) and (abs(self.__z) < self.__DZ):
+            if (
+                (abs(self.__x) < self.__DZ)
+                and (abs(self.__y) < self.__DZ)
+                and (abs(self.__z) < self.__DZ)
+                and (abs(self.__rx) < self.__DZ)
+            ):
                 self.__target_th0 = self.__curr_th0
                 self.__target_th1 = self.__curr_th1
                 self.__target_th2 = self.__curr_th2
 
                 # Reset target point to current arm position
                 self.__point = forward_kin(
-                [self.__curr_th0, self.__curr_th1, self.__curr_th2, self.__curr_th3],
-                self.A0,
-                self.A1,
-                self.A2,
-                self.A3,
-            )
+                    [
+                        self.__curr_th0,
+                        self.__curr_th1,
+                        self.__curr_th2,
+                        self.__curr_th3,
+                    ],
+                    self.A0,
+                    self.A1,
+                    self.A2,
+                    self.A3,
+                )
             else:
                 # Apply deadzone
-                x = (abs(self.__x) > self.__DZ) * (abs(self.__x) - self.__DZ) * float(sign(self.__x))
-                y = (abs(self.__y) > self.__DZ) * (abs(self.__y) - self.__DZ) * float(sign(self.__y))
-                z = (abs(self.__z) > self.__DZ) * (abs(self.__z) - self.__DZ) * float(sign(self.__z))
+                x = (
+                    (abs(self.__x) > self.__DZ)
+                    * (abs(self.__x) - self.__DZ)
+                    * float(sign(self.__x))
+                )
+                y = (
+                    (abs(self.__y) > self.__DZ)
+                    * (abs(self.__y) - self.__DZ)
+                    * float(sign(self.__y))
+                )
+                z = (
+                    (abs(self.__z) > self.__DZ)
+                    * (abs(self.__z) - self.__DZ)
+                    * float(sign(self.__z))
+                )
 
                 # P_new = P_old + (Velocity_Command * dt)
                 self.__point[0] += (x * self.__trans_sens) * UPDATE_RATE_SEC
                 self.__point[1] += (y * self.__trans_sens) * UPDATE_RATE_SEC
                 self.__point[2] += (z * self.__trans_sens) * UPDATE_RATE_SEC
 
+                self._logger.info(
+                    f"Point Position: x={self.__point[0]}:.2f    y={self.__point[1]}:.2f    z={self.__point[2]}:.2f",
+                    throttle_duration_sec=self.__THROTTLE_SEC,
+                )
+
                 # IK Logic
-                current_ang = [self.__curr_th0, self.__curr_th1, self.__curr_th2]
-                self.__target_th0, self.__target_th1, self.__target_th2 = fast_IK_solve(
+                current_ang = [
+                    self.__curr_th0,
+                    self.__curr_th1,
+                    self.__curr_th2,
+                    self.__curr_th3,
+                ]
+                (
+                    self.__target_th0,
+                    self.__target_th1,
+                    self.__target_th2,
+                    self.__point,
+                ) = fast_IK_solve(
                     current_ang,
-                    self._logger,
                     self.__point,
                     self.__target_th3,
                     self.A0,
                     self.A1,
                     self.A2,
                     self.A3,
+                    self._logger,
                 )
 
         elif self.__mode == ARM_MODES.RAW_CONTROL:
@@ -490,7 +563,7 @@ class ArmController(Node):
             return
 
         end_time = time.time()
-        self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
+        # self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
 
         """
         # Update stuff
@@ -525,12 +598,19 @@ class ArmController(Node):
 
         # Publish Calculated Angles
         self._logger.info(
-            f"Calculated target angles: {(self.__target_th0)}, {(self.__target_th1)}, {(self.__target_th2)}, {(self.__target_th3)}, {(self.__target_th4)}, {(self.__target_th5)}"
+            f"Calculated target angles: {(self.__target_th0*57.3)}, {(self.__target_th1*57.3)}, {(self.__target_th2*57.3)}, {(self.__target_th3*57.3)}, {(self.__target_th4)}, {(self.__target_th5)}",
+            throttle_duration_sec=self.__THROTTLE_SEC,
         )
 
-        self.__base_angle_publisher.publish(Float32(data=self.__target_th0))
-        self.__shoulder_angle_publisher.publish(Float32(data=self.__target_th1))
-        self.__elbow_angle_publisher.publish(Float32(data=self.__target_th2))
+        self.__base_angle_publisher.publish(
+            Float32(data=wrap_to_minus_90(self.__target_th0))
+        )
+        self.__shoulder_angle_publisher.publish(
+            Float32(data=wrap_to_minus_90(self.__target_th1))
+        )
+        self.__elbow_angle_publisher.publish(
+            Float32(data=wrap_to_pi(self.__target_th2))
+        )
         self.__wrist_angle_publisher.publish(
             ArmWrist(
                 wrist_bend=self.__target_th3,
@@ -557,7 +637,7 @@ class ArmController(Node):
 
         # Timing
         end_time = time.time()
-        self.get_logger().info(f"Time To update: {end_time - start_time}:.3f")
+        # self.get_logger().info(f"Time To update: {end_time - start_time}:.3f")
 
     def run(self):
         self.get_logger().info("starting inverse kinematics node...")

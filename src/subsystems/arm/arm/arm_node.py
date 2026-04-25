@@ -615,7 +615,8 @@ class Arm(Node):
                         )
                     )
                     self.get_logger().info(
-                        f"Updated actual tick for base motor: {actual_tick}"
+                        f"Updated actual tick for base motor: {actual_tick}",
+                        throttle_duration_sec=0.5,
                     )
 
             case CAN_MESSAGE_IDS.READ_SHOULDER:
@@ -656,7 +657,8 @@ class Arm(Node):
                         )
                     )
                     self.get_logger().info(
-                        f"Updated actual tick for shoulder motor: {actual_tick}"
+                        f"Updated actual tick for shoulder motor: {actual_tick}",
+                        throttle_duration_sec=0.5,
                     )
 
             case CAN_MESSAGE_IDS.READ_ELBOW:
@@ -679,7 +681,9 @@ class Arm(Node):
                     ):  # if the value is negative then convert it to a signed integer
                         actual_tick -= 2**32
 
-                    self.get_logger().info(f"ticks {actual_tick}:)")
+                    self.get_logger().info(
+                        f"ticks {actual_tick}:)", throttle_duration_sec=0.5
+                    )
 
                     # do not update if the same value
                     if actual_tick == self.__motors_actual_ticks[ARM_MOTOR_IDX.ELBOW]:
@@ -696,7 +700,8 @@ class Arm(Node):
                         )
                     )
                     self.get_logger().info(
-                        f"Updated actual tick for elbow motor: {actual_tick}"
+                        f"Updated actual tick for elbow motor: {actual_tick}",
+                        throttle_duration_sec=0.5,
                     )
 
             case CAN_MESSAGE_IDS.READ_WRIST_BEND:
@@ -717,7 +722,8 @@ class Arm(Node):
                     )
                 )
                 self.get_logger().info(
-                    f"Updated actual tick for bend wrist motor: {can_message.signals['Position'].value}"
+                    f"Updated actual tick for bend wrist motor: {can_message.signals['Position'].value}",
+                    throttle_duration_sec=0.5,
                 )
             case CAN_MESSAGE_IDS.READ_WRIST_TWIST:
                 if (
@@ -735,7 +741,8 @@ class Arm(Node):
                     )
                 )
                 self.get_logger().info(
-                    f"Updated actual tick for twist wrist motor: {can_message.signals['Position'].value}"
+                    f"Updated actual tick for twist wrist motor: {can_message.signals['Position'].value}",
+                    throttle_duration_sec=0.5,
                 )
             case CAN_MESSAGE_IDS.READ_CLAW:
                 if (
@@ -753,7 +760,8 @@ class Arm(Node):
                     )
                 )
                 self.get_logger().info(
-                    f"Updated actual tick for gripper: {can_message.signals['Position'].value}"
+                    f"Updated actual tick for gripper: {can_message.signals['Position'].value}",
+                    throttle_duration_sec=0.5,
                 )
             case _:
                 self.get_logger().warning(
