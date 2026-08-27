@@ -1,18 +1,67 @@
 # Rovers ROS
 
-This is the ROS package for our 2024 - 2025 rover, Scorpio. This runs on our Nvidia Jetson Orin Nano.
+ROS 2 workspace for the RIT SPEX rover (Scorpio). Runs on the Nvidia Jetson Orin Nano.
+
+## Shared Protocol Submodule
+
+This repository depends on the shared protocol package (`rovers-protocol`) for encoding/decoding messages from the basestation. The same protocol repo is used by both this repo and `rovers-basestation`.
+
+```bash
+# Clone with submodule
+git clone --recurse-submodules https://github.com/rit-spex/rovers-ros.git
+
+# Or if already cloned
+git submodule update --init --recursive
+```
+
+Expected submodule location: `lib/rovers-protocol/`
+
+### How it works
+
+The basestation sends controller data over XBee radio as compact bit-packed bytes. The `basestation_node` decodes them using `MessageEncoder` from the shared protocol and publishes the values as ROS topics. The `telemetry_uplink_node` collects rover telemetry from ROS topics, encodes them using the same protocol, and sends them back to the basestation over UDP.
+
+```
+                        XBee Radio
+  ┌───────────────┐   ───────────────> ┌─────────────────┐
+  │ BASESTATION   │   controller data  │  ROVER (ROS 2)  │
+  │ (Raspberry Pi)│  <───────────────  │  (this repo)    │
+  │               │   telemetry (UDP)  │                 │
+  └───────────────┘                    └─────────────────┘
+```
+
+### ROS nodes that use the protocol
+
+| Node | File | Purpose |
+|------|------|---------|
+| `basestation_node` | `src/communications/basestation/basestation/basestation_node.py` | Decodes XBee messages → ROS topics |
+| `telemetry_uplink_node` | `src/communications/basestation/basestation/telemetry_uplink_node.py` | Encodes rover telemetry and sends it to the basestation via UDP |
+
+### Protocol Trace Debugging
+
+You can enable real-time hex-level protocol tracing to verify that the rover is correctly encoding/decoding messages. This is useful for confirming bit-packed message IDs and field values match what the basestation expects.
+
+To enable tracing, pass the `protocol_trace:=1` argument:
+
+```bash
+# In simulation
+ros2 launch main simulation_launch.xml protocol_trace:=1
+
+# On hardware (SSH in and run)
+ros2 launch main main_launch.xml protocol_trace:=1
+```
+
+When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex traces like:
+- `[protocol rx] <ID:0x02> data:0200ff...` (Xbox control message)
+- `[protocol tx] <ID:0xF1> data:f1045a...` (Telemetry message)
+
+---
 
 ## Building
 
-To build the project, first make sure you have ROS2 installed.
+Make sure you have ROS 2 (Humble) installed, then:
 
-Next, build the workspace with:
 ```bash
 colcon build
-```
-
-Finally, source the environment:
-```bash
 source source.sh
 ```
 
@@ -21,30 +70,27 @@ Then rerun colcon build. MAKE sure to do this before source source.sh
 
 ## Running
 
-To run the project, launch the main package with the command:
 ```bash
+# Launch the full system
 ros2 launch main main_launch.xml
-```
 
-To run the simulator,
-```bash
+# Launch the simulator
 ros2 launch main simulation_launch.xml
 ```
 
-How to launch the rover:
-
 ## Connection
-To ssh to the rover
+
+SSH to the rover:
 ```bash
 ssh rovers@129.21.91.140
+# Password: rovers
 ```
 
-If it asks for password enter "rovers"
-
-Open a new terminal and enter the following commands
-
+Then:
+```bash
 cd ~/ros/rovers-ros
-source source.zsh
+source source.sh
 ros2 launch main main_launch.xml
+```
 
-After you see "starting xbee..." enter the password rovers
+After you see "starting xbee..." enter the password `rovers`.

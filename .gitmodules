@@ -1,0 +1,3 @@
+[submodule "lib/rovers-protocol"]
+	path = lib/rovers-protocol
+	url = https://github.com/rit-spex/rovers-protocol.git
