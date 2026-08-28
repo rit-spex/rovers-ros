@@ -41,3 +41,7 @@ services:
 
 volumes:
     workspace:
+
+networks:
+  rovers_simulation_udp:
+    name: rovers_simulation_udp
