@@ -1,9 +1,12 @@
 DC = docker compose
 
-build-dc:
+build:
 	$(DC) build
 
-enter: build-dc
+build-no-cache:
+	$(DC) build --no-cache
+
+enter: build
 	$(DC) up -d
 	$(DC) exec ros2 /bin/bash --init-file init_file.sh
 
