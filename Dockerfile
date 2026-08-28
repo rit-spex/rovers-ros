@@ -36,5 +36,3 @@ RUN virtualenv /home/ws/.venv
 
 # Set default shell
 ENV SHELL=/bin/bash
-
-CMD ["/bin/bash"]

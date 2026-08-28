@@ -5,4 +5,7 @@ build-dc:
 
 enter: build-dc
 	$(DC) up -d
-	$(DC) exec ros2 /bin/bash
+	$(DC) exec ros2 /bin/bash --init-file init_file.sh
+
+down:
+	$(DC) down
