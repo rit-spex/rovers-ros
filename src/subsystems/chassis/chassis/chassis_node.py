@@ -1,91 +1,45 @@
 from typing import Any
-from constants.CAN_Constants import TOPICS
 from constants.CommandCodes import CONSTANTS
+from constants.CAN_structs import Message
+from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsystems_Names
+from constants.can_encoding import TeensyCommunication
 
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16, UInt8
+from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 
 class Chassis(Node):
     __topic: dict[str, Any]
-    __can_publisher: Publisher
 
     __LY_value: float
     __RY_value: float
-    # 0-manual  1-object_detection  2-arcu_tracking  3-GPS  4-ARM_keyboard
-    __operation_type = 0
+
+    __publishers: dict[CAN_MESSAGE_IDS, Publisher]
+
+    __drive_power_can_message: Message
 
     def __init__(self):
         super().__init__("chassis_node")
 
-        self.__topic = TOPICS[3]
-        self.__can_publisher = self.create_publisher(
-            msg_type=Can,
-            topic=f"/CAN/TX/{self.__topic['name']}",
-            qos_profile=10,
-        )
+        self.__publishers = {}
+        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+            if(message.subsystem == Subsystems_Names.CHASSIS):
+                self.__publishers[message_id] = self.create_publisher(
+                    msg_type=Can,
+                    topic=message.topic_name,
+                    qos_profile=10
+                )
 
-        self.__control_mode_publisher = self.create_publisher(
-            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", 10
-        )
-
-        # From controller (manual driving)
         self.create_subscription(
-            Float32,
-            "/BASESTATION/"
-            + CONSTANTS.XBOX.NAME
-            + "/"
-            + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR,
-            self.__LY_manual_callback,
-            10,
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, 10
         )
         self.create_subscription(
-            Float32,
-            "/BASESTATION/"
-            + CONSTANTS.XBOX.NAME
-            + "/"
-            + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR,
-            self.__RY_manual_callback,
-            10,
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, 10
         )
-
-        # From Object Detection
-        self.create_subscription(
-            Float32, "/object_detection/OD_LY", self.__OD_LY_callback, 10
-        )
-        self.create_subscription(
-            Float32, "/object_detection/OD_RY", self.__OD_RY_callback, 10
-        )
-
-        # From Arcu Detection
-        self.create_subscription(
-            Float32, "/object_detection/AR_LY", self.__AR_LY_callback, 10
-        )
-        self.create_subscription(
-            Float32, "/object_detection/AR_RY", self.__AR_RY_callback, 10
-        )
-        # From GPS node
-        self.create_subscription(
-            Float32, "/object_detection/GPS_LY", self.__GPS_LY_callback, 10
-        )
-        self.create_subscription(
-            Float32, "/object_detection/GPS_RY", self.__GPS_RY_callback, 10
-        )
-
-        # Control mode switch
-        self.create_subscription(
-            UInt8, "/BASESTATION/XBOX/CONTROL_MODE1", self.__operation_type_callback, 10
-        )
-
-        self.create_subscription(Bool, "BASESTATION/XBOX/B", self.__xbox_b_callback, 10)
-        self.create_subscription(Bool, "BASESTATION/XBOX/X", self.__xbox_x_callback, 10)
-        self.create_subscription(Bool, "BASESTATION/XBOX/A", self.__xbox_a_callback, 10)
-        self.create_subscription(Bool, "BASESTATION/XBOX/Y", self.__xbox_y_callback, 10)
-
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -95,105 +49,31 @@ class Chassis(Node):
 
         self.__LY_value = 0
         self.__RY_value = 0
+        self.__drive_power_can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.DRIVE_POWER]
 
-    def __operation_type_callback(self, msg: UInt8):
-        self.__operation_type = msg.data
+    def __LY_callback(self, msg: Float32):
+        self.__LY_value = msg.data
+        self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
+        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
+        self.get_logger().info(f"LY_callback message: {msg}")
+        self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
-    def __LY_manual_callback(self, msg: Float32):
-        if self.__operation_type == 0:
-            self.__LY_value = msg.data
-            self.__send_controller_data()
-            # self.get_logger().info(f"LY_callback message: {msg}")
-            # self.get_logger().info(f"LY_value is now {self.__LY_value}")
-
-    def __RY_manual_callback(self, msg: Float32):
-        if self.__operation_type == 0:
-            self.__RY_value = msg.data
-            self.__send_controller_data()
-            # self.get_logger().info(f"RX_callback message: {msg}")
-            # self.get_logger().info(f"RX_value is now {self.__RX_value}")
-
-    def __OD_LY_callback(self, msg: Float32):
-        if self.__operation_type == 1:
-            self.__LY_value = msg.data
-            self.__send_controller_data()
-
-    def __OD_RY_callback(self, msg: Float32):
-        if self.__operation_type == 1:
-            self.__RY_value = msg.data
-            self.__send_controller_data()
-
-    def __AR_LY_callback(self, msg: Float32):
-        if self.__operation_type == 2:
-            self.__LY_value = msg.data
-            self.__send_controller_data()
-
-    def __AR_RY_callback(self, msg: Float32):
-        if self.__operation_type == 2:
-            self.__RY_value = msg.data
-            self.__send_controller_data()
-
-    def __GPS_LY_callback(self, msg: Float32):
-        if self.__operation_type == 3:
-            self.__LY_value = msg.data
-            self.__send_controller_data()
-
-    def __GPS_RY_callback(self, msg: Float32):
-        if self.__operation_type == 3:
-            self.__RY_value = msg.data
-            self.__send_controller_data()
-
-    # Control Mode Switching Functions -----------------
-    def __xbox_b_callback(self, msg):
-        if msg.data == True:
-            cm = UInt8()
-            cm.data = 0
-            self.__control_mode_publisher.publish(cm)
-
-    def __xbox_x_callback(self, msg):
-        if msg.data == True:
-            cm = UInt8()
-            cm.data = 1
-            self.__control_mode_publisher.publish(cm)
-
-    def __xbox_a_callback(self, msg):
-        if msg.data == True:
-            cm = UInt8()
-            cm.data = 2
-            self.__control_mode_publisher.publish(cm)
-
-    def __xbox_y_callback(self, msg):
-        if msg.data == True:
-            cm = UInt8()
-            cm.data = 3
-            self.__control_mode_publisher.publish(cm)
-
-    def __send_controller_data(self):
-        # self.get_logger().info(f"LY: {self.__LY_value}")
-        # self.get_logger().info(f"RY: {self.__RY_value}")
-        # self.get_logger().info(f"")
-
-        ros_msg = Can()
-        ros_msg.channel = self.__topic["channel"]
-        ros_msg.id = self.__topic["id"]
-        ros_msg.buf = [
-            int((self.__LY_value * -100) + 100),
-            int((self.__RY_value * 100) + 100),
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ]
-
-        self.__can_publisher.publish(ros_msg)
+    def __RY_callback(self, msg: Float32):
+        self.__RY_value = msg.data
+        self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
+        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
+        # self.get_logger().info(f"RY_callback message: {msg}")
+        # self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping chassis...")
-        self.__LY_value = 0
-        self.__RY_value = 0
-        self.__send_controller_data()
+        # self.__LY_value = 0
+        # self.__RY_value = 0
+        # self.__LY_Publisher.publish(self.__LY_value)
+        # self.__RY_Publisher.publish(self.__RY_value)
+
         rclpy.shutdown()
 
     def run(self):

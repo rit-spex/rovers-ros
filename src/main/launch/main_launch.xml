@@ -1,35 +1,13 @@
 <launch>
+	<arg name="protocol_trace" default="0"></arg>
+	<set_env name="ROVER_PROTOCOL_TRACE" value="$(var protocol_trace)"></set_env>
 	<node pkg="can_comms" exec="can_comms_node" name="can_comms"></node>
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
+	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>
 	<node pkg="xbee" exec="xbee_node" name="xbee"></node>
 	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
 	<node pkg="arm" exec="arm_node" name="arm"></node>
 	<node pkg="main" exec="master_node" name="master_node"></node>
 	<node pkg="status_led" exec="status_led_node" name="status_led_node"></node>
-	<node pkg="object_detection" exec="object_detection_node" name="object_pathfinding"></node>
-	<node pkg="object_detection" exec="object_tracker_node" name="object_tracker"></node>
-	<node pkg="object_detection" exec="arcu_tracker_node" name="arcu_tracker"></node>
-	<node pkg="object_detection" exec="aruco_pathfinding_node" name="arcu_pathfinding"></node>
-	<node pkg="object_detection" exec="GPS_node" name="GPS_node"></node>
-	<node pkg="object_detection" exec="GPS_pathfinding_node" name="GPS_pathfinding"></node>
-	<node pkg="cameras" exec="cameras" name="cameras"></node>
-
-	<node pkg="unitree_lidar_ros2" exec="unitree_lidar_ros2_node" name="unilidar_node">
-		<param name="port" value="/dev/ttyUSB1"/>
-	</node>
-
-	<node pkg="tf2_ros" exec="static_transform_publisher" name="static_transform_publisher"
-      args="--x 0 --y 0 --z 0 --roll 0 --pitch 0 --yaw 2.74 --frame-id base_link --child-frame-id unilidar_lidar" />
-
-	<node pkg="pointcloud_to_laserscan" exec="pointcloud_to_laserscan_node" name="p2l_node">
-		<remap from="cloud_in" to="unilidar/cloud"/>
-		<param name="target_frame" value="base_link"/>
-		<param name="min_height" value="0.05"/>
-		<param name="max_height" value="2.0"/>
-		<param name="range_min" value="0.3"/>
-		<param name="range_max" value="3.0"/>
-		<param name="scan_time" value="0.1"/>
-	</node>
-
-
+	<node pkg="inverse_kinematics" exec="inverse_kinematics_node" name="inverse_kinematics"></node>
 </launch>
