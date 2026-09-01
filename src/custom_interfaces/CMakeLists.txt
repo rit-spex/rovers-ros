@@ -16,7 +16,11 @@ set(msg_files
     "msg/Can.msg"
     "msg/CanFD.msg"
     "msg/UDPPacket.msg"
+<<<<<<< HEAD
+    "msg/SpaceMouse.msg"
+=======
     "msg/ArmWrist.msg"
+>>>>>>> e2673ceeac7c1a127f77ba035f11358e90329448
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}

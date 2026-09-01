@@ -30,7 +30,7 @@ class CAN(Node):
         can.rc["bitrate"] = BIT_RATE
 
         self.bus = can.Bus(
-            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True
+            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=False
         )
         can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
@@ -145,7 +145,6 @@ def main():
     rclpy.init()
     can = CAN()
     can.run()
-
 
 if __name__ == "__main__":
     main()
