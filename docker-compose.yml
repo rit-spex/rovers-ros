@@ -17,7 +17,7 @@ services:
         environment:
             - ROS_DOMAIN_ID=42
             - ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-            - DISPLAY=:0
+            - DISPLAY=$DISPLAY
             - LIBGL_ALWAYS_SOFTWARE=1
 
         volumes:
