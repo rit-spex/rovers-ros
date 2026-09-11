@@ -207,7 +207,7 @@ class Master(Node):
                 self.__chassis_teensy_enable_publisher.publish(self.__pack_enable_message_to_teensy(CAN_MESSAGE_IDS.ENABLE_CHASSIS, False))
             else:
                 self.__last_chassis_command = self.__curr_chassis_command
-        
+
         # check for arm command timeout
         if self.__arm_teensy_enabled:
             if self.__curr_arm_command == self.__last_arm_command:
@@ -319,7 +319,7 @@ class Master(Node):
         if message_id not in TEENSY_CAN_MESSAGES:
             self.get_logger().error(f"Message ID {message_id} not found in TEENSY_CAN_MESSAGES")
             return None
-        
+
         message = TEENSY_CAN_MESSAGES[message_id]
         message.signals["enable"].set_value(enabled)
         can_packet = TeensyCommunication.encode_can_message(message)

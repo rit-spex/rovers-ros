@@ -279,7 +279,7 @@ class Arm(Node):
                 f"CAN message for moving the wrist does not exist: {e}"
             )
             return
-        
+
     def __gripper_callback(self, msg: Float32):
         self.__send_motor_command(ARM_MOTOR_IDX.GRIPPER, msg.data)
 
