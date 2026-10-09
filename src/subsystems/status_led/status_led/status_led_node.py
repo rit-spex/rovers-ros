@@ -101,11 +101,10 @@ class StatusLED(Node):
 
     def set_gpio(self, pin, val):
         if self._gpio_enabled:
-            # GPIO.output(pin, val)
-            return
+            GPIO.output(pin, val)
 
     def __flicker_led(self):
-        self.get_logger().info("flicker_led")
+        # self.get_logger().info("flicker_led")
         if self.__led_status:
             self.__led_status = False
             self.set_gpio(LED_PIN_Y, LOW)  # Turn off LED to indicate live jetson
@@ -143,8 +142,7 @@ class StatusLED(Node):
             self.__green_led_status = False  # Turn off the LED to indicate arm disabled
             return
         self.get_logger().info("Arm enabled, blinking status LED...")
-        if self._gpio_enabled:
-            self.__green_led_status = True  # Blink the LED to indicate arm enabled
+        self.__green_led_status = True  # Blink the LED to indicate arm enabled
 
     def __on_science_enabled_received(self, msg: Bool):
         if not msg.data:
@@ -152,8 +150,8 @@ class StatusLED(Node):
             self.set_gpio(LED_PIN_G, LOW)  # Turn off the LED to indicate science disabled
             return
         self.get_logger().info("Science enabled, starting status LED...")
+        self.__green_led_status = False
         if self._gpio_enabled:
-            self.__green_led_status = False
             self.set_gpio(LED_PIN_G, HIGH)  # Turn the LED solid to indicate science enabled
 
     def __on_chassis_enabled_received(self, msg: Bool):
@@ -192,6 +190,7 @@ def main():
     finally:
         status_led.destroy_node()
         if rclpy.ok():
+            status_led.get_logger().info("stopping status LED")
             rclpy.shutdown()
 
 
