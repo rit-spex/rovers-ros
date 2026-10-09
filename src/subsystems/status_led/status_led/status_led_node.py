@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node, Timer
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, UInt8, UInt16
 
 try:
     import Jetson.GPIO as GPIO
@@ -13,7 +13,10 @@ except Exception as exc:
     _GPIO_IMPORT_ERROR = str(exc)
 
 LED_flicker_sec = 1.0
-LED_PIN = 7
+LED_PIN_R = 7
+LED_PIN_G = 11
+LED_PIN_B = 13
+LED_PIN_Y = 15
 
 
 class StatusLED(Node):
@@ -22,6 +25,7 @@ class StatusLED(Node):
 
     # gpio status
     __led_status: bool
+    __green_led_status: bool
 
     def __init__(self):
         super().__init__("status_led_node")
@@ -30,7 +34,10 @@ class StatusLED(Node):
         if self._gpio_enabled:
             # GPIO setup to have led indicate heartbeat status
             GPIO.setmode(GPIO.BOARD)
-            GPIO.setup(LED_PIN, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(LED_PIN_Y, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(LED_PIN_R, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(LED_PIN_G, GPIO.OUT, initial=GPIO.LOW)
+            GPIO.setup(LED_PIN_B, GPIO.OUT, initial=GPIO.LOW)
         else:
             self.get_logger().warning(
                 "Jetson GPIO unavailable; status LED disabled (%s)"
@@ -39,11 +46,47 @@ class StatusLED(Node):
 
         # requires some default value
         self.__led_status = False
+        self.__green_led_status = False
 
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
             callback=self.__on_estop_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/ARM/ENABLED",
+            callback=self.__on_arm_enabled_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/SCIENCE/ENABLED",
+            callback=self.__on_science_enabled_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=Bool,
+            topic="/CHASSIS/ENABLED",
+            callback=self.__on_chassis_enabled_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=UInt8,
+            topic="/ROVER/AUTO_STATE",
+            callback=self.__on_auto_state_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=UInt8,
+            topic="/BASESTATION/auto_state/auto_state",
+            callback=self.__on_auto_state_received,
             qos_profile=10,
         )
 
@@ -58,26 +101,66 @@ class StatusLED(Node):
         # self.get_logger().info("flicker_led")
         if self.__led_status:
             self.__led_status = False
-            GPIO.output(LED_PIN, GPIO.LOW)  # Turn off LED to indicate live jetson
+            GPIO.output(LED_PIN_Y, GPIO.LOW)  # Turn off LED to indicate live jetson
+            if self.__green_led_status:
+                GPIO.output(LED_PIN_G, GPIO.LOW)  # Turn off LED to indicate arm enabled
         else:
             self.__led_status = True
-            GPIO.output(LED_PIN, GPIO.HIGH)  # Turn on LED to indicate live jetson
+            GPIO.output(LED_PIN_Y, GPIO.HIGH)  # Turn on LED to indicate live jetson
+            if self.__green_led_status:
+                GPIO.output(LED_PIN_G, GPIO.HIGH)  # Turn on LED to indicate arm enabled
 
     def __on_estop_received(self, msg: Bool):
         if not msg.data:
             return
-        self.get_logger().info("E-STOP received, stopping status LED...")
+        self.get_logger().info("E-STOP received, stop blinking status LED...")
         self.__led_status = True
         if self._gpio_enabled:
-            GPIO.output(LED_PIN, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
+            GPIO.output(LED_PIN_Y, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
         rclpy.shutdown()
+
+    def __on_auto_state_received(self, msg: UInt8):
+        if msg.data > 0:
+            GPIO.output(LED_PIN_B, GPIO.LOW)  # Turn off the LED to indicate auto state enabled
+            return
+        self.get_logger().info("Auto state not received, starting status LED...")
+        if self._gpio_enabled:
+            GPIO.output(LED_PIN_B, GPIO.HIGH)  # Turn the LED solid to indicate auto state disabled
+
+    def __on_arm_enabled_received(self, msg: Bool):
+        if not msg.data:
+            self.__green_led_status = False  # Turn off the LED to indicate arm disabled
+            return
+        self.get_logger().info("Arm enabled, blinking status LED...")
+        if self._gpio_enabled:
+            self.__green_led_status = True  # Blink the LED to indicate arm enabled
+
+    def __on_science_enabled_received(self, msg: Bool):
+        if not msg.data:
+            GPIO.output(LED_PIN_G, GPIO.LOW)  # Turn off the LED to indicate science disabled
+            return
+        self.get_logger().info("Science enabled, starting status LED...")
+        if self._gpio_enabled:
+            self.__green_led_status = False
+            GPIO.output(LED_PIN_G, GPIO.HIGH)  # Turn the LED solid to indicate science enabled
+
+    def __on_chassis_enabled_received(self, msg: Bool):
+        if msg.data:
+            GPIO.output(LED_PIN_R, GPIO.LOW)  # Turn off the LED to indicate chassis enabled
+            return
+        self.get_logger().info("Chassis disabled, starting status LED...")
+        if self._gpio_enabled:
+            GPIO.output(LED_PIN_R, GPIO.HIGH)  # Turn the LED solid to indicate chassis disabled
 
     def destroy_node(self):
         if self._gpio_enabled:
             try:
-                GPIO.cleanup(LED_PIN)
+                GPIO.cleanup(LED_PIN_Y)
+                GPIO.cleanup(LED_PIN_R)
+                GPIO.cleanup(LED_PIN_G)
+                GPIO.cleanup(LED_PIN_B)
             except Exception:
-                self.get_logger().exception("Failed to cleanup GPIO pin %s", LED_PIN)
+                self.get_logger().exception("Failed to cleanup GPIO pin %s", LED_PIN_Y)
         return super().destroy_node()
 
     def run(self):
