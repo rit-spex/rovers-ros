@@ -8,6 +8,7 @@ from linear_algebra import (
 )
 from math_helpers import wrap_to_pi, wrap_to_minus_90
 import rclpy
+import time
 
 # from space_mouse import (
 #     read_spacemouse,
@@ -23,7 +24,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
-from std_msgs.msg import Bool, Float32, Int16, UInt16
+from std_msgs.msg import Bool, Float32, Int16, UInt16, UInt8
 from enum import IntEnum
 
 from constants.CommandCodes import CONSTANTS
@@ -46,7 +47,7 @@ Controls
     - Rz : Rotation of the base
 """
 
-UPDATE_RATE_SEC = 1  # seconds
+UPDATE_RATE_SEC = 0.2  # seconds
 
 
 class ARM_MODES(IntEnum):
@@ -89,6 +90,8 @@ class ArmController(Node):
     __rz: float
     __homing: bool
     __homing_toggled: bool
+    __solenoid: bool
+    __solenoid_toggled: bool
     __mode: ARM_MODES  # Buttonz
     __mode_toggled: bool
 
@@ -104,6 +107,7 @@ class ArmController(Node):
     __wrist_angle_publisher: Publisher
     __gripper_angle_publisher: Publisher
     __solenoid_publisher: Publisher
+    __operation_mode_publisher: Publisher
 
     # Space mouse
     # __device: Any
@@ -128,8 +132,8 @@ class ArmController(Node):
         self.__ry = 0
         self.__rz = 0
 
-        self.__trans_sens = 0.004
-        self.__rotate_sens = 0.0007
+        self.__trans_sens = 0.0015 * UPDATE_RATE_SEC
+        self.__rotate_sens = 0.003 * UPDATE_RATE_SEC
 
         self.create_subscription(
             msg_type=Bool,
@@ -224,6 +228,7 @@ class ArmController(Node):
         self.__solenoid_publisher = self.create_publisher(
             Bool, "/ARM/SOLENOID/ENABLED", 10
         )
+        self.__operation_mode_publisher = self.create_publisher(UInt8, "/ARM/MODE", 10)
 
         # Update values periodically
         self.create_timer(
@@ -248,6 +253,8 @@ class ArmController(Node):
         # self.__device = setup_spacemouse()
         # self.__state = {"x": 0, "y": 0, "z": 0, "rx": 0, "ry": 0, "rz": 0, "buttons": 0}
         # self.__buttonz = [False, False]
+        self.__solenoid = False
+        self.__solenoid_toggled = False
         self.__homing = False
         self.__homing_toggled = False
         self.__mode = ARM_MODES.RAW_CONTROL
@@ -290,6 +297,9 @@ class ArmController(Node):
         # Make it a toggle
         if msg.data & 0b10 and not self.__mode_toggled:
             self.__mode = ARM_MODES((self.__mode + 1) % 3)
+            new_msg = Int8()
+            new_msg.data = self.__mode
+            self.__operation_mode_publisher.publish(msg=new_msg)
             self.__mode_toggled = True
             if self.__mode == ARM_MODES.RAW_CONTROL:
                 self.get_logger().info("Raw control mode enabled.")
@@ -300,16 +310,17 @@ class ArmController(Node):
         elif not msg.data & 0b10:
             self.__mode_toggled = False
 
-        if (msg.data & 0b01) and not self.__homing_toggled:
-            self.__homing = bool(msg.data & 0b01)
-            self.__homing_toggled = True
-            self.__solenoid_publisher.publish(msg=self.__homing)
-            if msg.data:
-                self.get_logger().info("Homing initiated.")
+        if (msg.data & 0b01) and not self.__solenoid_toggled:
+            self.__solenoid = not self.__solenoid
+            new_msg = Bool()
+            new_msg.data = self.__solenoid
+            self.__solenoid_publisher.publish(msg=new_msg)
+            if self.__solenoid:
+                self.get_logger().info("Solenoid set.")
             else:
-                self.get_logger().info("Homing cleared.")
-        elif not msg.data & 0b01:
-            self.__homing_toggled = False
+                self.get_logger().info("Solenoid cleared.")
+        elif not (msg.data & 0b01):
+            self.__solenoid_toggled = False
 
     def __on_base_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th0:
@@ -328,17 +339,17 @@ class ArmController(Node):
             self.get_logger().info(f"Elbow angle update received: {msg.data} radians")
             self.__curr_th2 = wrap_to_pi(msg.data)
 
-    def __on_wrist_twist_angle_received(self, msg: Float32):
-        if msg.data != self.__curr_th3:
-            self.get_logger().info(
-                f"Wrist twist angle update received: {msg.data} radians"
-            )
-            self.__curr_th3 = wrap_to_pi(msg.data)
-
     def __on_wrist_bend_angle_received(self, msg: Float32):
         if msg.data != self.__curr_th4:
             self.get_logger().info(
                 f"Wrist bend angle update received: {msg.data} radians"
+            )
+            self.__curr_th3 = wrap_to_pi(msg.data)
+
+    def __on_wrist_twist_angle_received(self, msg: Float32):
+        if msg.data != self.__curr_th3:
+            self.get_logger().info(
+                f"Wrist twist angle update received: {msg.data} radians"
             )
             self.__curr_th4 = wrap_to_pi(msg.data)
 
@@ -348,10 +359,14 @@ class ArmController(Node):
             self.__curr_th5 = msg.data
 
     def __calculate_angles(self):
+
+        start_time = time.time()
+
         # Verify that all angles have been initialized
         self._logger.info(
             f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
         )
+
         if any(
             math.isnan(angle)
             for angle in [
@@ -366,9 +381,9 @@ class ArmController(Node):
             # self.get_logger().warning("Current angles not fully initialized. Cannot calculate angles.")
             return
 
-        self._logger.info(
-            f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
-        )
+        # self._logger.info(
+        #    f"Current spacemouse state: x={self.__x}, y={self.__y}, z={self.__z}, rx={self.__rx}, ry={self.__ry}, rz={self.__rz}, homing={self.__homing}, mode={self.__mode}"
+        # )
 
         self.__target_th0 = self.__curr_th0
         self.__target_th1 = self.__curr_th1
@@ -396,6 +411,9 @@ class ArmController(Node):
         # Check if anything is going on
         # if (not all(v == 0 for v in self.__state.values())) or self.__homing:
         # Okay well what is going on
+        # end_time = time.time()
+        # self.get_logger().info(f"Time before calcs: {end_time - start_time}:.3f")
+
         if self.__homing:
             (
                 self.__homing,
@@ -469,7 +487,6 @@ class ArmController(Node):
 
             except Exception as e:
                 self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
-
         elif self.__mode == ARM_MODES.GRIPPER_CONTROL:
             # x rotates the gripper
             self.__target_th3 += self.__rx * self.__rotate_sens
@@ -479,26 +496,29 @@ class ArmController(Node):
             self.__target_th5 += self.__ry * self.__rotate_sens
 
             # Compute arm joints
-            try:
-                self.__target_th0, self.__target_th1, self.__target_th2, _ = (
-                    inverse_kinematics(
-                        self.__point,
-                        [
-                            self.__target_th0,
-                            self.__target_th1,
-                            self.__target_th2,
-                            self.__target_th3,
-                        ],
-                        self.__target_th4,
-                    )
-                )
+            # try:
+            #     self.__target_th0, self.__target_th1, self.__target_th2, _ = (
+            #         inverse_kinematics(
+            #             self.__point,
+            #             [
+            #                 self.__target_th0,
+            #                 self.__target_th1,
+            #                 self.__target_th2,
+            #                 self.__target_th3,
+            #             ],
+            #             self.__target_th4,
+            #         )
+            #     )
 
-            except Exception as e:
-                self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
+            # except Exception as e:
+            #     self.get_logger().error(f"Inverse kinematics calculation failed: {e}")
 
         # # Reset state variable
         # for key in self.__state:
         #     self.__state[key] = 0
+
+        # end_time = time.time()
+        # self.get_logger().info(f"Time after calcs: {end_time - start_time}:.3f")
 
         # Update stuff
         (
@@ -548,9 +568,14 @@ class ArmController(Node):
             Float32(data=wrap_to_pi(self.__target_th2))
         )
         self.__wrist_angle_publisher.publish(
-            ArmWrist(wrist_bend=wrap_to_pi(self.__target_th3), wrist_twist=wrap_to_pi(self.__target_th4))
+            ArmWrist(
+                wrist_bend=wrap_to_pi(self.__target_th3),
+                wrist_twist=wrap_to_pi(self.__target_th4),
+            )
         )
         self.__gripper_angle_publisher.publish(Float32(data=self.__target_th5))
+        end_time = time.time()
+        self.get_logger().info(f"Time To update: {end_time - start_time}:.3f")
 
     def run(self):
         self.get_logger().info("starting inverse kinematics node...")

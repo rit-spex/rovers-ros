@@ -60,7 +60,7 @@ class Basestation(Node):
 
         self.create_subscription(
             msg_type=UInt8MultiArray,
-            topic="/XBEE/MESSAGES",
+            topic="/XBEE/MESSAGES/RX",
             callback=self.__on_message_received,
             qos_profile=10,
         )
