@@ -17,11 +17,10 @@ except Exception as exc:
     LOW = 0
 
 LED_flicker_sec = 1.0
-LED_PIN_R = 7
-LED_PIN_G = 11
-LED_PIN_B = 13
-LED_PIN_Y = 15
-
+LED_PIN_Y = 1 # Jetson Header Pin 29
+LED_PIN_R = 7 # Jetson Header Pin 32
+LED_PIN_G = 11 # Jetson Header Pin 31
+LED_PIN_B = 13 # Jetson Header Pin 33
 
 class StatusLED(Node):
 
