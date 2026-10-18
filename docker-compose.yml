@@ -1,0 +1,47 @@
+services:
+    ros2:
+        build:
+            context: .
+            args:
+                USERNAME: ${USER:-ros2user}
+                USER_UID: ${UID:-1000}
+                USER_GID: ${GID:-1000}
+        container_name: ros2-humble-workspace
+        network_mode: host
+        ipc: host
+        pid: host
+        stdin_open: true
+        tty: true
+        working_dir: /home/ws
+
+        environment:
+            - ROS_DOMAIN_ID=42
+            - ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+            - DISPLAY=$DISPLAY
+            - LIBGL_ALWAYS_SOFTWARE=1
+
+        volumes:
+            # Workspace with persistent build cache
+            - workspace:/home/ws
+
+            # Copy important files from repo to container
+            - ./src:/home/ws/src
+            - ./lib:/home/ws/lib
+            - ./requirements.txt:/home/ws/requirements.txt
+            - ./source.sh:/home/ws/source.sh
+            - ./init_file.sh:/home/ws/init_file.sh
+
+            # X11 for GUI applications
+            - /tmp/.X11-unix:/tmp/.X11-unix
+
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+
+        command: "sh -c '/home/ws/.venv/bin/pip3 install -r /home/ws/requirements.txt && /bin/bash'"
+
+volumes:
+    workspace:
+
+networks:
+  rovers_simulation_udp:
+    name: rovers_simulation_udp
