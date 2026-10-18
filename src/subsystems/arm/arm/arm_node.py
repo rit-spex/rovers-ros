@@ -136,7 +136,7 @@ ARM_MOTOR_PARAMS = [
     ),  # gripper
 ]
 
-REQUESTED_ARM_UPDATE_RATE = 0.5  # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
+REQUESTED_ARM_UPDATE_RATE = 0.1  # in seconds, this is the rate at which the arm node will request updates from the arm motors, it should be at least as fast as the rate at which the arm motors update their position to ensure smooth movement of the arm
 
 
 class Arm(Node):
@@ -269,6 +269,9 @@ class Arm(Node):
         self.__send_motor_command(ARM_MOTOR_IDX.ELBOW, ticks)
 
     def __wrist_callback(self, msg: ArmWrist):
+        # self.get_logger().info(
+        #    f"Target Wrist Bend: {msg.wrist_bend}, Twist: {msg.wrist_twist}"
+        # )
         try:
             can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_WRIST]
             can_message.signals["Position_Bend"].set_value(msg.wrist_bend)
@@ -296,8 +299,8 @@ class Arm(Node):
 
         # try to send the message to the arm motor
         try:
-            can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_CLAW]
-            can_message.signals["enabled"].set_value(self.__solenoid_engaged)
+            can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.MOVE_SOLENOID]
+            can_message.signals["Enabled"].set_value(self.__solenoid_engaged)
             self.__send_CAN_data(can_message)
         except KeyError as e:
             self.get_logger().error(
@@ -312,9 +315,9 @@ class Arm(Node):
         if not self.arm_enabled:
             return
 
-        self.get_logger().info(
-            f"Target angle {target_tick} for motor {motor_idx.name}]"
-        )
+        # self.get_logger().info(
+        #    f"Target angle {target_tick} for motor {motor_idx.name}]"
+        # )
 
         # check if the target angle is within the limits of the motor
         if (
