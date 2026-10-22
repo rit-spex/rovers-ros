@@ -80,7 +80,14 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False,
     ),
-    CAN_MESSAGE_IDS.ENABLE_ARM: Message(
+    # add here - AUTO COLOR below is auto generated.
+    CAN_MESSAGE_IDS.AUTO_COLOR: Message(
+        id=CAN_MESSAGE_IDS.AUTO_COLOR,
+        subsystem=Subsystems_Names.CHASSIS,
+        name="AUTO_COLOR",
+        signals={"state": Signal(DATA_TYPES.UINT_8, 0)},
+        isforJetson=False,
+    ),    CAN_MESSAGE_IDS.ENABLE_ARM: Message(
         id=CAN_MESSAGE_IDS.ENABLE_ARM,
         subsystem=Subsystems_Names.ARM,
         name="ENABLE_ARM",
