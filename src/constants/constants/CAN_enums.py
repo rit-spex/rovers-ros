@@ -23,6 +23,11 @@ class SubsystemsIDs(IntEnum):
     CHASSIS = 1
     ARM = 2
     SCIENCE = 3
+class LEDState(IntEnum):
+    Off = 0
+    Blue = 1
+    Red = 2
+    Green = 3
 
 class CAN_MESSAGE_IDS(IntEnum):
     E_STOP = 0
@@ -31,6 +36,7 @@ class CAN_MESSAGE_IDS(IntEnum):
 
     ENABLE_CHASSIS = 10
     DRIVE_POWER = 13
+    AUTO_COLOR = 14
 
     ENABLE_ARM = 20
     # MOVE_BASE = 21
