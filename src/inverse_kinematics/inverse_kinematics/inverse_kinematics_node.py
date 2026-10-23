@@ -363,7 +363,7 @@ class ArmController(Node):
         start_time = time.time()
 
         # Verify that all angles have been initialized
-        self._logger.info(
+        self._logger.debug(
             f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
         )
 

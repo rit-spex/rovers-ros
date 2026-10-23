@@ -36,7 +36,7 @@ class CAN_UDP(Node):
         super().__init__("CAN_udp_node")
 
         self.__address = "127.0.0.1"
-        self.__recv_port = 8001
+        self.__recv_port = 8002
         self.__send_port = 8000
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
@@ -105,7 +105,7 @@ class CAN_UDP(Node):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().debug(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):
