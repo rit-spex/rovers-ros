@@ -363,7 +363,7 @@ class ArmController(Node):
         start_time = time.time()
 
         # Verify that all angles have been initialized
-        self._logger.info(
+        self._logger.debug(
             f"Current angles: {self.__curr_th0 *57.3}, {self.__curr_th1*57.3}, {self.__curr_th2*57.3}, {self.__curr_th3*57.3}, {self.__curr_th4*57.3}, {self.__curr_th5*57.3}"
         )
 
@@ -555,7 +555,7 @@ class ArmController(Node):
         self.__point = l2
 
         # Must re-wrap some angles to prevent sign flips due to crossing the 180:-180 boundary
-        self._logger.info(
+        self._logger.debug(
             f"Calculated target angles: {wrap_to_minus_90(self.__target_th0)}, {wrap_to_minus_90(self.__target_th1)}, {wrap_to_pi(self.__target_th2)}, {wrap_to_pi(self.__target_th3)}, {wrap_to_pi(self.__target_th4)}, {wrap_to_pi(self.__target_th5)}"
         )
         self.__base_angle_publisher.publish(

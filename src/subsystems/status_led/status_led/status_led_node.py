@@ -5,6 +5,7 @@ from std_msgs.msg import Bool, UInt8, UInt16
 
 try:
     import Jetson.GPIO as GPIO
+
     _GPIO_AVAILABLE = True
     _GPIO_IMPORT_ERROR = ""
     HIGH = GPIO.HIGH
@@ -17,10 +18,11 @@ except Exception as exc:
     LOW = 0
 
 LED_flicker_sec = 1.0
-LED_PIN_Y = 29 # Jetson Header Pin 1
-LED_PIN_R = 32 # Jetson Header Pin 7
-LED_PIN_G = 31 # Jetson Header Pin 11
-LED_PIN_B = 33 # Jetson Header Pin 13
+LED_PIN_Y = 29  # Jetson Header Pin 1
+LED_PIN_R = 32  # Jetson Header Pin 7
+LED_PIN_G = 31  # Jetson Header Pin 11
+LED_PIN_B = 33  # Jetson Header Pin 13
+
 
 class StatusLED(Node):
 
@@ -44,8 +46,7 @@ class StatusLED(Node):
             GPIO.setup(LED_PIN_B, GPIO.OUT, initial=LOW)
         else:
             self.get_logger().warning(
-                "Jetson GPIO unavailable; status LED disabled (%s)"
-                % _GPIO_IMPORT_ERROR
+                "Jetson GPIO unavailable; status LED disabled (%s)" % _GPIO_IMPORT_ERROR
             )
 
         # requires some default value
@@ -134,18 +135,24 @@ class StatusLED(Node):
     def __on_auto_state_received(self, msg: UInt8):
         if msg.data > 0:
             self.get_logger().info("Auto state received, stopping blue LED...")
-            self.set_gpio(LED_PIN_B, LOW)  # Turn off the LED to indicate auto state enabled
+            self.set_gpio(
+                LED_PIN_B, LOW
+            )  # Turn off the LED to indicate auto state enabled
             return
         self.get_logger().info("Auto state not received, starting blue LED...")
         if self._gpio_enabled:
-            self.set_gpio(LED_PIN_B, HIGH)  # Turn the LED solid to indicate auto state disabled
+            self.set_gpio(
+                LED_PIN_B, HIGH
+            )  # Turn the LED solid to indicate auto state disabled
 
     def __on_arm_enabled_received(self, msg: Bool):
         if not msg.data:
             self.get_logger().info("Arm disabled, not blinking green LED...")
-            self.__green_led_status = False  
+            self.__green_led_status = False
             if self._gpio_enabled:
-                self.set_gpio(LED_PIN_G, LOW)  # Turn off the LED to indicate arm disabled
+                self.set_gpio(
+                    LED_PIN_G, LOW
+                )  # Turn off the LED to indicate arm disabled
             return
         self.get_logger().info("Arm enabled, blinking green LED...")
         self.__green_led_status = True  # Blink the LED to indicate arm enabled
@@ -153,21 +160,29 @@ class StatusLED(Node):
     def __on_science_enabled_received(self, msg: Bool):
         if not msg.data:
             self.get_logger().info("Science dissabled, stopping green LED...")
-            self.set_gpio(LED_PIN_G, LOW)  # Turn off the LED to indicate science disabled
+            self.set_gpio(
+                LED_PIN_G, LOW
+            )  # Turn off the LED to indicate science disabled
             return
         self.get_logger().info("Science enabled, starting green LED...")
         self.__green_led_status = False
         if self._gpio_enabled:
-            self.set_gpio(LED_PIN_G, HIGH)  # Turn the LED solid to indicate science enabled
+            self.set_gpio(
+                LED_PIN_G, HIGH
+            )  # Turn the LED solid to indicate science enabled
 
     def __on_chassis_enabled_received(self, msg: Bool):
         if msg.data:
             self.get_logger().info("Chassis ensabled, stopping red LED...")
-            self.set_gpio(LED_PIN_R, LOW)  # Turn off the LED to indicate chassis enabled
+            self.set_gpio(
+                LED_PIN_R, LOW
+            )  # Turn off the LED to indicate chassis enabled
             return
         self.get_logger().info("Chassis disabled, starting red LED...")
         if self._gpio_enabled:
-            self.set_gpio(LED_PIN_R, HIGH)  # Turn the LED solid to indicate chassis disabled
+            self.set_gpio(
+                LED_PIN_R, HIGH
+            )  # Turn the LED solid to indicate chassis disabled
 
     def destroy_node(self):
         if self._gpio_enabled:
