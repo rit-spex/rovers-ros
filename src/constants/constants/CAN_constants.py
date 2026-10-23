@@ -80,7 +80,7 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False,
     ),
-    # add here - AUTO COLOR below is auto generated.
+
     CAN_MESSAGE_IDS.AUTO_COLOR: Message(
         id=CAN_MESSAGE_IDS.AUTO_COLOR,
         subsystem=Subsystems_Names.CHASSIS,
