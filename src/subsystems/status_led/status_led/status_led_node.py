@@ -17,17 +17,18 @@ except Exception as exc:
     LOW = 0
 
 LED_flicker_sec = 1.0
-LED_PIN_Y = 1 # Jetson Header Pin 29
-LED_PIN_R = 7 # Jetson Header Pin 32
-LED_PIN_G = 11 # Jetson Header Pin 31
-LED_PIN_B = 13 # Jetson Header Pin 33
+LED_PIN_Y = 29 # Jetson Header Pin 1
+LED_PIN_R = 32 # Jetson Header Pin 7
+LED_PIN_G = 31 # Jetson Header Pin 11
+LED_PIN_B = 33 # Jetson Header Pin 13
 
 class StatusLED(Node):
 
     LED_flicker_timer: Timer
 
     # gpio status
-    __led_status: bool
+    __led_flicker_state: bool
+    __yellow_led_status: bool
     __green_led_status: bool
 
     def __init__(self):
@@ -48,7 +49,8 @@ class StatusLED(Node):
             )
 
         # requires some default value
-        self.__led_status = False
+        self.__led_flicker_state = False
+        self.__yellow_led_status = True
         self.__green_led_status = False
 
         self.create_subscription(
@@ -103,62 +105,67 @@ class StatusLED(Node):
             GPIO.output(pin, val)
 
     def __flicker_led(self):
-        # self.get_logger().info("flicker_led")
-        if self.__led_status:
-            self.__led_status = False
-            self.set_gpio(LED_PIN_Y, LOW)  # Turn off LED to indicate live jetson
+        if self.__led_flicker_state:
+            self.__led_flicker_state = False
+            if self.__yellow_led_status:
+                self.set_gpio(LED_PIN_Y, LOW)  # Turn off LED to indicate live jetson
+                self.get_logger().debug("Blinking yellow off")
             if self.__green_led_status:
-                self.get_logger().info("Blinking green off")
+                self.get_logger().debug("Blinking green off")
                 self.set_gpio(LED_PIN_G, LOW)  # Turn off LED to indicate arm enabled
         else:
-            self.__led_status = True
-            self.set_gpio(LED_PIN_Y, HIGH)  # Turn on LED to indicate live jetson
+            self.__led_flicker_state = True
+            if self.__yellow_led_status:
+                self.set_gpio(LED_PIN_Y, HIGH)  # Turn on LED to indicate live jetson
+                self.get_logger().debug("Blinking yellow on")
             if self.__green_led_status:
-                self.get_logger().info("Blinking green on")
+                self.get_logger().debug("Blinking green on")
                 self.set_gpio(LED_PIN_G, HIGH)  # Turn on LED to indicate arm enabled
 
     def __on_estop_received(self, msg: Bool):
         if not msg.data:
             return
-        self.get_logger().info("E-STOP received, stop blinking status LED...")
-        self.__led_status = True
+        self.get_logger().info("E-STOP received, stop blinking yellow status LED...")
+        self.__yellow_led_status = False
         if self._gpio_enabled:
             self.set_gpio(LED_PIN_Y, HIGH)  # Turn the LED solid to indicate e-stop
         rclpy.shutdown()
 
     def __on_auto_state_received(self, msg: UInt8):
         if msg.data > 0:
-            self.get_logger().info("Auto state received, stopping status LED...")
+            self.get_logger().info("Auto state received, stopping blue LED...")
             self.set_gpio(LED_PIN_B, LOW)  # Turn off the LED to indicate auto state enabled
             return
-        self.get_logger().info("Auto state not received, starting status LED...")
+        self.get_logger().info("Auto state not received, starting blue LED...")
         if self._gpio_enabled:
             self.set_gpio(LED_PIN_B, HIGH)  # Turn the LED solid to indicate auto state disabled
 
     def __on_arm_enabled_received(self, msg: Bool):
         if not msg.data:
-            self.get_logger().info("Arm disabled, not blinking status LED...")
-            self.__green_led_status = False  # Turn off the LED to indicate arm disabled
+            self.get_logger().info("Arm disabled, not blinking green LED...")
+            self.__green_led_status = False  
+            if self._gpio_enabled:
+                self.set_gpio(LED_PIN_G, LOW)  # Turn off the LED to indicate arm disabled
             return
-        self.get_logger().info("Arm enabled, blinking status LED...")
+        self.get_logger().info("Arm enabled, blinking green LED...")
         self.__green_led_status = True  # Blink the LED to indicate arm enabled
 
     def __on_science_enabled_received(self, msg: Bool):
         if not msg.data:
-            self.get_logger().info("Science dissabled, stopping status LED...")
+            self.get_logger().info("Science dissabled, stopping green LED...")
             self.set_gpio(LED_PIN_G, LOW)  # Turn off the LED to indicate science disabled
             return
-        self.get_logger().info("Science enabled, starting status LED...")
+        self.get_logger().info("Science enabled, starting green LED...")
         self.__green_led_status = False
         if self._gpio_enabled:
             self.set_gpio(LED_PIN_G, HIGH)  # Turn the LED solid to indicate science enabled
 
     def __on_chassis_enabled_received(self, msg: Bool):
         if msg.data:
-            self.get_logger().info("Chassis ensabled, stopping status LED...")
+            self.get_logger().info("Chassis ensabled, stopping red LED...")
             self.set_gpio(LED_PIN_R, LOW)  # Turn off the LED to indicate chassis enabled
             return
-        self.get_logger().info("Chassis disabled, starting status LED...")
+        self.get_logger().info("Chassis disabled, starting red LED...")
         if self._gpio_enabled:
             self.set_gpio(LED_PIN_R, HIGH)  # Turn the LED solid to indicate chassis disabled
 
@@ -170,7 +177,7 @@ class StatusLED(Node):
                 GPIO.cleanup(LED_PIN_G)
                 GPIO.cleanup(LED_PIN_B)
             except Exception:
-                self.get_logger().exception("Failed to cleanup GPIO pin %s", LED_PIN_Y)
+                self.get_logger().exception("Failed to cleanup GPIO pin %d", LED_PIN_Y)
         return super().destroy_node()
 
     def run(self):
