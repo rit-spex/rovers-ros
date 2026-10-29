@@ -105,7 +105,7 @@ class CAN_UDP(Node):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().debug(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.get_logger().info(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):
