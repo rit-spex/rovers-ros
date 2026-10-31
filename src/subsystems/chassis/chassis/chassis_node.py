@@ -14,7 +14,7 @@ from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
 
 class Chassis(Node):
     __topic: dict[str, Any]
-    
+
     __LY_value: float
     __RY_value: float
 
@@ -63,7 +63,7 @@ class Chassis(Node):
         self.__RY_value = msg.data
         self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
         can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
-        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)        
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
         # self.get_logger().info(f"RY_callback message: {msg}")
         # self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
