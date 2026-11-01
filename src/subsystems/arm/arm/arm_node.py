@@ -8,7 +8,7 @@ from constants.CAN_constants import (
     Subsystems_Names,
 )
 from constants.CAN_structs import Signal, Message
-from custom_interfaces.msg import Can
+from custom_interfaces.msg import Can, SpaceMouse
 from custom_interfaces.msg import ArmWrist
 
 from numpy import uint8, int32
@@ -182,6 +182,14 @@ class Arm(Node):
                     qos_profile=10,
                 )
 
+        self.create_subscription(
+            msg_type=SpaceMouse,
+            topic="/BASESTATION/spacemouse",
+            callback=self.__on_spacemouse_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(Bool, "/ARM/ENABLED", self.__on_arm_enable_received, 10)
         # create subscribers for the arm motor angle commands
         self.create_subscription(
             Float32, "/ARM/BASE/TARGET_ANGLE", self.__base_callback, 10
@@ -247,6 +255,25 @@ class Arm(Node):
             callback=self.request_position,
         )
 
+    def __on_spacemouse_received(self, msg: SpaceMouse):
+        """Handle incoming SpaceMouse 6DOF input for arm control.
+
+        msg.x/y/z  – translation axes (-1.0 to 1.0)
+        msg.rx/ry/rz – rotation axes  (-1.0 to 1.0)
+        msg.buttons  – bitmask of SpaceMouse button states
+
+        TODO: map axes to arm motors here.
+        """
+        if not self.arm_enabled:
+            return
+
+        self.get_logger().debug(
+            "SpaceMouse: x=%.3f y=%.3f z=%.3f rx=%.3f ry=%.3f rz=%.3f buttons=%d",
+            msg.x, msg.y, msg.z, msg.rx, msg.ry, msg.rz, msg.buttons,
+        )
+
+    def __base_callback(self, msg: Float32):        
+        self.__send_motor_command(ARM_MOTOR_IDX.BASE, int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks))
     def __base_callback(self, msg: Float32):
         ticks = (
             int32(msg.data * ARM_MOTOR_PARAMS[ARM_MOTOR_IDX.BASE].rad_2_ticks)
