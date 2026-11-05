@@ -11,7 +11,6 @@ from constants.can_encoding import TeensyCommunication
 import rclpy.publisher
 import rclpy.subscription
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
-from can_msgs.msg import Frame, ErrorFrame
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
