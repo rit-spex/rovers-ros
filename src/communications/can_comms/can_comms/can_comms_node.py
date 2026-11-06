@@ -22,6 +22,9 @@ class CAN(Node):
     # This is needed as a var to shut it down early during E-stop
     __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
 
+    ERROR_THRESHOLD = 5  # Number of errors before resetting the CAN network
+    __error_count = 0  # Current number of errors
+
     def __init__(self) -> None:
         super().__init__("CAN_node")
         self.reset_network()
@@ -47,6 +50,13 @@ class CAN(Node):
                 callback=self.send_msg,
                 qos_profile=10,
             )
+
+        self.create_subscription(
+            msg_type=Bool,
+            topic="can_err",
+            callback=self.__on_can_error,
+            qos_profile=10,
+        )
 
         self.create_subscription(
             msg_type=Bool,
@@ -81,6 +91,19 @@ class CAN(Node):
         self.bus.flush_tx_buffer()
         self.bus.shutdown()
         rclpy.shutdown()
+
+    def __on_can_error(self, msg: Bool):
+        self.get_logger().info(
+            f"CAN error received: {msg.error} on channel {msg.channel}"
+        )
+        self.reset_network()
+        self.__error_count += 1
+        if self.__error_count >= self.ERROR_THRESHOLD:
+            self.get_logger().error(
+                f"CAN error threshold reached ({self.__error_count} errors), shutting down can_comms_node"
+            )
+            rclpy.shutdown()
+
 
     def send_msg(self, msg: Can):
         self.get_logger().debug(
@@ -119,8 +142,14 @@ class JETSON_LISTENER(can.Listener):
                 msg_type=Can, topic=message.topic_name, qos_profile=10
             )
 
+        self.error_frame_publisher = self.__node.create_publisher(
+            msg_type=Bool, topic="can_err", qos_profile=10
+        )
+
     def on_message_received(self, msg: can.Message) -> None:
-        if msg.arbitration_id in self.__publishers:
+        if msg.is_error_frame:
+            self.error_frame_publisher.publish(msg)
+        elif msg.arbitration_id in self.__publishers:
             buf = [0] * 8  # Initialize buffer with 8 zeros
             for i in range(msg.dlc):
                 buf[i] = msg.data[i]
