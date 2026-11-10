@@ -123,6 +123,9 @@ class cCMD_SETANGLES (cSTorM32RcCmd):
         self.yaw_deg = yaw_deg
         self.payload = struct.pack("fff", self.pitch_deg, self.roll_deg, self.yaw_deg) + b'\x00\x00'
 
+    def getPayload(self):
+        return struct.unpack("fff", self.payload[0:12])
+
 
 #------------------------------------------------------
 # RCCMD  SendCameraCommand  #27 = 0x1B

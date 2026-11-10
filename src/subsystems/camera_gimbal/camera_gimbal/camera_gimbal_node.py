@@ -36,7 +36,7 @@ class CameraGimbal(Node):
 
         # Set initial angles
         self.reset_angles()
-        self.angles = cCMD_SETANGLES(ser, self.yaw_deg, self.pitch_deg, self.roll_deg)
+        self.angles = cCMD_SETANGLES(self.ser, self.pitch_deg, self.roll_deg, self.yaw_deg)
 
         # Initialize STorM32 command object
         self.storm = cSTorM32RcCmd(ser=ser)
@@ -53,35 +53,50 @@ class CameraGimbal(Node):
 
         self.__angle_publisher = self.create_publisher(
             msg_type=Float32MultiArray,
-            topic="/camera_gimbal/angle",
+            topic="/camera_gimbal/currentangle",
             qos_profile=10,
         )
 
         self.create_subscription(
             msg_type=Float32MultiArray,
-            topic="/camera_gimbal/angle",
+            topic="/camera_gimbal/targetangle",
             callback=self.__on_angles_received,
             qos_profile=10,
         )
 
     def timer_callback(self):
         # Update angles
-        self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
+        # self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
 
     def reset_angles(self):
         self.yaw_deg = 0.0
         self.pitch_deg = 0.0
         self.roll_deg = 0.0
+        self.update_angles(self.yaw_deg, self.pitch_deg, self.roll_deg)
 
     def update_angles(self, yaw: float, pitch: float, roll: float):
         self.yaw_deg = yaw
         self.pitch_deg = pitch
         self.roll_deg = roll
-        self.angles = cCMD_SETANGLES(yaw, pitch, roll)
+        if self.yaw_deg > self.yaw_max:
+            self.yaw_deg = self.yaw_max
+        if self.yaw_deg < self.yaw_min:
+            self.yaw_deg = self.yaw_min 
+        if self.pitch_deg > self.pitch_max:
+            self.pitch_deg = self.pitch_max
+        if self.pitch_deg < self.pitch_min:
+            self.pitch_deg = self.pitch_min
+        if self.roll_deg > self.roll_max:
+            self.roll_deg = self.roll_max
+        if self.roll_deg < self.roll_min:
+            self.roll_deg = self.roll_min
+        self.angles.setPayload(self.pitch_deg, self.roll_deg, self.yaw_deg)
         self.angles.send()
 
     def __on_angles_received(self, msg: Float32MultiArray):
         # Handle received angles 
+        self.pitch_deg, self.roll_deg, self.yaw_deg = self.angles.getPayload()
+        self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
         self.update_angles(msg.data[0], msg.data[1], msg.data[2])
         self.get_logger().debug(f"Sent angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
 
