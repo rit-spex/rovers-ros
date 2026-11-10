@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<sdf version="1.7">
+  <world name="default">
+    <gui>
+      <plugin name="rover_sim_control"
+              filename="libgazebo_sim_control_gui.so"/>
+    </gui>
+    <!-- A global light source -->
+    <include>
+      <uri>model://sun</uri>
+    </include>
+    <!-- A ground plane -->
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+  </world>
+</sdf>

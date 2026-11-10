@@ -1,0 +1,5 @@
+gazebo:
+  ros__parameters:
+    # /clock publish rate. 400 Hz flooded the ROS graph for no benefit;
+    # controllers and sensors only need ~100 Hz or less.
+    publish_rate: 100.0

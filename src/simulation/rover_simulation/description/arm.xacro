@@ -1,0 +1,388 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!--
+      5-DOF rover arm for Gazebo testing.
+
+      Joint chain (matches kinematics/simulated_arm.py)
+        base(z) -> A0(z) -> shoulder(x) -> A1(y) -> elbow(x)
+        -> A2(y) -> wrist bend(x) -> wrist twist(y) -> A3(y)
+
+      Link lengths are the same physical dimensions as constants.py,
+      converted from inches to metres.  The gripper is a simple revolute
+      joint so the existing /ARM/GRIPPER/TARGET_ANGLE topic can drive it.
+    -->
+
+    <xacro:property name="arm_mount_z" value="0.0935"/>
+    <xacro:property name="arm_a0" value="0.1651"/>
+    <xacro:property name="arm_a1" value="0.5588"/>
+    <xacro:property name="arm_a2" value="0.5588"/>
+    <xacro:property name="arm_a3" value="0.3048"/>
+
+    <!-- Joint hubs are 8 inch diameter and 6 inch deep. The shoulder and
+         elbow hubs both sit on the +X side of the arm. -->
+    <xacro:property name="arm_hub_radius" value="0.1016"/>
+    <xacro:property name="arm_hub_length" value="0.1524"/>
+    <xacro:property name="arm_hub_offset" value="${arm_hub_length / 2}"/>
+
+    <!-- Gripper has a cylindrical body with three prongs spaced 120 degrees. -->
+    <xacro:property name="gripper_body_radius" value="0.06"/>
+    <xacro:property name="gripper_body_length" value="0.16"/>
+    <xacro:property name="gripper_prong_length" value="0.12"/>
+    <xacro:property name="gripper_prong_thickness" value="0.024"/>
+    <xacro:property name="gripper_prong_radius" value="0.064"/>
+
+    <!-- Clear gap between the two parallel links in each arm segment. -->
+    <xacro:property name="arm_link_gap" value="0.1016"/>
+
+    <!-- Arm is red in Gazebo; the URDF materials match so RViz agrees. -->
+    <material name="arm_upper_color">
+        <color rgba="0.8 0.05 0.05 1"/>
+    </material>
+    <material name="arm_forearm_color">
+        <color rgba="0.8 0.05 0.05 1"/>
+    </material>
+    <material name="arm_tool_color">
+        <color rgba="0.8 0.05 0.05 1"/>
+    </material>
+
+    <xacro:macro name="arm_box_inertial" params="mass x y z">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="${mass}"/>
+            <inertia ixx="${mass * (y*y + z*z) / 12.0}"
+                     ixy="0" ixz="0"
+                     iyy="${mass * (x*x + z*z) / 12.0}"
+                     iyz="0"
+                     izz="${mass * (x*x + y*y) / 12.0}"/>
+        </inertial>
+    </xacro:macro>
+
+    <!-- One claw prong, aligned along +Y and offset from the gripper axis. -->
+    <xacro:macro name="arm_claw_prong" params="x z">
+        <visual>
+            <origin xyz="${x} ${gripper_body_length + gripper_prong_length / 2} ${z}"/>
+            <geometry>
+                <box size="${gripper_prong_thickness} ${gripper_prong_length} ${gripper_prong_thickness}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="${x} ${gripper_body_length + gripper_prong_length / 2} ${z}"/>
+            <geometry>
+                <box size="${gripper_prong_thickness} ${gripper_prong_length} ${gripper_prong_thickness}"/>
+            </geometry>
+        </collision>
+    </xacro:macro>
+
+    <!-- Mounting plate on top of the chassis. -->
+    <link name="arm_base_link">
+        <visual>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.08" length="0.06"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.08" length="0.06"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="1.0" x="0.16" y="0.16" z="0.06"/>
+    </link>
+
+    <joint name="arm_base_mount_joint" type="fixed">
+        <parent link="chassis"/>
+        <child link="arm_base_link"/>
+        <origin xyz="0 0 ${arm_mount_z}" rpy="0 0 ${-pi / 2}"/>
+    </joint>
+
+    <!-- Base yaw. -->
+    <link name="arm_yaw_link">
+        <visual>
+            <origin xyz="0 0 ${arm_hub_offset}"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 ${arm_hub_offset}"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="1.2"
+            x="${arm_hub_radius * 2}" y="${arm_hub_radius * 2}" z="${arm_hub_length}"/>
+    </link>
+
+    <joint name="arm_base_joint" type="continuous">
+        <parent link="arm_base_link"/>
+        <child link="arm_yaw_link"/>
+        <origin xyz="0 0 0.03" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="100" velocity="5.0"/>
+    </joint>
+
+    <!-- Shoulder elevation (A0). -->
+    <link name="arm_shoulder_link">
+        <visual>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.06" length="0.10"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.06" length="0.10"/>
+            </geometry>
+        </collision>
+        <!-- 8 inch x 6 inch shoulder hub on the +X side. -->
+        <visual>
+            <origin xyz="${arm_hub_offset} 0 0" rpy="0 ${pi / 2} 0"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="${arm_hub_offset} 0 0" rpy="0 ${pi / 2} 0"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="1.0" x="0.12" y="0.12" z="0.10"/>
+    </link>
+
+    <joint name="arm_shoulder_offset_joint" type="fixed">
+        <parent link="arm_yaw_link"/>
+        <child link="arm_shoulder_link"/>
+        <origin xyz="0 0 ${arm_a0}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Upper arm. -->
+    <link name="arm_upper_link">
+        <visual>
+            <origin xyz="0 ${arm_a1 / 2} 0"/>
+            <geometry>
+                <box size="0.05 ${arm_a1} 0.05"/>
+            </geometry>
+            <material name="arm_upper_color"/>
+        </visual>
+        <visual>
+            <origin xyz="0 ${arm_a1 / 2} ${0.05 + arm_link_gap}"/>
+            <geometry>
+                <box size="0.05 ${arm_a1} 0.05"/>
+            </geometry>
+            <material name="arm_upper_color"/>
+        </visual>
+        <collision>
+            <origin xyz="0 ${arm_a1 / 2} 0"/>
+            <geometry>
+                <box size="0.05 ${arm_a1} 0.05"/>
+            </geometry>
+        </collision>
+        <!-- 8 inch x 6 inch elbow hub on the +X side, same side as the
+             shoulder hub. -->
+        <visual>
+            <origin xyz="${arm_hub_offset} ${arm_a1} 0" rpy="0 ${pi / 2} 0"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="${arm_hub_offset} ${arm_a1} 0" rpy="0 ${pi / 2} 0"/>
+            <geometry>
+                <cylinder radius="${arm_hub_radius}" length="${arm_hub_length}"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="1.5" x="0.05" y="${arm_a1}" z="0.05"/>
+    </link>
+
+    <joint name="arm_shoulder_joint" type="revolute">
+        <parent link="arm_shoulder_link"/>
+        <child link="arm_upper_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="${2 * pi / 180}" upper="${178 * pi / 180}"
+               effort="100" velocity="5.0"/>
+    </joint>
+
+    <!-- Forearm. -->
+    <link name="arm_forearm_link">
+        <visual>
+            <origin xyz="0 ${arm_a2 / 2} 0"/>
+            <geometry>
+                <box size="0.045 ${arm_a2} 0.045"/>
+            </geometry>
+            <material name="arm_forearm_color"/>
+        </visual>
+        <visual>
+            <origin xyz="0 ${arm_a2 / 2} ${0.045 + arm_link_gap}"/>
+            <geometry>
+                <box size="0.045 ${arm_a2} 0.045"/>
+            </geometry>
+            <material name="arm_forearm_color"/>
+        </visual>
+        <collision>
+            <origin xyz="0 ${arm_a2 / 2} 0"/>
+            <geometry>
+                <box size="0.045 ${arm_a2} 0.045"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="1.2" x="0.045" y="${arm_a2}" z="0.045"/>
+    </link>
+
+    <joint name="arm_elbow_joint" type="revolute">
+        <parent link="arm_upper_link"/>
+        <child link="arm_forearm_link"/>
+        <origin xyz="0 ${arm_a1} 0" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="${-3 * pi / 4}" upper="${3 * pi / 4}"
+               effort="100" velocity="5.0"/>
+    </joint>
+
+    <!-- Wrist bend. -->
+    <link name="arm_wrist_bend_link">
+        <visual>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.045" length="0.09"/>
+            </geometry>
+            <material name="arm_tool_color"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.045" length="0.09"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="0.6" x="0.09" y="0.09" z="0.09"/>
+    </link>
+
+    <joint name="arm_wrist_bend_joint" type="revolute">
+        <parent link="arm_forearm_link"/>
+        <child link="arm_wrist_bend_link"/>
+        <origin xyz="0 ${arm_a2} 0" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="${-pi / 6}" upper="${pi / 6}"
+               effort="50" velocity="5.0"/>
+    </joint>
+
+    <!-- Wrist twist. -->
+    <link name="arm_wrist_twist_link">
+        <visual>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.035" length="0.08"/>
+            </geometry>
+            <material name="black"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <cylinder radius="0.035" length="0.08"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="0.4" x="0.07" y="0.07" z="0.08"/>
+    </link>
+
+    <joint name="arm_wrist_twist_joint" type="revolute">
+        <parent link="arm_wrist_bend_link"/>
+        <child link="arm_wrist_twist_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="${-pi / 2}" upper="${pi / 2}"
+               effort="50" velocity="5.0"/>
+    </joint>
+
+    <!-- Tool / gripper extension (A3). -->
+    <link name="arm_tool_link">
+        <visual>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <box size="0.04 0.04 0.04"/>
+            </geometry>
+            <material name="arm_tool_color"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0"/>
+            <geometry>
+                <box size="0.04 0.04 0.04"/>
+            </geometry>
+        </collision>
+        <xacro:arm_box_inertial mass="0.3" x="0.04" y="0.04" z="0.04"/>
+    </link>
+
+    <joint name="arm_tool_joint" type="fixed">
+        <parent link="arm_wrist_twist_link"/>
+        <child link="arm_tool_link"/>
+        <origin xyz="0 ${arm_a3} 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Gripper body is a cylinder with a three-prong claw along +Y. -->
+    <link name="arm_gripper_link">
+        <visual>
+            <origin xyz="0 ${gripper_body_length / 2} 0" rpy="${-pi / 2} 0 0"/>
+            <geometry>
+                <cylinder radius="${gripper_body_radius}" length="${gripper_body_length}"/>
+            </geometry>
+            <material name="arm_tool_color"/>
+        </visual>
+        <collision>
+            <origin xyz="0 ${gripper_body_length / 2} 0" rpy="${-pi / 2} 0 0"/>
+            <geometry>
+                <cylinder radius="${gripper_body_radius}" length="${gripper_body_length}"/>
+            </geometry>
+        </collision>
+        <xacro:arm_claw_prong x="${gripper_prong_radius}" z="0"/>
+        <xacro:arm_claw_prong x="${-gripper_prong_radius / 2}"
+                              z="${gripper_prong_radius * 0.8660254}"/>
+        <xacro:arm_claw_prong x="${-gripper_prong_radius / 2}"
+                              z="${-gripper_prong_radius * 0.8660254}"/>
+        <xacro:arm_box_inertial mass="0.25" x="0.16" y="0.28" z="0.16"/>
+    </link>
+
+    <joint name="arm_gripper_joint" type="revolute">
+        <parent link="arm_tool_link"/>
+        <child link="arm_gripper_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit lower="0.0" upper="0.5" effort="20" velocity="2.0"/>
+    </joint>
+
+    <!-- Gazebo overrides - the whole arm is red. -->
+    <gazebo reference="arm_base_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_yaw_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_shoulder_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_upper_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_forearm_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_wrist_bend_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_wrist_twist_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_tool_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+    <gazebo reference="arm_gripper_link">
+        <material>Gazebo/Red</material>
+    </gazebo>
+
+</robot>

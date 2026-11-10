@@ -44,7 +44,7 @@ To enable tracing, pass the `protocol_trace:=1` argument:
 
 ```bash
 # In simulation
-ros2 launch main simulation_launch.xml protocol_trace:=1
+ros2 launch rover_simulation simulation_launch.xml protocol_trace:=1
 
 # On hardware (SSH in and run)
 ros2 launch main main_launch.xml protocol_trace:=1
@@ -62,7 +62,7 @@ Make sure you have ROS 2 (Humble) installed, then:
 
 ```bash
 colcon build
-source source.sh
+source scripts/source.sh
 ```
 
 ## Running
@@ -86,7 +86,7 @@ ssh rovers@129.21.91.140
 Then:
 ```bash
 cd ~/ros/rovers-ros
-source source.sh
+source scripts/source.sh
 ros2 launch main main_launch.xml
 ```
 

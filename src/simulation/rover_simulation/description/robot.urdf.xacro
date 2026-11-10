@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro"  name="robot">
+
+    <xacro:arg name="robot_config" default="arm_drivebase"/>
+    <xacro:property name="robot_build" value="$(arg robot_config)"/>
+    
+    <xacro:include filename="robot_core.xacro" />
+
+    <xacro:if value="${robot_build == 'arm_drivebase'}">
+        <xacro:include filename="arm.xacro" />
+    </xacro:if>
+
+    <xacro:include filename="ros2_control.xacro" />
+
+    <xacro:include filename="lidar.xacro" />
+
+    <xacro:include filename="camera.xacro" />
+
+    
+    
+</robot>

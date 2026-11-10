@@ -9,7 +9,7 @@
 source /opt/ros/humble/setup.bash
 
 # Source your workspace setup
-source ./source.sh
+source ./scripts/source.sh
 
 # Launch ROS 2
 ros2 launch main main_launch.xml

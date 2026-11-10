@@ -1,0 +1,18 @@
+<launch>
+	<arg name="protocol_trace" default="0"></arg>
+	<arg name="robot_config" default="arm_drivebase"></arg>
+	<set_env name="ROVER_PROTOCOL_TRACE" value="$(var protocol_trace)"></set_env>
+	<node pkg="can_udp" exec="can_udp_node" name="can_udp"></node>
+	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp"></node>
+	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
+	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>
+	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
+	<node pkg="rover_simulation" exec="gazebo_bridge" name="arm_gazebo_bridge" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)">
+		<param name="randomize_start" value="true"/>
+	</node>
+	<node pkg="main" exec="master_node" name="master_node"></node>
+	<node pkg="rover_simulation" exec="sim_config_node" name="sim_config">
+		<param name="config" value="$(var robot_config)"/>
+	</node>
+	<node pkg="inverse_kinematics" exec="inverse_kinematics_node" name="inverse_kinematics" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+</launch>

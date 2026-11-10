@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:macro name="arm_control_joint" params="name">
+        <joint name="${name}">
+            <command_interface name="position"/>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+    </xacro:macro>
+
+    <ros2_control name="GazeboSystem" type="system">
+        <hardware>
+            <plugin>gazebo_ros2_control/GazeboSystem</plugin>
+        </hardware>
+        <joint name="left_front_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="velocity"/>
+            <state_interface name="position"/>
+        </joint>
+        <joint name="left_rear_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="velocity"/>
+            <state_interface name="position"/>
+        </joint>
+        <joint name="right_front_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="velocity"/>
+            <state_interface name="position"/>
+        </joint>
+        <joint name="right_rear_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="velocity"/>
+            <state_interface name="position"/>
+        </joint>
+
+        <!-- Rover arm joints (position controlled in Gazebo). -->
+        <xacro:if value="${robot_build == 'arm_drivebase'}">
+            <xacro:arm_control_joint name="arm_base_joint"/>
+            <xacro:arm_control_joint name="arm_shoulder_joint"/>
+            <xacro:arm_control_joint name="arm_elbow_joint"/>
+            <xacro:arm_control_joint name="arm_wrist_bend_joint"/>
+            <xacro:arm_control_joint name="arm_wrist_twist_joint"/>
+            <xacro:arm_control_joint name="arm_gripper_joint"/>
+        </xacro:if>
+
+    </ros2_control>
+
+    <gazebo>
+        <plugin name="gazebo_ros2_control" filename="libgazebo_ros2_control.so">
+            <parameters>$(find rover_simulation)/config/my_controllers.yaml</parameters>
+            <!-- Absolute robot_state_publisher name. The plugin node lives in
+                 /GAZEBO, so a relative lookup would resolve inside it. -->
+            <robot_param_node>/robot_state_publisher</robot_param_node>
+            <ros>
+                <!-- Every ros2_control topic is simulation-only, so keep it
+                     under /GAZEBO. The shared joint state bus stays at
+                     /GAZEBO/joint_states; the arm and drive controllers are
+                     regrouped under /GAZEBO/ARM and /GAZEBO/CHASSIS. -->
+                <namespace>GAZEBO</namespace>
+                <remapping>/GAZEBO/arm_cont/commands:=/GAZEBO/ARM/arm_cont/commands</remapping>
+                <remapping>/GAZEBO/diff_cont/cmd_vel_unstamped:=/GAZEBO/CHASSIS/diff_cont/cmd_vel_unstamped</remapping>
+                <remapping>/GAZEBO/diff_cont/cmd_vel:=/GAZEBO/CHASSIS/diff_cont/cmd_vel</remapping>
+                <remapping>/GAZEBO/diff_cont/cmd_vel_out:=/GAZEBO/CHASSIS/diff_cont/cmd_vel_out</remapping>
+                <remapping>/GAZEBO/diff_cont/odom:=/GAZEBO/CHASSIS/diff_cont/odom</remapping>
+            </ros>
+        </plugin>
+    </gazebo>
+
+
+</robot>
