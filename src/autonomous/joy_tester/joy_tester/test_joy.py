@@ -143,8 +143,7 @@ def main(args=None):
         print('Received keyboard interrupt!')
     except ExternalShutdownException:
         print('Received external shutdown request!')
-
-    print('Exiting...')
-
-    joy_tester.destroy_node()
-    rclpy.try_shutdown()
+    finally:
+        print('Exiting...')
+        joy_tester.destroy_node()
+        rclpy.try_shutdown()

@@ -91,37 +91,31 @@ class TelemetryUplink(Node):
     # ------------------------------------------------------------------
 
     def _register_subscriptions(self) -> None:
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/COLOR_SENSOR", self._life_detection, "color_sensor")
-        self._sub_bool("/ROVER/TELEMETRY/LIFE/LIMIT_SWITCH_1", self._life_detection, "limit_switch_1")
-        self._sub_bool("/ROVER/TELEMETRY/LIFE/LIMIT_SWITCH_2", self._life_detection, "limit_switch_2")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/AUGER_DEPTH", self._life_detection, "auger_depth")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/PUMP_OUTPUT_LEVEL", self._life_detection, "pump_output_level")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/SLIDE_POSITION", self._life_detection, "slide_position")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/SELECTED_TUBE", self._life_detection, "selected_tube")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/SPEC_SLIDE_POSITION", self._life_detection, "spec_slide_position")
-        self._sub_u8("/ROVER/TELEMETRY/LIFE/SPEC_COLOR_SENSOR", self._life_detection, "spec_color_sensor")
 
-        # Arm encoder values can be large, so use UInt16 instead of UInt8
-        self._sub_s16_angle("/ARM/BASE/CURR_ANGLE", self._arm_encoders, "arm_base_position")
-        self._sub_s16_angle("/ARM/SHOULDER/CURR_ANGLE", self._arm_encoders, "shoulder_position")
-        self._sub_s16_angle("/ARM/ELBOW/CURR_ANGLE", self._arm_encoders, "elbow_position")
-        self._sub_s16_angle("/ARM/WRIST_BEND/CURR_ANGLE", self._arm_encoders, "wrist_bend_position")
-        self._sub_s16_angle("/ARM/WRIST_TWIST/CURR_ANGLE", self._arm_encoders, "wrist_twist_position")
-        self._sub_s16_angle("/ARM/GRIPPER/CURR_ANGLE", self._arm_encoders, "gripper_position")
+        # Generic Subscriptions
+        self._sub_bool("/ESTOP", self._rover_estop, "rover_estop")
+        self._sub_bool("/ARM/STATE/ENABLED", self._subsystem_enabled, "arm_enabled")
+        self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/AUTO_ENABLED", self._subsystem_enabled, "auto_enabled")
+        self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/LIFE_ENABLED", self._subsystem_enabled, "life_enabled")
+        self._sub_u8("/ROVER/TELEMETRY/CONTROL_MODE", self._control_mode, "control_mode")
 
+        # Chassis Subscriptions
         self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_LEFT", self._drive_imu, "drive_speed_left")
         self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_RIGHT", self._drive_imu, "drive_speed_right")
         self._sub_u16("/ROVER/TELEMETRY/IMU/YAW", self._drive_imu, "yaw")
         self._sub_u16("/ROVER/TELEMETRY/IMU/PITCH", self._drive_imu, "pitch")
         self._sub_u16("/ROVER/TELEMETRY/IMU/ROLL", self._drive_imu, "roll")
 
-        self._sub_bool("/ARM/ENABLED", self._subsystem_enabled, "arm_enabled")
-        self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/AUTO_ENABLED", self._subsystem_enabled, "auto_enabled")
-        self._sub_bool("/ROVER/TELEMETRY/SUBSYSTEM/LIFE_ENABLED", self._subsystem_enabled, "life_enabled")
-
-        self._sub_bool("/ESTOP", self._rover_estop, "rover_estop")
-
-        self._sub_u8("/ROVER/TELEMETRY/CONTROL_MODE", self._control_mode, "control_mode")
+        # Life Detection Subscriptions
+        self._sub_bool("/LIFE/LIMIT_SWITCH_1", self._life_detection, "limit_switch_1")
+        self._sub_bool("/LIFE/LIMIT_SWITCH_2", self._life_detection, "limit_switch_2")
+        self._sub_u8("/LIFE/COLOR_SENSOR", self._life_detection, "color_sensor")
+        self._sub_u8("/LIFE/AUGER_DEPTH", self._life_detection, "auger_depth")
+        self._sub_u8("/LIFE/PUMP_OUTPUT_LEVEL", self._life_detection, "pump_output_level")
+        self._sub_u8("/LIFE/SLIDE_POSITION", self._life_detection, "slide_position")
+        self._sub_u8("/LIFE/SELECTED_TUBE", self._life_detection, "selected_tube")
+        self._sub_u8("/LIFE/SPEC_SLIDE_POSITION", self._life_detection, "spec_slide_position")
+        self._sub_u8("/LIFE/SPEC_COLOR_SENSOR", self._life_detection, "spec_color_sensor")
 
     def _sub_u8(self, topic: str, target: Dict, key: str) -> None:
         self.create_subscription(UInt8, topic, self._setter(target, key), 10)

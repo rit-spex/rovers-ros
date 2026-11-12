@@ -1,6 +1,7 @@
 import os
 import can
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
@@ -19,7 +20,8 @@ BIT_RATE = 1000000  # 1 Mbps
 
 class CAN(Node):
 
-    # This is needed as a var to shut it down early during E-stop
+    # Outgoing CAN topic subscriptions. They stay registered during E-STOP;
+    # send_msg() ignores commands while the latch is active.
     __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
 
     def __init__(self) -> None:
@@ -144,7 +146,14 @@ class JETSON_LISTENER(can.Listener):
 def main():
     rclpy.init()
     can = CAN()
-    can.run()
+    try:
+        can.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        can.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

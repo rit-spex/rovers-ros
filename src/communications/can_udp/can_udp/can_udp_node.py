@@ -1,5 +1,6 @@
 import threading
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 import rclpy.subscription
 import rclpy.publisher
@@ -18,6 +19,7 @@ import errno
 
 # this is used to package the message in certain formats
 from struct import *
+
 
 class CAN_UDP(Node):
     __address: str
@@ -122,7 +124,7 @@ class CAN_UDP(Node):
         except Exception as e:
             err = e.args
             # only error out if it wasn't from non-blocking
-            if(err[0] == errno.EWOULDBLOCK):
+            if(err and err[0] == errno.EWOULDBLOCK):
                 pass
             else:
                 self.get_logger().error(f"failed to send can udp packet: {e}")
@@ -153,19 +155,31 @@ def udp_receive_thread(node: CAN_UDP, socket: socket):
                 msg.id = message_id
                 msg.buf = buf
                 node.on_message_received(msg)
+        except BlockingIOError:
+            continue
+        except OSError:
+            break
         except Exception as e:
             err = e.args
             # only error out if it wasn't from non-blocking
-            if(err[0] == errno.EWOULDBLOCK):
+            if(err and err[0] == errno.EWOULDBLOCK):
                 pass
-            else:
+            elif rclpy.ok():
                 node.get_logger().info(f"failed to receive can udp packet: {e}")
 
 
 def main():
     rclpy.init()
     can_udp = CAN_UDP()
-    can_udp.run()
+    try:
+        can_udp.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        can_udp.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()

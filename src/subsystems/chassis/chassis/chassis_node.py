@@ -5,6 +5,7 @@ from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, Subsys
 from constants.can_encoding import TeensyCommunication
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import Can
@@ -85,7 +86,14 @@ class Chassis(Node):
 def main():
     rclpy.init()
     chassis = Chassis()
-    chassis.run()
+    try:
+        chassis.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        chassis.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

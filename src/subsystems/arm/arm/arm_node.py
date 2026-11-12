@@ -9,10 +9,10 @@ from constants.CAN_constants import (
 )
 from constants.CAN_structs import Signal, Message
 from custom_interfaces.msg import Can
-from custom_interfaces.msg import ArmWrist
 
 from numpy import uint8, int32
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
@@ -778,4 +778,11 @@ class Arm(Node):
 def main():
     rclpy.init()
     arm = Arm()
-    arm.run()
+    try:
+        arm.run()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        arm.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
