@@ -66,12 +66,9 @@ class Basestation(Node):
             qos_profile=10,
         )
 
-        self.create_subscription(
-            msg_type=Bool,
-            topic="/ESTOP",
-            callback=self.__on_estop_received,
-            qos_profile=10,
-        )
+    # Protocol messages that are decoded but intentionally not exposed as
+    # ROS topics. The N64 controller is not used by the rover stack.
+    DISABLED_MESSAGES = {"n64"}
 
     def _create_publishers_from_protocol(self) -> None:
         for message_id, message in self.__encoder.get_messages().items():
@@ -143,10 +140,6 @@ class Basestation(Node):
             f"protocol trace {'enabled' if self._protocol_trace else 'disabled'}"
         )
         rclpy.spin(self)
-
-    def __on_estop_received(self, _msg: Bool):
-        self.get_logger().info("E-STOP received, shutting down basestation...")
-        rclpy.shutdown()
 
 
 def main():

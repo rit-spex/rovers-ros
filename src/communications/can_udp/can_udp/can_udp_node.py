@@ -7,7 +7,12 @@ import rclpy.publisher
 
 from custom_interfaces.msg import Can
 
-from constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.CAN_constants import (
+    TEENSY_CAN_MESSAGES,
+    CAN_MESSAGE_IDS,
+    SAFE_STOP_MESSAGE_IDS,
+    TEENSY_ESTOP_TOPIC,
+)
 from constants.CAN_structs import TX_TOPIC_NAME
 from constants.can_encoding import TeensyCommunication
 
@@ -31,7 +36,8 @@ class CAN_UDP(Node):
     # Stored as Publishers[message_id]
     __publishers: dict[int, rclpy.publisher.Publisher]
 
-    # This is needed as a var to shut it down early during E-stop
+    # Outgoing CAN topic subscriptions. They stay registered during E-STOP;
+    # send_msg() ignores commands while the latch is active.
     __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
 
     def __init__(self) -> None:
@@ -42,9 +48,16 @@ class CAN_UDP(Node):
         self.__send_port = 8000
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
+        self.__estop = False
 
         self.__publishers = {}
         self.__can_tx_subscriptions = {}
+
+        # E_STOP is bidirectional on the same CAN ID. Incoming frames are
+        # republished here so master_node can latch a Teensy-side E-STOP.
+        self.__estop_publisher = self.create_publisher(
+            Can, TEENSY_ESTOP_TOPIC, 10
+        )
 
         for (id, message) in TEENSY_CAN_MESSAGES.items():
             if(message.isforJetson):
@@ -70,40 +83,66 @@ class CAN_UDP(Node):
             qos_profile=10,
         )
 
-        # 1. Create and start the receiver thread for udp messages
-        receiver_thread = threading.Thread(target=udp_receive_thread, args=(self, self.__socket))
-        receiver_thread.start()
-
-        self.run()
+        self.__stop = threading.Event()
+        self.__receiver_thread = None
 
     def __on_estop_received(self, msg: Bool):
-        self.get_logger().info("E-STOP received, shutting down can_comms_node")
+        # /ESTOP is level-triggered. Latch outbound commands while active,
+        # send one round of safe defaults, and keep the node alive so it can
+        # resume when E-STOP clears.
+        if msg.data:
+            if self.__estop:
+                return
+            self.__estop = True
+            self.get_logger().info(
+                "E-STOP received, sending safe CAN defaults")
+            self.__send_safe_stop()
+        else:
+            if not self.__estop:
+                return
+            self.__estop = False
+            self.__send_estop_clear()
+            self.get_logger().info(
+                "E-STOP cleared, CAN output re-enabled")
 
-        # First turn off the subscription so no new messages can be sent
-        for subscription in self.__can_tx_subscriptions.values():
-            self.destroy_subscription(subscription)
-
-        self.get_logger().info("CAN_node: sending default messages before shutting down")
-        # clear out all of the messages with default values
-        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
-            # Set all of the value to default
+    def __send_safe_stop(self, include_estop: bool = True):
+        """Send only outgoing messages whose defaults are safe stop values."""
+        for message_id in SAFE_STOP_MESSAGE_IDS:
+            if not include_estop and message_id == CAN_MESSAGE_IDS.E_STOP:
+                continue
+            message = TEENSY_CAN_MESSAGES[message_id]
             message.reset()
             can_packet = TeensyCommunication.encode_can_message(message)
             if can_packet is not None:
-                self.send_msg(can_packet)
+                self.__send_can(can_packet)
 
-        self.__socket.close()
-        rclpy.shutdown()
+    def __send_estop_clear(self):
+        """Tell the Teensy the E-STOP condition has cleared."""
+        message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.E_STOP]
+        message.signals["E_STOP"].set_value(0)
+        can_packet = TeensyCommunication.encode_can_message(message)
+        if can_packet is not None:
+            self.__send_can(can_packet)
 
     def on_message_received(self, msg: Can):
         try:
+            if msg.id == CAN_MESSAGE_IDS.E_STOP:
+                self.__estop_publisher.publish(msg)
+                self.get_logger().info(
+                    "Hardware E-STOP frame received from UDP")
+                return
             self.get_logger().debug(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
             self.__publishers[msg.id].publish(msg)
         except Exception as e:
             self.get_logger().error(f"failed to publish can message: {e}")
 
-
     def send_msg(self, msg: Can):
+        """Callback for outgoing CAN topics; ignored while E-STOP is latched."""
+        if self.__estop:
+            return
+        self.__send_can(msg)
+
+    def __send_can(self, msg: Can):
         """
         pack and send the message to the teensy
         """
@@ -137,10 +176,34 @@ class CAN_UDP(Node):
         # make it so it will not stop the code when requesting a read
         self.__socket.setblocking(False)
 
+        self.__receiver_thread = threading.Thread(
+            target=udp_receive_thread,
+            args=(self, self.__socket, self.__stop),
+            daemon=True,
+        )
+        self.__receiver_thread.start()
+
         rclpy.spin(self)
 
-def udp_receive_thread(node: CAN_UDP, socket: socket):
-    while rclpy.ok():
+    def destroy_node(self) -> bool:
+        # Best-effort actuator safe state while the socket is still open.
+        try:
+            self.__send_safe_stop(include_estop=False)
+        except Exception:
+            pass
+        self.__stop.set()
+        try:
+            self.__socket.close()
+        except OSError:
+            pass
+        if self.__receiver_thread is not None:
+            self.__receiver_thread.join(timeout=1.0)
+            self.__receiver_thread = None
+        return super().destroy_node()
+
+
+def udp_receive_thread(node: CAN_UDP, socket: socket, stop: threading.Event):
+    while rclpy.ok() and not stop.is_set():
         try:
             data, addr = socket.recvfrom(1024)
             if data:

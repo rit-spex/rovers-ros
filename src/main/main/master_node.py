@@ -14,7 +14,15 @@ from custom_interfaces.msg import Can
 
 from constants.CommandCodes import CONSTANTS
 from constants.can_encoding import TeensyCommunication
-from constants.CAN_constants import CAN_MESSAGE_IDS, TEENSY_CAN_MESSAGES, ArmState, ArmDirection, Subsystems_Names, SubsystemsIDs
+from constants.CAN_constants import (
+    CAN_MESSAGE_IDS,
+    TEENSY_CAN_MESSAGES,
+    TEENSY_ESTOP_TOPIC,
+    ArmState,
+    ArmDirection,
+    Subsystems_Names,
+    SubsystemsIDs,
+)
 from constants.CAN_structs import Signal, Message
 import time
 
@@ -40,6 +48,8 @@ class Master(Node):
     __last_basestation_heartbeat_time: UInt16
     __current_basestation_heartbeat_time: UInt16
     __basestation_recieved_heartbeat: bool
+    __heartbeat_estop: bool
+    __hardware_estop: bool
 
     # heartbeat tracking
     __last_heartbeat_time: int
@@ -66,6 +76,9 @@ class Master(Node):
         self.__last_basestation_heartbeat_time = UInt16()
         self.__current_basestation_heartbeat_time = UInt16()
         self.__basestation_recieved_heartbeat = False
+        # Fail safe: stay latched until the basestation proves it is alive.
+        self.__heartbeat_estop = True
+        self.__hardware_estop = False
 
         self.__last_heartbeat_time = 0
         self.__current_heartbeat_time = 0
@@ -93,13 +106,13 @@ class Master(Node):
         )
         self.__auto_state_publisher = self.create_publisher(
             msg_type=UInt8,
-            topic="/ROVER/AUTO_STATE",
+            topic="/ROVER/TELEMETRY/AUTO_STATE",
             qos_profile=10,
         )
 
         self.__chassis_node_enable_publisher = self.create_publisher(
             msg_type=Bool,
-            topic="/CHASSIS/ENABLED",
+            topic="/ROVER/TELEMETRY/SUBSYSTEM/CHASSIS_ENABLED",
             qos_profile=10,
         )
 
@@ -111,7 +124,7 @@ class Master(Node):
 
         self.__arm_node_enable_publisher = self.create_publisher(
             msg_type=Bool,
-            topic="/ARM/ENABLED",
+            topic="/ARM/STATE/ENABLED",
             qos_profile=10,
         )
 
@@ -123,7 +136,7 @@ class Master(Node):
 
         self.__science_node_enable_publisher = self.create_publisher(
             msg_type=Bool,
-            topic="/SCIENCE/ENABLED",
+            topic="/ROVER/TELEMETRY/SUBSYSTEM/SCIENCE_ENABLED",
             qos_profile=10,
         )
 
@@ -142,7 +155,10 @@ class Master(Node):
         # create subscriptions for basestation heartbeat and quit messages
         self.create_subscription(
             msg_type=Bool,
-            topic="/BASESTATION/" + CONSTANTS.QUIT.NAME + "/" + CONSTANTS.QUIT.NAME,
+            topic="/BASESTATION/"
+            + CONSTANTS.QUIT.NAME
+            + "/"
+            + CONSTANTS.QUIT.QUIT_MESSAGE,
             callback=self.__on_quit_received,
             qos_profile=10,
         )
@@ -162,12 +178,16 @@ class Master(Node):
             callback=self.__on_auto_state_received,
             qos_profile=10,
         )
+
+        # Teensy-side hardware E-STOP. E_STOP shares one CAN ID in both
+        # directions; the transport republishes inbound frames here.
         self.create_subscription(
-            msg_type=Bool,
-            topic="/ESTOP",
-            callback=self.__on_estop_received,
+            msg_type=Can,
+            topic=TEENSY_ESTOP_TOPIC,
+            callback=self.__on_new_CAN_message_received,
             qos_profile=10,
         )
+
         self.create_timer(
             timer_period_sec=timeout_duration,
             callback=self.__check_timeout,
@@ -183,19 +203,30 @@ class Master(Node):
                     qos_profile=10
                 )
 
+        # Publish the fail-safe state before the startup delay so other nodes
+        # latch immediately instead of waiting for the first timer tick.
+        self.__publish_estop()
         # delay start up to ensure everything else is up and running before the master starts sending messages to the teensy
         time.sleep(DELAY_STARTUP_SEC)
+        self.get_logger().info(
+            "E-STOP latched until the basestation heartbeat is received")
 
     def __check_timeout(self) -> None:
-        # check for basestation heartbeat timeout
+        # check for an existing basestation heartbeat timeout
         if self.__basestation_recieved_heartbeat:
             if self.__current_basestation_heartbeat_time == self.__last_basestation_heartbeat_time:
-                self.get_logger().info("Heartbeat timeout detected")
-                estop_msg = Bool()
-                estop_msg.data = True
-                self.__estop_publisher.publish(estop_msg)
+                if not self.__heartbeat_estop:
+                    self.get_logger().info("Heartbeat timeout detected")
+                    self.__heartbeat_estop = True
             else:
                 self.__last_basestation_heartbeat_time = self.__current_basestation_heartbeat_time
+                # If disabled, clear the heartbeat e-stop
+                if self.__heartbeat_estop:
+                    self.__heartbeat_estop = False
+                    # A hardware e-stop stays latched until the node restarts.
+                    if not self.__hardware_estop:
+                        self.get_logger().info(
+                            "Heartbeat restored, clearing e-stop")
 
         # check for chassis command timeout
         if self.__chassis_teensy_enabled:
@@ -238,9 +269,23 @@ class Master(Node):
         if can_packet is not None:
             self.__ros_teensy_publisher.publish(can_packet)
 
+        # Republish every tick so nodes that start after a transition still
+        # see the current level.
+        self.__publish_estop()
+
+    def __publish_estop(self) -> None:
+        """Publish the current level-triggered E-STOP state."""
+        self.__estop_publisher.publish(
+            Bool(data=self.__heartbeat_estop or self.__hardware_estop))
+
     def __on_quit_received(self, msg: Bool):
         self.get_logger().info("Quit message received, forwarding e-stop ...")
-        self.__estop_publisher.publish(msg)
+        if msg.data:
+            # A deliberate quit is treated like a lost heartbeat: a new
+            # basestation session can clear it by sending a heartbeat.
+            self.__heartbeat_estop = True
+        # Never let a quit-clear override a latched hardware e-stop.
+        self.__publish_estop()
 
     def __on_basestation_heartbeat_received(self, msg: UInt16):
         # self.get_logger().info("Heartbeat message received")
@@ -260,10 +305,15 @@ class Master(Node):
 
         # if e-stop message, forward it to the e-stop topic
         if(can_message.id == CAN_MESSAGE_IDS.E_STOP):
-            self.get_logger().info("E-STOP message received from can_comms, forwarding ...")
-            estop_msg = Bool()
-            estop_msg.data = True
-            self.__estop_publisher.publish(estop_msg)
+            if can_message.signals["E_STOP"].value:
+                if not self.__hardware_estop:
+                    self.get_logger().info(
+                        "Hardware E-STOP received; latching until restart")
+                    self.__hardware_estop = True
+            elif self.__hardware_estop:
+                self.get_logger().info(
+                    "Hardware E-STOP clear received; staying latched until restart")
+            return
         elif(can_message.id == CAN_MESSAGE_IDS.TEENSY_HEARTBEAT):
             try:
                 source_signal = can_message.signals["source"]
@@ -328,13 +378,16 @@ class Master(Node):
         else:
             self.get_logger().error(f"Failed to encode CAN message for {message.name}")
 
-    def __on_estop_received(self, msg: Bool):
-        self.get_logger().info("E-Stop message received, shutting down ...")
-
-        rclpy.shutdown()
-
     def __on_auto_state_received(self, msg: UInt8):
         self.__auto_state_publisher.publish(UInt8(data=msg.data))
+
+    def destroy_node(self):
+        # Best effort: tell the rest of the stack to stop as we go down.
+        try:
+            self.__estop_publisher.publish(Bool(data=True))
+        except Exception:
+            pass
+        return super().destroy_node()
 
     def run(self):
         self.get_logger().info("starting master node ...")

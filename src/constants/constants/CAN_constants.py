@@ -9,7 +9,7 @@
 # last modified : 12/4/2025 - Tyler
 # ------------------------------------------------------------------
 from constants.CAN_enums import CAN_MESSAGE_IDS, ArmState, ArmDirection, SubsystemsIDs
-from constants.CAN_structs import DATA_TYPE, Signal, Message
+from constants.CAN_structs import DATA_TYPE, Signal, Message, RX_TOPIC_NAME
 
 
 # Define subsystem names
@@ -493,3 +493,34 @@ TEENSY_CAN_MESSAGES = {
         isforJetson=True,
     ),
 }
+
+# Hardware E-STOP frames arrive on the same CAN ID as the outgoing software
+# E-STOP command. The transports republish inbound frames on this RX topic so
+# master_node can distinguish a Teensy-side E-STOP from its own output.
+TEENSY_ESTOP_TOPIC = (
+    RX_TOPIC_NAME + "/" + Subsystems_Names.GENERAL + "/E_STOP"
+)
+
+# Outgoing messages that are safe to send with their default values during an
+# E-STOP. Deliberately excludes ROS_HEARTBEAT (it would tell the Teensy that
+# ROS is still healthy) and motion commands (their defaults are positions,
+# not stops).
+SAFE_STOP_MESSAGE_IDS = (
+    CAN_MESSAGE_IDS.E_STOP,
+    CAN_MESSAGE_IDS.ENABLE_CHASSIS,
+    CAN_MESSAGE_IDS.DRIVE_POWER,
+    CAN_MESSAGE_IDS.ENABLE_ARM,
+    CAN_MESSAGE_IDS.SEND_BASE,
+    CAN_MESSAGE_IDS.SEND_SHOULDER,
+    CAN_MESSAGE_IDS.SEND_ELBOW,
+    CAN_MESSAGE_IDS.ENABLE_SCIENCE,
+    CAN_MESSAGE_IDS.ENABLE_DRILL,
+    CAN_MESSAGE_IDS.ENABLE_PUMP1,
+    CAN_MESSAGE_IDS.ENABLE_PUMP2,
+    CAN_MESSAGE_IDS.ENABLE_PUMP3,
+    CAN_MESSAGE_IDS.ENABLE_PUMP4,
+    CAN_MESSAGE_IDS.ENABLE_FLOROMETER_MICRO_PUMP,
+    CAN_MESSAGE_IDS.ENABLE_PRIMER,
+    CAN_MESSAGE_IDS.ENABLE_VIBRATOR,
+    CAN_MESSAGE_IDS.MOVE_SOLENOID,
+)

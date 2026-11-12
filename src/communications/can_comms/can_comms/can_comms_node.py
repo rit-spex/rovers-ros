@@ -6,7 +6,12 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
 
-from constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.CAN_constants import (
+    TEENSY_CAN_MESSAGES,
+    CAN_MESSAGE_IDS,
+    SAFE_STOP_MESSAGE_IDS,
+    TEENSY_ESTOP_TOPIC,
+)
 from constants.can_encoding import TeensyCommunication
 
 import rclpy.publisher
@@ -23,18 +28,23 @@ class CAN(Node):
     # Outgoing CAN topic subscriptions. They stay registered during E-STOP;
     # send_msg() ignores commands while the latch is active.
     __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
+    __notifier: can.Notifier | None
 
     def __init__(self) -> None:
         super().__init__("CAN_node")
+        self.__estop = False
         self.reset_network()
 
         can.rc["interface"] = "socketcan"
         can.rc["bitrate"] = BIT_RATE
 
+        # Do not loop our own outgoing frames back as hardware feedback.
+        # E_STOP shares an ID in both directions, so echo would look like a
+        # Teensy-side E-STOP.
         self.bus = can.Bus(
-            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True
+            CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=False
         )
-        can.Notifier(self.bus, [JETSON_LISTENER(self)])
+        self.__notifier = can.Notifier(self.bus, [JETSON_LISTENER(self)])
 
         self.__can_tx_subscriptions = {}
 
@@ -62,29 +72,54 @@ class CAN(Node):
         os.system("./src/communications/can_comms/can_comms/reset_can.zsh")
 
     def __on_estop_received(self, msg: Bool):
-        self.get_logger().info("E-STOP received, shutting down can_comms_node")
+        # /ESTOP is level-triggered. Latch outbound commands while active,
+        # send one round of safe defaults, and keep the node alive so it can
+        # resume when E-STOP clears.
+        if msg.data:
+            if self.__estop:
+                return
+            self.__estop = True
+            self.get_logger().info(
+                "E-STOP received, sending safe CAN defaults")
+            self.__send_safe_stop()
+            self.bus.flush_tx_buffer()
+        else:
+            if not self.__estop:
+                return
+            self.__estop = False
+            self.__send_estop_clear()
+            self.get_logger().info(
+                "E-STOP cleared, CAN output re-enabled")
 
-        # First turn off the subscriptions so no new messages can be sent
-        for subscription in self.__can_tx_subscriptions.values():
-            self.destroy_subscription(subscription)
+    def __send_safe_stop(self, include_estop: bool = True):
+        """Send only outgoing messages whose defaults are safe stop values.
 
-        self.get_logger().info(
-            "CAN_node: sending default messages before shutting down"
-        )
-        # clear out all of the messages with default values
-        for message_id, message in TEENSY_CAN_MESSAGES.items():
-            # Set all of the value to default
+        On shutdown ``include_estop`` is false so stopping the process does
+        not leave the Teensy latched in its own E-STOP state.
+        """
+        for message_id in SAFE_STOP_MESSAGE_IDS:
+            if not include_estop and message_id == CAN_MESSAGE_IDS.E_STOP:
+                continue
+            message = TEENSY_CAN_MESSAGES[message_id]
             message.reset()
             can_packet = TeensyCommunication.encode_can_message(message)
             if can_packet is not None:
-                self.send_msg(can_packet)
+                self.__send_can(can_packet)
 
-        # Flush all of the messages before shutting down
-        self.bus.flush_tx_buffer()
-        self.bus.shutdown()
-        rclpy.shutdown()
+    def __send_estop_clear(self):
+        """Tell the Teensy the E-STOP condition has cleared."""
+        message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.E_STOP]
+        message.signals["E_STOP"].set_value(0)
+        can_packet = TeensyCommunication.encode_can_message(message)
+        if can_packet is not None:
+            self.__send_can(can_packet)
 
     def send_msg(self, msg: Can):
+        if self.__estop:
+            return
+        self.__send_can(msg)
+
+    def __send_can(self, msg: Can):
         self.get_logger().info(
             f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
@@ -95,6 +130,24 @@ class CAN(Node):
             self.bus.send(bus_msg)
         except Exception as e:
             self.get_logger().info(f"Failed to send message: {e}")
+
+    def destroy_node(self):
+        # Best-effort actuator safe state while the bus is still open.
+        try:
+            self.__send_safe_stop(include_estop=False)
+        except Exception:
+            pass
+        if self.__notifier is not None:
+            try:
+                self.__notifier.stop()
+            except Exception:
+                pass
+            self.__notifier = None
+        try:
+            self.bus.shutdown()
+        except Exception:
+            pass
+        return super().destroy_node()
 
     def run(self):
         rclpy.spin(self)
@@ -112,6 +165,12 @@ class JETSON_LISTENER(can.Listener):
 
         self.__publishers = {}
 
+        # E_STOP is bidirectional on the same CAN ID. Incoming frames are
+        # republished here so master_node can latch a Teensy-side E-STOP.
+        self.__estop_publisher = self.__node.create_publisher(
+            msg_type=Can, topic=TEENSY_ESTOP_TOPIC, qos_profile=10
+        )
+
         # This is for messages coming in
         for id, message in TEENSY_CAN_MESSAGES.items():
             if not message.isforJetson:
@@ -122,6 +181,16 @@ class JETSON_LISTENER(can.Listener):
             )
 
     def on_message_received(self, msg: can.Message) -> None:
+        if msg.arbitration_id == CAN_MESSAGE_IDS.E_STOP:
+            buf = [0] * 8
+            for i in range(msg.dlc):
+                buf[i] = msg.data[i]
+            self.__estop_publisher.publish(Can(id=msg.arbitration_id, buf=buf))
+            self.__node.get_logger().info(
+                "Hardware E-STOP frame received from CAN"
+            )
+            return
+
         if msg.arbitration_id in self.__publishers:
             buf = [0] * 8  # Initialize buffer with 8 zeros
             for i in range(msg.dlc):

@@ -39,6 +39,7 @@ class StatusLED(Node):
 
         # requires some default value
         self.__led_status = False
+        self.__estop = False
 
         self.create_subscription(
             msg_type=Bool,
@@ -55,6 +56,9 @@ class StatusLED(Node):
     def __flicker_led(self):
         if not self._gpio_enabled:
             return
+        # Keep the LED solid while E-STOP is latched.
+        if self.__estop:
+            return
         # self.get_logger().info("flicker_led")
         if self.__led_status:
             self.__led_status = False
@@ -64,13 +68,21 @@ class StatusLED(Node):
             GPIO.output(LED_PIN, GPIO.HIGH)  # Turn on LED to indicate live jetson
 
     def __on_estop_received(self, msg: Bool):
-        if not msg.data:
-            return
-        self.get_logger().info("E-STOP received, stopping status LED...")
-        self.__led_status = True
-        if self._gpio_enabled:
-            GPIO.output(LED_PIN, GPIO.HIGH)  # Turn the LED solid to indicate e-stop
-        rclpy.shutdown()
+        # /ESTOP is level-triggered; the node stays alive so the LED can
+        # return to normal heartbeat flashing after the E-STOP clears.
+        if msg.data:
+            if self.__estop:
+                return
+            self.__estop = True
+            self.get_logger().info("E-STOP received, holding status LED solid")
+            self.__led_status = True
+            if self._gpio_enabled:
+                GPIO.output(LED_PIN, GPIO.HIGH)
+        else:
+            if not self.__estop:
+                return
+            self.__estop = False
+            self.get_logger().info("E-STOP cleared, resuming status LED")
 
     def destroy_node(self):
         if self._gpio_enabled:

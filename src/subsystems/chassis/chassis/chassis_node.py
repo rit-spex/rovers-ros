@@ -25,6 +25,7 @@ class Chassis(Node):
 
     def __init__(self):
         super().__init__("chassis_node")
+        self.__estop = False
 
         self.__publishers = {}
         for (message_id, message) in TEENSY_CAN_MESSAGES.items():
@@ -53,29 +54,58 @@ class Chassis(Node):
         self.__drive_power_can_message = TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS.DRIVE_POWER]
 
     def __LY_callback(self, msg: Float32):
+        if self.__estop:
+            return
         self.__LY_value = msg.data
         self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
-        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
-        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
+        self.__publish_drive_power()
         self.get_logger().info(f"LY_callback message: {msg}")
         self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
 
     def __RY_callback(self, msg: Float32):
+        if self.__estop:
+            return
         self.__RY_value = msg.data
         self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
-        can_packet = TeensyCommunication.encode_can_message(self.__drive_power_can_message)
-        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)        
-        # self.get_logger().info(f"RY_callback message: {msg}")
-        # self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
+        self.__publish_drive_power()
+
+    def __publish_drive_power(self):
+        can_packet = TeensyCommunication.encode_can_message(
+            self.__drive_power_can_message)
+        self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
 
     def __on_estop_received(self, msg: Bool):
-        self.get_logger().info("E-STOP received, stopping chassis...")
-        # self.__LY_value = 0
-        # self.__RY_value = 0
-        # self.__LY_Publisher.publish(self.__LY_value)
-        # self.__RY_Publisher.publish(self.__RY_value)
+        # /ESTOP is level-triggered. On TRUE, zero the drive command and
+        # ignore joystick input. On FALSE, resume accepting commands. The
+        # node must stay alive so the rover can recover.
+        if msg.data:
+            if self.__estop:
+                return
+            self.__estop = True
+            self.get_logger().info("E-STOP received, stopping chassis...")
+            self.__LY_value = 0.0
+            self.__RY_value = 0.0
+            self.__drive_power_can_message.signals["left"].set_value(0.0)
+            self.__drive_power_can_message.signals["right"].set_value(0.0)
+            self.__publish_drive_power()
+        else:
+            if not self.__estop:
+                return
+            self.__estop = False
+            self.get_logger().info(
+                "E-STOP cleared, chassis commands re-enabled")
 
-        rclpy.shutdown()
+    def destroy_node(self):
+        # Best effort: leave the drive at zero if this node goes down alone.
+        try:
+            self.__LY_value = 0.0
+            self.__RY_value = 0.0
+            self.__drive_power_can_message.signals["left"].set_value(0.0)
+            self.__drive_power_can_message.signals["right"].set_value(0.0)
+            self.__publish_drive_power()
+        except Exception:
+            pass
+        return super().destroy_node()
 
     def run(self):
         self.get_logger().info("starting chassis...")

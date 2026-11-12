@@ -7,6 +7,10 @@
 twist_mux:
   ros__parameters:
     topics:
+      estop:
+        topic: /GAZEBO/CHASSIS/diff_cont/cmd_vel_estop
+        timeout: 0.5
+        priority: 255
       navigation:
         topic: /cmd_vel
         timeout: 0.5

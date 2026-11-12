@@ -31,6 +31,7 @@ setup(
         'console_scripts': [
             'gazebo_bridge = rover_simulation.gazebo_bridge:main',
             'sim_config_node = rover_simulation.sim_config_node:main',
+            'sim_estop_gate = rover_simulation.sim_estop_gate:main',
         ],
     },
 )

@@ -65,9 +65,11 @@ Use the workspace entry point:
 ./scripts/sim.sh view      # RViz view, once the stack is running
 ```
 
-`launch_sim.launch.py` starts Gazebo, the robot state publisher, and the
-controllers. `simulation_launch.xml` starts the simulated rover nodes
-(`xbee_udp`, `can_udp`, chassis, arm bridge, IK, etc.).
+`launch_sim.launch.py` starts Gazebo, the robot state publisher, the
+controllers, and `sim_estop_gate`. The gate holds the simulated diff drive at
+zero through `twist_mux` while `/ESTOP` is active. `simulation_launch.xml`
+starts the simulated rover nodes (`xbee_udp`, `can_udp`, chassis, arm bridge,
+IK, etc.).
 
 ## Robot configuration
 
@@ -97,6 +99,10 @@ ros2 launch rover_simulation launch_sim.launch.py robot_config:=arm_drivebase
 
 The default is saved in `~/.config/rovers-ros/sim_config`. The Gazebo
 **Simulation Control** panel can change it and restart the simulation.
+
+`master_node` starts with E-STOP latched until it receives a basestation
+heartbeat. `sim.sh start` runs the basestation, so it clears normally;
+`sim.sh stack` alone stays stopped until a heartbeat is published.
 
 ## Keyboard
 

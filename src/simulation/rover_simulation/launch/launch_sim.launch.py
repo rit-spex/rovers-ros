@@ -140,6 +140,14 @@ def generate_launch_description():
             remappings=[('/cmd_vel_out','/GAZEBO/CHASSIS/diff_cont/cmd_vel_unstamped')]
         )
 
+    # Highest-priority twist_mux input, active only while /ESTOP is latched.
+    estop_gate = Node(
+            package='rover_simulation',
+            executable='sim_estop_gate',
+            name='sim_estop_gate',
+            parameters=[{'use_sim_time': use_sim_time}],
+        )
+
     # Launch them all!
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -168,4 +176,5 @@ def generate_launch_description():
         lidar_transform,
         points_2_scan,
         twist_mux,
+        estop_gate,
     ])
