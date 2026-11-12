@@ -82,7 +82,7 @@ build_workspace() {
     colcon build \
         --packages-select \
         constants custom_interfaces \
-        basestation can_udp xbee_udp chassis arm main inverse_kinematics \
+        basestation can_udp xbee_udp chassis arm main \
         rover_simulation gazebo_sim_control pointcloud_to_laserscan \
         pathfinding \
         --symlink-install || return 1
