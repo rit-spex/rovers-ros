@@ -1,0 +1,16 @@
+[Unit]
+Description=SPEX rover ROS 2 stack
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROS_WS@
+Environment=HOME=@HOME@
+ExecStart=/bin/bash @ROS_WS@/scripts/autoboot/autoboot.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
