@@ -1,16 +1,17 @@
 import os
 import can
-import gpiod
+
+# import gpiod
 import time
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
-BIT_RATE = 500000
+BIT_RATE = 1000000
 
 
 def reset_network():
     os.system("sudo ifconfig can0 down")
-    os.system("sudo ip link set can0 up type can bitrate 500000")
+    os.system("sudo ip link set can0 up type can bitrate 1000000")
     os.system("sudo ip link set can0 up")
 
 
@@ -47,9 +48,10 @@ def can_rx_loop(bus: can.bus.BusABC):
 
 
 def main():
-    reset_network()
+    # reset_network()
     can.util.set_logging_level("info")
-    bus = can.Bus(CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=True)
+    bus = can.Bus(CHANNEL, INTERFACE, bitrate=BIT_RATE, receive_own_messages=False)
+    print(bus.state)
 
     while True:
         can_tx(bus, 3)

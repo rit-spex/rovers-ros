@@ -1,0 +1,8 @@
+# Opens a PR here whenever the rovers-protocol submodule falls behind its
+# main branch.
+version: 2
+updates:
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "daily"

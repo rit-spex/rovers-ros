@@ -4,3 +4,20 @@ build
 install
 log
 poetry.lock
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+
+# Python packaging
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+
+# Pytest cache
+.pytest_cache/
