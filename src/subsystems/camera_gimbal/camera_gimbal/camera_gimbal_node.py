@@ -1,12 +1,12 @@
 from typing import Any
-from constants.CAN_Constants import TOPICS
-from constants.CommandCodes import CONSTANTS
+# from constants.CAN_Constants import TOPICS
+# from constants.CommandCodes import CONSTANTS
 
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from std_msgs.msg import Bool, Float32, Float23MultiArray, UInt8MultiArray, Int8, Int16, Int32
-from Jetson.
+from std_msgs.msg import Bool, Float32, Float32MultiArray, UInt8MultiArray, Int8, Int16, Int32
+# from Jetson.
 from STorM32_lib import *
 
 class CameraGimbal(Node):
@@ -34,12 +34,12 @@ class CameraGimbal(Node):
         # Start serial
         ser = serial.Serial(UART_port, baud)
 
+        # Initialize STorM32 command object
+        self.storm = cSTorM32RcCmd(ser=ser)
+
         # Set initial angles
         self.reset_angles()
         self.angles = cCMD_SETANGLES(self.ser, self.pitch_deg, self.roll_deg, self.yaw_deg)
-
-        # Initialize STorM32 command object
-        self.storm = cSTorM32RcCmd(ser=ser)
 
         self.timer=self.create_timer(0.1, self.timer_callback)
 
@@ -64,7 +64,7 @@ class CameraGimbal(Node):
             qos_profile=10,
         )
 
-    def timer_callback(self):
+    # def timer_callback(self):
         # Update angles
         # self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
 
@@ -97,8 +97,9 @@ class CameraGimbal(Node):
         # Handle received angles 
         self.pitch_deg, self.roll_deg, self.yaw_deg = self.angles.getPayload()
         self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
-        self.update_angles(msg.data[0], msg.data[1], msg.data[2])
         self.get_logger().debug(f"Sent angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
+        self.update_angles(msg.data[0], msg.data[1], msg.data[2])
+        self.get_logger().debug(f"Recieved angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping status LED...")
