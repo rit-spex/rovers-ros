@@ -1,0 +1,3 @@
+<launch>
+	<node pkg="camera_gimbal" exec="camera_gimbal_node" name="camera_gimbal"></node>
+</launch>
