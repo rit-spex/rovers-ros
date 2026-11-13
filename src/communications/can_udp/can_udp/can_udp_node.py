@@ -60,7 +60,7 @@ class CAN_UDP(Node):
                         callback=self.send_msg,
                         qos_profile=10,
                     )
-        
+
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
