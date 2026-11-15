@@ -18,7 +18,6 @@ class Subsystems_Names:
     CHASSIS = "CHASSIS"
     ARM = "ARM"
     SCIENCE = "SCIENCE"
-    ODRIVE = "ODRIVE"
 
 
 # Define data types for can bus communication
@@ -69,16 +68,6 @@ TEENSY_CAN_MESSAGES = {
         subsystem=Subsystems_Names.CHASSIS,
         name="ENABLE_CHASSIS",
         signals={"enable": Signal(DATA_TYPES.UINT_8, 0)},
-        isforJetson=False,
-    ),
-    CAN_MESSAGE_IDS.DRIVE_POWER: Message(
-        id=CAN_MESSAGE_IDS.DRIVE_POWER,
-        subsystem=Subsystems_Names.CHASSIS,
-        name="Drive_Power",
-        signals={
-            "left": Signal(DATA_TYPES.FLOAT_32, 0),
-            "right": Signal(DATA_TYPES.FLOAT_32, 0),
-        },
         isforJetson=False,
     ),
     CAN_MESSAGE_IDS.ENABLE_ARM: Message(
@@ -505,22 +494,34 @@ def generate_odrive_can_msgs():
             ODRIVE_CAN_MESSAGES[ODRIVE_MESSAGE_IDS(id)] = Message(
                 id=ODRIVE_MESSAGE_IDS(id),
                 name=name,
-                subsystem=Subsystems_Names.ODRIVE,
+                subsystem=Subsystems_Names.CHASSIS,
                 signals={
-                    'vel_cmd': Signal(DATA_TYPES.FLOAT_32, 0.0)
+                    'vel_cmd': Signal(DATA_TYPES.FLOAT_32, 0.0),
+                    'torque_ff': Signal(DATA_TYPES.FLOAT_32, 0.0),
                 },
                 isforJetson=False
             )
-        if 'HEARTBEAT' in name:
+        elif 'HEARTBEAT' in name:
             ODRIVE_CAN_MESSAGES[ODRIVE_MESSAGE_IDS(id)] = Message(
                 id=ODRIVE_MESSAGE_IDS(id),
                 name=name,
-                subsystem=Subsystems_Names.ODRIVE,
+                subsystem=Subsystems_Names.CHASSIS,
                 signals={
                     'error': Signal(DATA_TYPES.UINT_32, 0.0),
                     'state': Signal(DATA_TYPES.UINT_8, 0.0),
                     'result': Signal(DATA_TYPES.UINT_8, 0.0),
-                    'isTrajDone': Signal(DATA_TYPES.UINT_8, 0.0)
+                    'traj_done': Signal(DATA_TYPES.UINT_8, 0.0)
+                },
+                isforJetson=True
+            )
+        elif 'GET_ENCODER_ESTIMATES' in name:
+            ODRIVE_CAN_MESSAGES[ODRIVE_MESSAGE_IDS(id)] = Message(
+                id=ODRIVE_MESSAGE_IDS(id),
+                name=name,
+                subsystem=Subsystems_Names.CHASSIS,
+                signals={
+                    'pos': Signal(DATA_TYPES.FLOAT_32, 0.0),
+                    'vel': Signal(DATA_TYPES.FLOAT_32, 0.0),
                 },
                 isforJetson=True
             )
@@ -528,3 +529,5 @@ def generate_odrive_can_msgs():
     return ODRIVE_CAN_MESSAGES
 
 ODRIVE_CAN_MESSAGES = generate_odrive_can_msgs()
+
+CAN_MESSAGES = TEENSY_CAN_MESSAGES | ODRIVE_CAN_MESSAGES

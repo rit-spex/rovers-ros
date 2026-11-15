@@ -6,7 +6,7 @@ import rclpy.publisher
 
 from custom_interfaces.msg import Can
 
-from constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.CAN_constants import CAN_MESSAGES, CAN_MESSAGE_IDS
 from constants.CAN_structs import TX_TOPIC_NAME
 from constants.can_encoding import TeensyCommunication
 
@@ -44,7 +44,7 @@ class CAN_UDP(Node):
         self.__publishers = {}
         self.__can_tx_subscriptions = {}
 
-        for (id, message) in TEENSY_CAN_MESSAGES.items():
+        for (id, message) in CAN_MESSAGES.items():
             if(message.isforJetson):
                 # This is for messages coming in
                 self.__publishers[id] = self.create_publisher(
@@ -83,7 +83,7 @@ class CAN_UDP(Node):
 
         self.get_logger().info("CAN_node: sending default messages before shutting down")
         # clear out all of the messages with default values
-        for (message_id, message) in TEENSY_CAN_MESSAGES.items():
+        for (message_id, message) in CAN_MESSAGES.items():
             # Set all of the value to default
             message.reset()
             can_packet = TeensyCommunication.encode_can_message(message)
@@ -95,7 +95,7 @@ class CAN_UDP(Node):
 
     def on_message_received(self, msg: Can):
         try:
-            self.get_logger().debug(f"Received ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+            self.get_logger().debug(f"Received ID {msg.id} ({CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
             self.__publishers[msg.id].publish(msg)
         except Exception as e:
             self.get_logger().error(f"failed to publish can message: {e}")
@@ -105,7 +105,7 @@ class CAN_UDP(Node):
         """
         pack and send the message to the teensy
         """
-        self.get_logger().debug(f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
+        self.get_logger().debug(f"ID {msg.id} ({CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}")
 
         # make sure the message is at most 8 bytes long, otherwise throw an error
         if(len(msg.buf) > 8):

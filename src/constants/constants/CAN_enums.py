@@ -8,6 +8,7 @@
 # created on    : 1/14/2026 - Tyler
 # last modified : 1/14/2026 - Tyler
 # ------------------------------------------------------------------
+from itertools import chain
 from enum import IntEnum
 
 class ArmState(IntEnum):
@@ -24,13 +25,12 @@ class SubsystemsIDs(IntEnum):
     ARM = 2
     SCIENCE = 3
 
-class CAN_MESSAGE_IDS(IntEnum):
+class TEENSY_CAN_MESSAGE_IDS(IntEnum):
     E_STOP = 0
     ROS_HEARTBEAT = 1
     TEENSY_HEARTBEAT = 2
 
     ENABLE_CHASSIS = 10
-    DRIVE_POWER = 13
 
     ENABLE_ARM = 20
     # MOVE_BASE = 21
@@ -88,6 +88,7 @@ class ODRIVE_IDS(IntEnum):
 
 class ODRIVE_CMD(IntEnum):
     HEARTBEAT = 0x01
+    GET_ENCODER_ESTIMATES = 0x09
     SET_VEL = 0x0D
 
 def get_odrive_ids() -> type[IntEnum]:
@@ -104,6 +105,11 @@ def get_odrive_ids() -> type[IntEnum]:
 
 ODRIVE_MESSAGE_IDS = get_odrive_ids()
 
-print(*ODRIVE_MESSAGE_IDS, '\n')
-print(*CAN_MESSAGE_IDS)
+def get_can_ids() -> type[IntEnum]:
+    all_data = {}
+    for member in chain(TEENSY_CAN_MESSAGE_IDS, ODRIVE_IDS):
+        all_data[member.name] = member.value
 
+    return IntEnum('CAN_MESSAGE_IDS', all_data)
+
+CAN_MESSAGE_IDS = get_can_ids()
