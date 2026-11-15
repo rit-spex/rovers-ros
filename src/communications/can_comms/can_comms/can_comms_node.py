@@ -94,7 +94,13 @@ class CAN(Node):
             self.get_logger().info(
                 "E-STOP received, sending safe CAN defaults")
             self.__send_safe_stop()
-            self.bus.flush_tx_buffer()
+            try:
+                self.bus.flush_tx_buffer()
+            except NotImplementedError:
+                # SocketCAN transmits synchronously and does not implement
+                # flush_tx_buffer; without this guard the E-STOP callback
+                # raises and takes the whole node down.
+                pass
         else:
             if not self.__estop:
                 return
