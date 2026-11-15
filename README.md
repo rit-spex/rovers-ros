@@ -60,13 +60,19 @@ When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex 
 
 > On windows, make sure Docker Desktop is installed and running.
 >
-> On Linux, make sure you have docker installed
+> On Linux, make sure you have docker installed.
 
-To enter the docker environment, run the command `make enter`.
+To enter the docker environment, run the command `make enter` in the project directory.
 
 If this is your first time running this, it will setup and install the environment, so it might take a while.
 
 On startup, it will build the project, but on subsequent runs, it will just source the local source file.
+
+### Opening GUI Applications on Windows
+
+Install the program [Xming](http://www.straightrunning.com/XmingNotes/#sect-131) to view GUI applications ran in the Docker environment.
+
+Before launching any program, you need to launch Xming (or XServer) and set the display number to "".
 
 ## Building
 
