@@ -56,9 +56,17 @@ When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex 
 
 ---
 
-## Building
+## Running using the Docker Environment
 
-Make sure you have ROS 2 (Humble) installed, then:
+> On windows, make sure Docker Desktop is installed and running.
+>
+> On Linux, make sure you have docker installed
+
+Run the command `make enter` to enter the ros2 humble bash instance. If this is your first time running this, it will setup and install the environment, so it might take a while.
+
+On startup, it will build the project, but on subsequent runs, it will just source the local source file.
+
+## Building
 
 ```bash
 colcon build
@@ -78,12 +86,14 @@ ros2 launch main simulation_launch.xml
 ## Connection
 
 SSH to the rover:
+
 ```bash
 ssh rovers@129.21.91.140
 # Password: rovers
 ```
 
 Then:
+
 ```bash
 cd ~/ros/rovers-ros
 source source.sh
