@@ -14,6 +14,7 @@ implementation with the full controller from ``utils/simulated_arm.py``
               /ARM/STATE/{HOMING,FLIPPING,FLIPPED,PLANAR,JOINT_DRIVE,
                           POSITION_LOCK,ORIENTATION_LOCK,GRIPPER_DRIVE}
               /ARM/STATE/{LOCKED_JOINTS,HOMING_JOINTS,OPERATION_MODE,ERROR}
+              /ARM/STATE/POSE         (custom_interfaces/ArmPose)
 
 SpaceMouse controls (matching armSimulator4):
     Position drive (default):
@@ -59,7 +60,7 @@ import time
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from custom_interfaces.msg import ArmVelocity
+from custom_interfaces.msg import ArmPose, ArmVelocity
 from std_msgs.msg import Bool, Float32, String, UInt8, UInt32
 
 from constants import (
@@ -91,6 +92,24 @@ VELOCITY_TIMEOUT_SEC = 0.5
 def wrap_to_minus_90(angle: float) -> float:
     """Wrap an angle to [-pi/2, 3pi/2)."""
     return (angle + math.pi / 2) % (2 * math.pi) - math.pi / 2
+
+
+def rotation_to_rpy(rotation) -> tuple[float, float, float]:
+    """Return fixed-axis (roll, pitch, yaw) for ``Rz @ Ry @ Rx``.
+
+    Matches the convention used by the basestation display.  At gimbal
+    lock (pitch +/-90 deg) roll is pinned to zero and the combined
+    rotation is reported as yaw.
+    """
+    r20 = max(-1.0, min(1.0, float(rotation[2][0])))
+    pitch = math.asin(-r20)
+    if abs(r20) < 0.999999:
+        roll = math.atan2(float(rotation[2][1]), float(rotation[2][2]))
+        yaw = math.atan2(float(rotation[1][0]), float(rotation[0][0]))
+    else:
+        roll = 0.0
+        yaw = math.atan2(-float(rotation[0][1]), float(rotation[1][1]))
+    return roll, pitch, yaw
 
 
 class ArmControllerNode(Node):
@@ -185,6 +204,9 @@ class ArmControllerNode(Node):
         # One topic keeps code/arg/seq consistent for the telemetry uplink.
         self.__error_publisher = self.create_publisher(
             UInt32, ARM_STATE_TOPICS["error"], 10)
+        # Measured end-effector pose for the basestation Arm panel.
+        self.__pose_publisher = self.create_publisher(
+            ArmPose, ARM_STATE_TOPICS["pose"], 10)
 
     def arm_controller_state_subscribers(self):
         """Create the E-stop, command, velocity, and gripper subscriptions."""
@@ -489,6 +511,7 @@ class ArmControllerNode(Node):
         self.__publish_counter += 1
         self.__publish_targets(force=self.__publish_counter % 20 == 0)
         self.__publish_arm_status()
+        self.__publish_pose()
         self.__report_status(consumed)
 
     @property
@@ -531,6 +554,26 @@ class ArmControllerNode(Node):
         self.__mode_publisher.publish(UInt8(data=mode))
         for name, value in flag_values.items():
             self.__flag_publishers[name].publish(Bool(data=bool(value)))
+
+    def __publish_pose(self):
+        """Publish the measured end-effector pose for the basestation.
+
+        The controller works in inches; the message contract is metres
+        and radians.  The telemetry uplink converts back to the compact
+        protocol's centi-inch/centi-degree fields.  ``pos``/``frames`` were
+        refreshed by ``RoverArmController.update`` this cycle.
+        """
+        x, y, z = (float(value) for value in self.__arm.pos[-1])
+        roll, pitch, yaw = rotation_to_rpy(
+            self.__arm.frames[-1].rotation_matrix())
+        self.__pose_publisher.publish(ArmPose(
+            x=x * METERS_PER_INCH,
+            y=y * METERS_PER_INCH,
+            z=z * METERS_PER_INCH,
+            roll=roll,
+            pitch=pitch,
+            yaw=yaw,
+        ))
 
     def __publish_targets(self, force=False):
         angles = self.__arm_angles

@@ -12,6 +12,7 @@ from typing import Callable, Dict
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from custom_interfaces.msg import ArmPose
 from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
 
 
@@ -39,6 +40,9 @@ ARM_FLAG_BITS = {
     "ORIENTATION_LOCK": 1 << 6,
     "GRIPPER_DRIVE": 1 << 7,
 }
+
+# ArmPose carries metres; the compact protocol uses centi-inches.
+METERS_PER_INCH = 0.0254
 
 
 class TelemetryUplink(Node):
@@ -114,6 +118,17 @@ class TelemetryUplink(Node):
             "arm_error_arg": 0,
             "arm_error_seq": 0,
         }
+        # Measured end-effector pose (centi-units on the wire).  Nothing is
+        # sent until the arm controller has produced a real pose.
+        self._arm_pose = {
+            "pose_x": 0,
+            "pose_y": 0,
+            "pose_z": 0,
+            "pose_roll": 0,
+            "pose_pitch": 0,
+            "pose_yaw": 0,
+        }
+        self._arm_pose_seen = False
 
         self._register_subscriptions()
         self.create_timer(0.1, self._publish_uplink_packets)
@@ -172,6 +187,13 @@ class TelemetryUplink(Node):
             self._error_setter(self._arm_status),
             10,
         )
+        # Measured end-effector pose from the arm controller.
+        self.create_subscription(
+            ArmPose,
+            "/ARM/STATE/POSE",
+            self._pose_setter(self._arm_pose),
+            10,
+        )
 
     def _sub_u8(self, topic: str, target: Dict, key: str) -> None:
         self.create_subscription(UInt8, topic, self._setter(target, key), 10)
@@ -214,6 +236,19 @@ class TelemetryUplink(Node):
             target["arm_error_seq"] = (value >> 16) & 0xFF
         return _callback
 
+    def _pose_setter(self, target: Dict) -> Callable:
+        def _callback(msg):
+            # ArmPose is metres/radians; the protocol wants centi-inches
+            # and centi-degrees.
+            target["pose_x"] = int(round(msg.x / METERS_PER_INCH * 100.0))
+            target["pose_y"] = int(round(msg.y / METERS_PER_INCH * 100.0))
+            target["pose_z"] = int(round(msg.z / METERS_PER_INCH * 100.0))
+            target["pose_roll"] = int(round(math.degrees(msg.roll) * 100.0))
+            target["pose_pitch"] = int(round(math.degrees(msg.pitch) * 100.0))
+            target["pose_yaw"] = int(round(math.degrees(msg.yaw) * 100.0))
+            self._arm_pose_seen = True
+        return _callback
+
     def _angle_setter(self, target: Dict, key: str) -> Callable:
         def _callback(msg):
             # The protocol carries centi-degrees in an INT_16, giving the
@@ -236,6 +271,8 @@ class TelemetryUplink(Node):
             self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID)
             if all(self._arm_angles_seen.values()):
                 self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
+            if self._arm_pose_seen:
+                self._send(self._arm_pose, CONSTANTS.COMPACT_MESSAGES.ARM_POSE_ID)
             self._send(self._drive_imu, CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID)
             self._send(self._rover_estop, CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID)
             self._send(self._subsystem_enabled, CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID)

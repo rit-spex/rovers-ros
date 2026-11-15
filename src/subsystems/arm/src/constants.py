@@ -99,6 +99,7 @@ ARM_STATE_TOPICS = {
     "homing_joints": "/ARM/STATE/HOMING_JOINTS",
     "operation_mode": "/ARM/STATE/OPERATION_MODE",
     "error": "/ARM/STATE/ERROR",
+    "pose": "/ARM/STATE/POSE",
     "flags": {name: f"/ARM/STATE/{name}" for name in ARM_FLAG_NAMES},
 }
 ARM_ENABLED_TOPIC = ARM_STATE_TOPICS["enabled"]
