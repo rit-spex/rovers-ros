@@ -69,8 +69,10 @@ class TelemetryUplink(Node):
             "gripper_position": 0,
         }
         self._drive_imu = {
-            "drive_speed_left": 0.0,
-            "drive_speed_right": 0.0,
+            "drive_fr_vel": 0.0,
+            "drive_fl_vel": 0.0,
+            "drive_br_vel": 0.0,
+            "drive_bl_vel": 0.0,
             "yaw": 0,
             "pitch": 0,
             "roll": 0,
@@ -109,8 +111,10 @@ class TelemetryUplink(Node):
         self._sub_s16_angle("/ARM/WRIST_TWIST/CURR_ANGLE", self._arm_encoders, "wrist_twist_position")
         self._sub_s16_angle("/ARM/GRIPPER/CURR_ANGLE", self._arm_encoders, "gripper_position")
 
-        self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_LEFT", self._drive_imu, "drive_speed_left")
-        self._sub_f32("/ROVER/TELEMETRY/DRIVE/SPEED_RIGHT", self._drive_imu, "drive_speed_right")
+        self._sub_f32("/CHASSIS/FR/VEL", self._drive_imu, "drive_fr_vel")
+        self._sub_f32("/CHASSIS/FL/VEL", self._drive_imu, "drive_fl_vel")
+        self._sub_f32("/CHASSIS/BR/VEL", self._drive_imu, "drive_br_vel")
+        self._sub_f32("/CHASSIS/BL/VEL", self._drive_imu, "drive_bl_vel")
         self._sub_u16("/ROVER/TELEMETRY/IMU/YAW", self._drive_imu, "yaw")
         self._sub_u16("/ROVER/TELEMETRY/IMU/PITCH", self._drive_imu, "pitch")
         self._sub_u16("/ROVER/TELEMETRY/IMU/ROLL", self._drive_imu, "roll")
