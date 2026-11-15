@@ -181,12 +181,126 @@ if [ -z "$_overlay" ]; then
     echo "    Build with: cd $_ws_dir && colcon build --symlink-install"
 fi
 
-if [ -f "$_ws_dir/.venv/bin/activate" ]; then
-    # shellcheck disable=SC1091
-    if source "$_ws_dir/.venv/bin/activate"; then
-        _loaded="$_loaded + .venv"
+# ---------------------------------------------------------------------------
+# Python virtual environment (optional).
+#
+# The venv is layered on top of ROS 2 and the workspace overlay: its own
+# packages take precedence, while rclpy and the workspace modules stay
+# importable underneath.
+#
+#   ROVER_VENV           venv location        (default: <workspace>/.venv)
+#   ROVER_VENV_CREATE=1  create it with --system-site-packages when missing
+#   ROVER_VENV_INSTALL=1 install requirements.txt when modules are missing
+#   ROVER_VENV_CHECK=0   skip the import probe (faster sourcing)
+# ---------------------------------------------------------------------------
+_venv="${ROVER_VENV:-$_ws_dir/.venv}"
+
+if [ ! -d "$_venv" ] && [ "${ROVER_VENV_CREATE:-0}" = "1" ]; then
+    echo "[+] Creating Python venv at $_venv"
+    if ! python3 -m venv --system-site-packages "$_venv"; then
+        echo "[!] Could not create $_venv; continuing without it." >&2
+    fi
+fi
+
+if [ -f "$_venv/bin/activate" ]; then
+    _venv_py="$_venv/bin/python"
+
+    # ROS Humble/Dashing style prefixes contain lib/pythonX.Y. Use find rather
+    # than a glob: zsh aborts a sourced script when a glob has no match.
+    _ros_prefix="$(dirname "$_ros_setup")"
+    _ros_py_ver="$(find "$_ros_prefix/lib" -maxdepth 1 -type d -name 'python3.*' 2>/dev/null | sort | head -n 1)"
+    _ros_py_ver="${_ros_py_ver##*/python}"
+    [ -n "$_ros_py_ver" ] || _ros_py_ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+
+    _venv_info="$("$_venv_py" -c 'import sys, platform; print("%d.%d %s" % (sys.version_info[0], sys.version_info[1], platform.machine()))' 2>/dev/null)"
+    _venv_ver="${_venv_info%% *}"
+    _venv_arch="${_venv_info##* }"
+
+    _host_arch="$(uname -m)"
+    case "$_host_arch" in arm64) _host_arch=aarch64 ;; amd64) _host_arch=x86_64 ;; esac
+    case "$_venv_arch" in arm64) _venv_arch=aarch64 ;; amd64) _venv_arch=x86_64 ;; esac
+
+    if [ -z "$_venv_info" ]; then
+        echo "[!] $_venv/bin/python is not runnable; skipping venv activation." >&2
+        echo "    Recreate it: rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
+    elif [ -n "$_ros_py_ver" ] && [ "$_venv_ver" != "$_ros_py_ver" ]; then
+        echo "[!] $_venv uses Python $_venv_ver but ROS uses Python $_ros_py_ver;" >&2
+        echo "    not activating it (rclpy and workspace imports would fail)." >&2
+        echo "    Recreate it: rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
     else
-        echo "[!] Could not activate $_ws_dir/.venv" >&2
+        if [ -n "$_venv_arch" ] && [ "$_venv_arch" != "$_host_arch" ]; then
+            echo "[!] $_venv was built for $_venv_arch but this machine is $_host_arch;" >&2
+            echo "    compiled packages (numpy, pygame, cv2, hidapi) will fail to import." >&2
+            echo "    Recreate it on this machine:" >&2
+            echo "    rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
+        fi
+
+        # Activate unless this venv is already the active one.
+        case "$(command -v python3 2>/dev/null)" in
+            "$_venv"/*) ;;
+            *)
+                # shellcheck disable=SC1091
+                if source "$_venv/bin/activate"; then
+                    # zsh caches command paths; make sure python3 is the venv one
+                    rehash 2>/dev/null || hash -r 2>/dev/null || true
+                else
+                    echo "[!] Could not activate $_venv" >&2
+                    _venv_py=""
+                fi
+                ;;
+        esac
+
+        if [ -n "$_venv_py" ]; then
+            _loaded="$_loaded + .venv"
+
+            # PYTHONPATH is searched before site-packages, so a package that
+            # also lives in /opt/ros/... would shadow the venv copy. Prepend
+            # the venv's site-packages (once) so the venv really wins.
+            _venv_site="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+            if [ -n "$_venv_site" ] && [ -d "$_venv_site" ]; then
+                _clean_path="$(printf '%s' "${PYTHONPATH:-}" | tr ':' '\n' | grep -vxF "$_venv_site" | paste -sd: -)"
+                PYTHONPATH="$_venv_site${_clean_path:+:$_clean_path}"
+                export PYTHONPATH
+            fi
+
+            if [ "${ROVER_VENV_CHECK:-1}" = "1" ]; then
+                _venv_probe() {
+                    "$_venv_py" -c '
+import importlib, sys
+missing = []
+for name in sys.argv[1:]:
+    try:
+        importlib.import_module(name)
+    except Exception:
+        missing.append(name)
+print(" ".join(missing))
+' rclpy empy catkin_pkg xbee serial can numpy sympy yaml 2>/dev/null
+                }
+
+                _venv_missing="$(_venv_probe)"
+
+                if [ -n "$_venv_missing" ] && [ "${ROVER_VENV_INSTALL:-0}" = "1" ] && [ -f "$_ws_dir/requirements.txt" ]; then
+                    echo "[+] Installing requirements.txt into $_venv"
+                    "$_venv_py" -m pip --version >/dev/null 2>&1 || "$_venv_py" -m ensurepip --upgrade >/dev/null 2>&1 || true
+                    # Ignore the ROS PYTHONPATH here so pip does not mistake
+                    # ROS-installed packages for venv-installed ones.
+                    env -u PYTHONPATH -u PYTHONHOME "$_venv_py" -m pip install \
+                        --disable-pip-version-check -q -r "$_ws_dir/requirements.txt" ||
+                        echo "[!] pip install failed; see the output above." >&2
+                    _venv_missing="$(_venv_probe)"
+                fi
+
+                if [ -n "$_venv_missing" ]; then
+                    echo "[!] $_venv cannot import: $_venv_missing" >&2
+                    echo "    Install: $_venv/bin/python -m pip install -r $_ws_dir/requirements.txt" >&2
+                    echo "    Or let this script do it: ROVER_VENV_INSTALL=1 source scripts/source.sh" >&2
+                    echo "    Or recreate with system packages visible:" >&2
+                    echo "    rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
+                fi
+
+                unset -f _venv_probe
+            fi
+        fi
     fi
 fi
 
@@ -217,5 +331,6 @@ echo $'|\033[1;38;5;208m=====================================================\03
 echo ''
 
 unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
-unset _shell_kind
+unset _venv _venv_py _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
+unset _venv_site _clean_path _venv_missing _shell_kind
 unset -f _short _resolve_setup 2>/dev/null || true
