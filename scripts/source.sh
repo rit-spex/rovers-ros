@@ -20,6 +20,39 @@ if [ -z "${BASH_VERSION:-}" ] && [ -z "${ZSH_VERSION:-}" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
+_shell_kind="sh"
+[ -n "${BASH_VERSION:-}" ] && _shell_kind="bash"
+[ -n "${ZSH_VERSION:-}" ] && _shell_kind="zsh"
+
+# Resolve a setup script to the flavour for the shell running this script.
+# ament and colcon generate .bash, .sh and .zsh variants; the .bash flavour
+# locates itself through BASH_SOURCE, which is empty in zsh and silently
+# resolves to the current directory (the usual "no such file: .../setup.sh"
+# failure). Never hand a .bash script to zsh.
+_resolve_setup() {
+    _rs_dir="$(dirname "$1")"
+    _rs_stem="$(basename "$1")"
+    _rs_stem="${_rs_stem%%.*}"
+    case "$_rs_stem" in
+        setup | local_setup) ;;
+        *)
+            [ -f "$1" ] && { printf '%s' "$1"; return 0; }
+            return 1
+            ;;
+    esac
+    for _rs_ext in "$_shell_kind" sh; do
+        if [ -f "$_rs_dir/$_rs_stem.$_rs_ext" ]; then
+            printf '%s' "$_rs_dir/$_rs_stem.$_rs_ext"
+            return 0
+        fi
+    done
+    if [ "$_shell_kind" = "bash" ] && [ -f "$1" ]; then
+        printf '%s' "$1"
+        return 0
+    fi
+    return 1
+}
+
 if [ -n "${BASH_SOURCE[0]:-}" ]; then
     _ws_src="${BASH_SOURCE[0]}"
 elif [ -n "${ZSH_VERSION:-}" ]; then
@@ -57,24 +90,26 @@ fi
 # ---------------------------------------------------------------------------
 _ros_setup=""
 for _cand in "${ROS_SETUP:-}" "/opt/ros/${ROS_DISTRO:-}/setup.bash" /opt/ros/humble/setup.bash; do
-    if [ -n "$_cand" ] && [ -f "$_cand" ]; then
-        _ros_setup="$_cand"
+    [ -n "$_cand" ] || continue
+    if _resolved="$(_resolve_setup "$_cand")"; then
+        _ros_setup="$_resolved"
         break
     fi
 done
 
 if [ -z "$_ros_setup" ]; then
-    echo "[!] No ROS 2 setup file found." >&2
+    echo "[!] No ROS 2 setup file found for $_shell_kind." >&2
     if [ -n "${ROS_SETUP:-}" ]; then
         echo "    ROS_SETUP points at '${ROS_SETUP}', which does not exist." >&2
     fi
-    echo "    Install ROS 2 or set ROS_SETUP to its setup.bash." >&2
-    unset _ws_src _ws_dir _cand
+    echo "    Install ROS 2 or set ROS_SETUP to its setup.bash/setup.zsh." >&2
+    unset _ws_src _ws_dir _cand _resolved _ros_setup _shell_kind
+    unset -f _resolve_setup
     return 1 2>/dev/null || exit 1
 fi
 
-if [ -n "${ROS_SETUP:-}" ] && [ "$ROS_SETUP" != "$_ros_setup" ]; then
-    echo "[!] ROS_SETUP='$ROS_SETUP' is not a file; using $_ros_setup instead." >&2
+if [ -n "${ROS_SETUP:-}" ] && [ ! -f "$ROS_SETUP" ]; then
+    echo "[!] ROS_SETUP='$ROS_SETUP' does not exist; using $_ros_setup instead." >&2
 fi
 # Keep the environment consistent for scripts/common.sh and scripts/sim.sh,
 # which read ROS_SETUP directly.
@@ -83,7 +118,10 @@ export ROS_SETUP="$_ros_setup"
 # shellcheck disable=SC1090
 if ! source "$_ros_setup"; then
     echo "[!] Failed to source ROS 2 from $_ros_setup" >&2
-    unset _ws_src _ws_dir _ros_setup _cand
+    echo "    If this keeps happening, run the script from a bash shell:" >&2
+    echo "    bash -c 'source scripts/source.sh; exec bash'" >&2
+    unset _ws_src _ws_dir _ros_setup _cand _resolved _shell_kind
+    unset -f _resolve_setup
     return 1 2>/dev/null || exit 1
 fi
 
@@ -96,8 +134,8 @@ _overlay=""
 # made without a chained setup script is still usable.
 # ---------------------------------------------------------------------------
 for _cand in "$_ws_dir/install/setup.bash" "$_ws_dir/install/local_setup.bash"; do
-    if [ -f "$_cand" ]; then
-        _overlay="$_cand"
+    if _resolved="$(_resolve_setup "$_cand")"; then
+        _overlay="$_resolved"
         break
     fi
 done
@@ -133,7 +171,7 @@ if [ -n "$_overlay" ]; then
         fi
     else
         _overlay=""
-        echo "[!] Failed to source $_ws_dir/install/setup.bash" >&2
+        echo "[!] Failed to source $_resolved" >&2
         echo "    Rebuild with: cd $_ws_dir && colcon build --symlink-install" >&2
     fi
 fi
@@ -157,7 +195,7 @@ _short() {
     if [ "${#1}" -le 46 ]; then
         printf '%s' "$1"
     else
-        printf '...%s' "${1: -43}"
+        printf '...%s' "${1:$((${#1} - 43))}"
     fi
 }
 
@@ -178,5 +216,6 @@ echo '|  Echo Topic  |  ros2 topic echo <topic>             |'
 echo $'|\033[1;38;5;208m=====================================================\033[0m|'
 echo ''
 
-unset _ws_src _ws_dir _ros_setup _cand _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
-unset -f _short 2>/dev/null || true
+unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
+unset _shell_kind
+unset -f _short _resolve_setup 2>/dev/null || true
