@@ -11,6 +11,11 @@ twist_mux:
         topic: /GAZEBO/CHASSIS/diff_cont/cmd_vel_estop
         timeout: 0.5
         priority: 255
+      # Same path the real rover uses: chassis_node -> CAN Drive_Power.
+      can:
+        topic: /GAZEBO/CHASSIS/diff_cont/cmd_vel_can
+        timeout: 0.5
+        priority: 200
       navigation:
         topic: /cmd_vel
         timeout: 0.5

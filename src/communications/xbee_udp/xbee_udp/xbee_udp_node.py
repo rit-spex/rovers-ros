@@ -3,6 +3,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from std_msgs.msg import UInt8MultiArray
 
@@ -11,6 +12,10 @@ import socket as skt
 from socket import socket
 
 from constants.CommandCodes import CONSTANTS
+
+# Drain a burst in one pass so the rover-side UDP queue cannot grow while
+# the process is also publishing to ROS.
+MAX_DRAIN_PER_PASS = 32
 
 
 class xbee_udp(Node):
@@ -27,7 +32,10 @@ class xbee_udp(Node):
         self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
-        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES",
+            QoSProfile(depth=10,
+                       reliability=ReliabilityPolicy.BEST_EFFORT))
 
     def read_data(self, buffer_size: int) -> list[int]:
         try:
@@ -49,19 +57,28 @@ class xbee_udp(Node):
 
     def run(self) -> None:
         self.get_logger().info("starting xbee udp socket connection...")
+        self.__socket.setsockopt(
+            skt.SOL_SOCKET, skt.SO_RCVBUF, 1 << 20)
         self.__socket.bind((self.__address, self.__port))
 
         try:
             while rclpy.ok():
-                # Wait up to 10 ms for data instead of non-blocking spin
+                # Wait up to 10 ms for data instead of non-blocking spin.
                 ready, _, _ = select.select([self.__socket], [], [], 0.01)
                 if ready:
-                    data = self.read_data(self.__buffer_size)
-                    if data:
+                    for _ in range(MAX_DRAIN_PER_PASS):
+                        data = self.read_data(self.__buffer_size)
+                        if not data:
+                            break
                         self.publish_data(data)
+                        more, _, _ = select.select(
+                            [self.__socket], [], [], 0)
+                        if not more:
+                            break
                 rclpy.spin_once(self, timeout_sec=0)
         finally:
             self.__socket.close()
+
 
 def main():
     rclpy.init()

@@ -1,3 +1,4 @@
+
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
@@ -12,9 +13,15 @@
       converted from inches to metres.  The gripper is a simple revolute
       joint so the existing /ARM/GRIPPER/TARGET_ANGLE topic can drive it.
 
-      Arm links intentionally have no <collision> geometry: this is a
+      Arm links intentionally have no <collision> geometry. This is a
       kinematic/visual simulation, and contact impulses from the arm hitting
       the chassis or ground cause severe jitter at low poses.
+
+      Keep this file free of "colon-space" and "hash-space" sequences,
+      including inside comments. gazebo_ros2_control 0.4.x passes the
+      expanded URDF through a YAML parameter override, so those sequences
+      make the plugin abort before it creates the controller manager. With
+      no controller manager the arm is just a passive body under gravity.
     -->
 
     <xacro:property name="arm_mount_z" value="0.0935"/>
@@ -38,6 +45,15 @@
 
     <!-- Clear gap between the two parallel links in each arm segment. -->
     <xacro:property name="arm_link_gap" value="0.1016"/>
+    <xacro:property name="arm_upper_link_thickness" value="0.05"/>
+    <xacro:property name="arm_forearm_link_thickness" value="0.045"/>
+
+    <!-- Straddle the joint-axis line so both parallel links are equidistant
+         from the line between the rotation points. -->
+    <xacro:property name="arm_upper_link_offset"
+                    value="${(arm_upper_link_thickness + arm_link_gap) / 2}"/>
+    <xacro:property name="arm_forearm_link_offset"
+                    value="${(arm_forearm_link_thickness + arm_link_gap) / 2}"/>
 
     <!-- Arm is red in Gazebo; the URDF materials match so RViz agrees. -->
     <material name="arm_upper_color">
@@ -141,16 +157,16 @@
     <!-- Upper arm. -->
     <link name="arm_upper_link">
         <visual>
-            <origin xyz="0 ${arm_a1 / 2} 0"/>
+            <origin xyz="0 ${arm_a1 / 2} ${arm_upper_link_offset}"/>
             <geometry>
-                <box size="0.05 ${arm_a1} 0.05"/>
+                <box size="${arm_upper_link_thickness} ${arm_a1} ${arm_upper_link_thickness}"/>
             </geometry>
             <material name="arm_upper_color"/>
         </visual>
         <visual>
-            <origin xyz="0 ${arm_a1 / 2} ${0.05 + arm_link_gap}"/>
+            <origin xyz="0 ${arm_a1 / 2} ${-arm_upper_link_offset}"/>
             <geometry>
-                <box size="0.05 ${arm_a1} 0.05"/>
+                <box size="${arm_upper_link_thickness} ${arm_a1} ${arm_upper_link_thickness}"/>
             </geometry>
             <material name="arm_upper_color"/>
         </visual>
@@ -178,16 +194,16 @@
     <!-- Forearm. -->
     <link name="arm_forearm_link">
         <visual>
-            <origin xyz="0 ${arm_a2 / 2} 0"/>
+            <origin xyz="0 ${arm_a2 / 2} ${arm_forearm_link_offset}"/>
             <geometry>
-                <box size="0.045 ${arm_a2} 0.045"/>
+                <box size="${arm_forearm_link_thickness} ${arm_a2} ${arm_forearm_link_thickness}"/>
             </geometry>
             <material name="arm_forearm_color"/>
         </visual>
         <visual>
-            <origin xyz="0 ${arm_a2 / 2} ${0.045 + arm_link_gap}"/>
+            <origin xyz="0 ${arm_a2 / 2} ${-arm_forearm_link_offset}"/>
             <geometry>
-                <box size="0.045 ${arm_a2} 0.045"/>
+                <box size="${arm_forearm_link_thickness} ${arm_a2} ${arm_forearm_link_thickness}"/>
             </geometry>
             <material name="arm_forearm_color"/>
         </visual>

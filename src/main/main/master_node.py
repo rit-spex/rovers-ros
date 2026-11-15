@@ -9,7 +9,8 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, UInt8, UInt16
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, UInt8, UInt8MultiArray, UInt16
 from custom_interfaces.msg import Can
 
 from constants.CommandCodes import CONSTANTS
@@ -29,7 +30,25 @@ import time
 # delay start up to ensure everything else is up and running before the master starts sending messages to the teensy
 DELAY_STARTUP_SEC = 5 # seconds
 
+# How often the master checks command and heartbeat timeouts [s].
 timeout_duration = 1  # seconds
+
+# The basestation sends a heartbeat every 200 ms.  The effective detection
+# window is 1 s: latch after 0.9 s of silence, and the 0.1 s check granularity
+# brings the worst-case detection to 1.0 s.
+HEARTBEAT_DETECTION_SEC = 1.0
+HEARTBEAT_CHECK_PERIOD_SEC = 0.1
+
+# A check timer that fires this much later than scheduled means the process
+# was descheduled (a stalled VM or a loaded host does this for seconds at a
+# time).  The recorded silence then includes time this node could not run, so
+# it is not evidence that the basestation link died.  Skip those samples
+# instead of flapping E-STOP; a real outage still latches one tick later.
+HEARTBEAT_LATE_CHECK_SEC = 0.5
+
+# Raw teleop/XBee frames are high-rate and loss tolerant.  Best-effort QoS
+# keeps a slow consumer from blocking the transport and stalling heartbeats.
+XBEE_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 class Master(Node):
 
@@ -45,16 +64,12 @@ class Master(Node):
     __ros_teensy_publisher: rclpy.publisher.Publisher # This is sent to the teensy to tell it that the ROS system is alive
 
     # basestation heartbeat tracking
-    __last_basestation_heartbeat_time: UInt16
-    __current_basestation_heartbeat_time: UInt16
-    __basestation_recieved_heartbeat: bool
+    __last_basestation_heartbeat_rx: float
+    __received_basestation_heartbeat: bool
+    __last_heartbeat_check_rx: float
+    __heartbeat_silence_limit_sec: float
     __heartbeat_estop: bool
     __hardware_estop: bool
-
-    # heartbeat tracking
-    __last_heartbeat_time: int
-    __current_heartbeat_time: int
-    __received_heartbeat: bool
     # subsystem status tracking
     __chassis_teensy_enabled: bool # we wait until the chassis teensy sends a heartbeat message before we consider the chassis enabled
     __chassis_node_enabled: bool   # wait until teensy knows it is enabled before we consider the chassis node enabled
@@ -73,16 +88,20 @@ class Master(Node):
 
     def __init__(self):
         super().__init__("Master")
-        self.__last_basestation_heartbeat_time = UInt16()
-        self.__current_basestation_heartbeat_time = UInt16()
-        self.__basestation_recieved_heartbeat = False
+        self.__last_basestation_heartbeat_rx = 0.0
+        self.__received_basestation_heartbeat = False
+        self.__last_heartbeat_check_rx = time.monotonic()
+        self.declare_parameter("heartbeat_timeout_sec",
+                               HEARTBEAT_DETECTION_SEC)
+        effective_window = max(
+            2 * HEARTBEAT_CHECK_PERIOD_SEC,
+            float(self.get_parameter("heartbeat_timeout_sec").value))
+        self.__heartbeat_silence_limit_sec = (
+            effective_window - HEARTBEAT_CHECK_PERIOD_SEC)
         # Fail safe: stay latched until the basestation proves it is alive.
         self.__heartbeat_estop = True
         self.__hardware_estop = False
 
-        self.__last_heartbeat_time = 0
-        self.__current_heartbeat_time = 0
-        self.__received_heartbeat = False
         self.__chassis_teensy_enabled = False
         self.__chassis_node_enabled = False
         self.__last_chassis_command = UInt16()
@@ -172,6 +191,15 @@ class Master(Node):
             callback=self.__on_basestation_heartbeat_received,
             qos_profile=10,
         )
+        # The decoded heartbeat topic passes through basestation_node.  Also
+        # watch the raw transport so a stalled decode bridge cannot look like
+        # a dead operator link.
+        self.create_subscription(
+            msg_type=UInt8MultiArray,
+            topic="/XBEE/MESSAGES",
+            callback=self.__on_xbee_message_received,
+            qos_profile=XBEE_QOS,
+        )
         self.create_subscription(
             msg_type=UInt8,
             topic="/BASESTATION/auto_state/auto_state",
@@ -192,6 +220,10 @@ class Master(Node):
             timer_period_sec=timeout_duration,
             callback=self.__check_timeout,
         )
+        self.create_timer(
+            timer_period_sec=HEARTBEAT_CHECK_PERIOD_SEC,
+            callback=self.__check_heartbeat,
+        )
 
         # create subscriptions for subsystem commands
         for (message_id, message) in TEENSY_CAN_MESSAGES.items():
@@ -210,24 +242,33 @@ class Master(Node):
         time.sleep(DELAY_STARTUP_SEC)
         self.get_logger().info(
             "E-STOP latched until the basestation heartbeat is received")
+        self.get_logger().info(
+            "Basestation heartbeat window: %.1f s"
+            % (self.__heartbeat_silence_limit_sec
+               + HEARTBEAT_CHECK_PERIOD_SEC))
+
+    def __check_heartbeat(self) -> None:
+        """Latch the heartbeat E-stop after a full grace window of silence."""
+        now = time.monotonic()
+        since_last_check = now - self.__last_heartbeat_check_rx
+        self.__last_heartbeat_check_rx = now
+        if not self.__received_basestation_heartbeat:
+            return
+        # A late timer means this process itself was starved; the silence we
+        # measured is our own scheduling delay, not evidence about the link.
+        # Restart the grace window instead of latching on that invalid sample.
+        if since_last_check > HEARTBEAT_LATE_CHECK_SEC:
+            self.__last_basestation_heartbeat_rx = now
+            return
+        silent_for = now - self.__last_basestation_heartbeat_rx
+        if (silent_for > self.__heartbeat_silence_limit_sec
+                and not self.__heartbeat_estop):
+            self.get_logger().warn(
+                f"Basestation heartbeat timeout ({silent_for:.2f} s)")
+            self.__heartbeat_estop = True
+            self.__publish_estop()
 
     def __check_timeout(self) -> None:
-        # check for an existing basestation heartbeat timeout
-        if self.__basestation_recieved_heartbeat:
-            if self.__current_basestation_heartbeat_time == self.__last_basestation_heartbeat_time:
-                if not self.__heartbeat_estop:
-                    self.get_logger().info("Heartbeat timeout detected")
-                    self.__heartbeat_estop = True
-            else:
-                self.__last_basestation_heartbeat_time = self.__current_basestation_heartbeat_time
-                # If disabled, clear the heartbeat e-stop
-                if self.__heartbeat_estop:
-                    self.__heartbeat_estop = False
-                    # A hardware e-stop stays latched until the node restarts.
-                    if not self.__hardware_estop:
-                        self.get_logger().info(
-                            "Heartbeat restored, clearing e-stop")
-
         # check for chassis command timeout
         if self.__chassis_teensy_enabled:
             if self.__curr_chassis_command == self.__last_chassis_command:
@@ -270,13 +311,51 @@ class Master(Node):
             self.__ros_teensy_publisher.publish(can_packet)
 
         # Republish every tick so nodes that start after a transition still
-        # see the current level.
+        # see the current level, and so consumers re-arm after an E-STOP.
         self.__publish_estop()
+        self.__publish_enable_levels()
 
     def __publish_estop(self) -> None:
         """Publish the current level-triggered E-STOP state."""
         self.__estop_publisher.publish(
             Bool(data=self.__heartbeat_estop or self.__hardware_estop))
+
+    def __publish_enable_levels(self) -> None:
+        """Republish the enabled state of each subsystem.
+
+        The CAN transports drop outbound frames while ``/ESTOP`` is active,
+        so an enable sent at the instant the stop clears can be swallowed.
+        Republishing the level lets the arm/chassis nodes and the Teensy
+        re-arm as soon as the latch is gone.
+        """
+        teensy_enables = (
+            (self.__chassis_teensy_enabled,
+             self.__chassis_teensy_enable_publisher,
+             CAN_MESSAGE_IDS.ENABLE_CHASSIS),
+            (self.__arm_teensy_enabled,
+             self.__arm_teensy_enable_publisher,
+             CAN_MESSAGE_IDS.ENABLE_ARM),
+            (self.__science_teensy_enabled,
+             self.__science_teensy_enable_publisher,
+             CAN_MESSAGE_IDS.ENABLE_SCIENCE),
+        )
+        for enabled, publisher, message_id in teensy_enables:
+            if not enabled:
+                continue
+            packet = self.__pack_enable_message_to_teensy(message_id, True)
+            if packet is not None:
+                publisher.publish(packet)
+
+        node_enables = (
+            (self.__chassis_node_enabled,
+             self.__chassis_node_enable_publisher),
+            (self.__arm_node_enabled, self.__arm_node_enable_publisher),
+            (self.__science_node_enabled,
+             self.__science_node_enable_publisher),
+        )
+        for enabled, publisher in node_enables:
+            if enabled:
+                publisher.publish(Bool(data=True))
 
     def __on_quit_received(self, msg: Bool):
         self.get_logger().info("Quit message received, forwarding e-stop ...")
@@ -288,9 +367,26 @@ class Master(Node):
         self.__publish_estop()
 
     def __on_basestation_heartbeat_received(self, msg: UInt16):
-        # self.get_logger().info("Heartbeat message received")
-        self.__basestation_recieved_heartbeat = True
-        self.__current_basestation_heartbeat_time = msg
+        self.__mark_basestation_heartbeat()
+
+    def __on_xbee_message_received(self, msg: UInt8MultiArray):
+        """Use the raw transport heartbeat as an independent liveness path."""
+        if not msg.data or msg.data[0] != CONSTANTS.HEARTBEAT.MESSAGE[0]:
+            return
+        self.__mark_basestation_heartbeat()
+
+    def __mark_basestation_heartbeat(self):
+        # Any heartbeat arrival proves the basestation is alive; the payload
+        # is only a sequence stamp and may legitimately repeat.
+        self.__received_basestation_heartbeat = True
+        self.__last_basestation_heartbeat_rx = time.monotonic()
+        if self.__heartbeat_estop:
+            self.__heartbeat_estop = False
+            # A hardware e-stop stays latched until the node restarts.
+            if not self.__hardware_estop:
+                self.get_logger().info(
+                    "Heartbeat restored, clearing e-stop")
+            self.__publish_estop()
 
     def __on_new_CAN_message_received(self, msg: Can):
         # first try to decode the message into a CAN message object

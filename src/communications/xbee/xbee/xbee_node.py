@@ -2,6 +2,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import UInt8MultiArray
 from digi.xbee.devices import XBeeDevice, TimeoutException
 
@@ -21,7 +22,10 @@ class Xbee(Node):
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(UInt8MultiArray, "/XBEE/MESSAGES", 10)
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES",
+            QoSProfile(depth=10,
+                       reliability=ReliabilityPolicy.BEST_EFFORT))
 
     def read_data(self) -> list[int] | None:
         message = None

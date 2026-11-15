@@ -8,9 +8,12 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.publisher import Publisher
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import Can
 from std_msgs.msg import Float32
 from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
+
+TELEOP_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 class Chassis(Node):
@@ -37,10 +40,10 @@ class Chassis(Node):
                 )
 
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, TELEOP_QOS
         )
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, 10
+            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, TELEOP_QOS
         )
         self.create_subscription(
             msg_type=Bool,
@@ -59,8 +62,9 @@ class Chassis(Node):
         self.__LY_value = msg.data
         self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
         self.__publish_drive_power()
-        self.get_logger().info(f"LY_callback message: {msg}")
-        self.get_logger().info(f"Topic is {self.__drive_power_can_message.topic_name}")
+        self.get_logger().debug(
+            f"LY axis {msg.data:.3f} -> "
+            f"{self.__drive_power_can_message.topic_name}")
 
     def __RY_callback(self, msg: Float32):
         if self.__estop:

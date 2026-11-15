@@ -1,4 +1,5 @@
 import threading
+import select
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -205,6 +206,12 @@ class CAN_UDP(Node):
 def udp_receive_thread(node: CAN_UDP, socket: socket, stop: threading.Event):
     while rclpy.ok() and not stop.is_set():
         try:
+            # Wait for a datagram instead of busy-spinning on a
+            # non-blocking socket, which otherwise pegs a CPU core and
+            # starves the basestation/heartbeat path.
+            ready, _, _ = select.select([socket], [], [], 0.1)
+            if not ready:
+                continue
             data, addr = socket.recvfrom(1024)
             if data:
                 # unpack the message with the same format as packing

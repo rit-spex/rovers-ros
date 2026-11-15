@@ -129,10 +129,10 @@ ros2 launch rover_simulation simulation_launch.xml robot_config:='$ROBOT_CONFIG'
         open_tab "Base Station" \
             "cd '$BASE_WS' && \
 if [ -x .venv/bin/python ]; then \
-BASESTATION_SIMULATION=1 .venv/bin/python -m basestation \
+ROVER_PROTOCOL_TRACE=0 BASESTATION_SIMULATION=1 .venv/bin/python -m basestation \
 --sim-inputs --real-spacemouse; \
 else \
-BASESTATION_SIMULATION=1 python3 -m basestation \
+ROVER_PROTOCOL_TRACE=0 BASESTATION_SIMULATION=1 python3 -m basestation \
 --sim-inputs --real-spacemouse; \
 fi"
     else
