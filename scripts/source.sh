@@ -184,9 +184,10 @@ fi
 # ---------------------------------------------------------------------------
 # Python virtual environment (optional).
 #
-# The venv is layered on top of ROS 2 and the workspace overlay: its own
-# packages take precedence, while rclpy and the workspace modules stay
-# importable underneath.
+# The venv is layered on top of ROS 2 and the workspace overlay. ROS and
+# workspace paths stay ahead of it on PYTHONPATH, so a venv copy of a ROS
+# package (for example the fake rclpy shipped by rclpy-intellisense) can
+# never shadow the real ROS 2 installation.
 #
 #   ROVER_VENV           venv location        (default: <workspace>/.venv)
 #   ROVER_VENV_CREATE=1  create it with --system-site-packages when missing
@@ -273,16 +274,6 @@ if [ -f "$_venv/bin/activate" ]; then
                 esac
             fi
 
-            # PYTHONPATH is searched before site-packages, so a package that
-            # also lives in /opt/ros/... would shadow the venv copy. Prepend
-            # the venv's site-packages (once) so the venv really wins.
-            _venv_site="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
-            if [ -n "$_venv_site" ] && [ -d "$_venv_site" ]; then
-                _clean_path="$(printf '%s' "${PYTHONPATH:-}" | tr ':' '\n' | grep -vxF "$_venv_site" | paste -sd: -)"
-                PYTHONPATH="$_venv_site${_clean_path:+:$_clean_path}"
-                export PYTHONPATH
-            fi
-
             if [ "${ROVER_VENV_CHECK:-1}" = "1" ]; then
                 _venv_probe() {
                     "$_venv_py" -c '
@@ -353,5 +344,5 @@ echo ''
 unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
 unset _venv _venv_py _venv_real _active_real _py_bin _py_real
 unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
-unset _venv_site _clean_path _venv_missing _shell_kind
+unset _venv_missing _shell_kind
 unset -f _short _resolve_setup 2>/dev/null || true
