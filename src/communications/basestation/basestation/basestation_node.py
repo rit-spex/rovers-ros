@@ -41,6 +41,35 @@ _ensure_local_package_path()
 from command_codes import CONSTANTS
 from encoding import MessageEncoder
 
+# Arm key actions arrive as per-action press states.  The physical key map
+# lives on the basestation; this bridge only translates the semantic action
+# names into controller commands.
+ARM_STATE_JUST_PRESSED = 1
+ARM_STATE_COMMANDS = {
+    "flip": "flip",
+    "home": "home",
+    "position_drive": "position_drive",
+    "joint_drive": "joint_drive",
+    "pnp_normal": "pnp_normal",
+    "toggle_planar": "toggle_planar",
+    "guide_orientation": "guide_orientation",
+    "toggle_position_lock": "toggle_position_lock",
+    "toggle_orientation_lock": "toggle_orientation_lock",
+    "toggle_joint_lock_0": "toggle_joint_lock:0",
+    "toggle_joint_lock_1": "toggle_joint_lock:1",
+    "toggle_joint_lock_2": "toggle_joint_lock:2",
+    "toggle_joint_lock_3": "toggle_joint_lock:3",
+    "toggle_joint_lock_4": "toggle_joint_lock:4",
+    "home_joint_0": "home_joint:0",
+    "home_joint_1": "home_joint:1",
+    "home_joint_2": "home_joint:2",
+    "home_joint_3": "home_joint:3",
+    "home_joint_4": "home_joint:4",
+    # Momentary strike, not a state. The basestation adds the matching
+    # arm_state signal; the rover only forwards the pulse.
+    "solenoid_strike": "fire_solenoid",
+}
+
 
 class Basestation(Node):
     __encoder: MessageEncoder
@@ -53,7 +82,7 @@ class Basestation(Node):
         # verify end-to-end communication, so tracing should be on unless
         # explicitly disabled.
         self._protocol_trace = (
-            os.environ.get("ROVER_PROTOCOL_TRACE", "1").strip().lower()
+            os.environ.get("ROVER_PROTOCOL_TRACE", "0").strip().lower()
             not in {"0", "false", "no", "off"}
         )
 
@@ -72,6 +101,12 @@ class Basestation(Node):
         }
 
         self._create_publishers_from_protocol()
+
+        self.__arm_command_publisher = self.create_publisher(
+            msg_type=String,
+            topic="/ARM/COMMAND",
+            qos_profile=10,
+        )
 
         self.create_subscription(
             msg_type=UInt8MultiArray,
@@ -168,6 +203,15 @@ class Basestation(Node):
                 continue
 
             publisher.publish(value_type(data=value))
+
+    def __publish_arm_commands(self, decoded_data: dict) -> None:
+        """Translate just-pressed arm action states into arm commands."""
+        for signal, value in decoded_data.items():
+            if value != ARM_STATE_JUST_PRESSED:
+                continue
+            command = ARM_STATE_COMMANDS.get(signal)
+            if command is not None:
+                self.__arm_command_publisher.publish(String(data=command))
 
     def run(self):
         self.get_logger().info("starting basestation ...")
