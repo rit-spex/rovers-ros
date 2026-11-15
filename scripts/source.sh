@@ -204,6 +204,12 @@ fi
 
 if [ -f "$_venv/bin/activate" ]; then
     _venv_py="$_venv/bin/python"
+    # Compare canonical paths: the venv may be reached through a symlink.
+    _venv_real="$(cd "$_venv" >/dev/null 2>&1 && pwd -P)"
+    _active_real=""
+    if [ -n "${VIRTUAL_ENV:-}" ]; then
+        _active_real="$(cd "$VIRTUAL_ENV" >/dev/null 2>&1 && pwd -P)"
+    fi
 
     # ROS Humble/Dashing style prefixes contain lib/pythonX.Y. Use find rather
     # than a glob: zsh aborts a sourced script when a glob has no match.
@@ -235,23 +241,37 @@ if [ -f "$_venv/bin/activate" ]; then
             echo "    rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
         fi
 
-        # Activate unless this venv is already the active one.
-        case "$(command -v python3 2>/dev/null)" in
-            "$_venv"/*) ;;
-            *)
-                # shellcheck disable=SC1091
-                if source "$_venv/bin/activate"; then
-                    # zsh caches command paths; make sure python3 is the venv one
-                    rehash 2>/dev/null || hash -r 2>/dev/null || true
-                else
-                    echo "[!] Could not activate $_venv" >&2
-                    _venv_py=""
-                fi
-                ;;
-        esac
+        if [ -n "$_active_real" ] && [ "$_active_real" = "$_venv_real" ]; then
+            # Already active; still re-check the paths below.
+            _loaded="$_loaded + .venv"
+        else
+            # Deactivate any other venv first, so PATH does not accumulate a
+            # stack of environments when the script is sourced repeatedly.
+            if [ -n "${VIRTUAL_ENV:-}" ] && command -v deactivate >/dev/null 2>&1; then
+                deactivate
+            fi
+
+            # shellcheck disable=SC1091
+            if source "$_venv/bin/activate"; then
+                # zsh caches command paths; point python3 at the venv
+                rehash 2>/dev/null || hash -r 2>/dev/null || true
+                _loaded="$_loaded + .venv"
+            else
+                echo "[!] Could not activate $_venv" >&2
+                _venv_py=""
+            fi
+        fi
 
         if [ -n "$_venv_py" ]; then
-            _loaded="$_loaded + .venv"
+            # Make sure the active python3 really is the venv's interpreter.
+            _py_bin="$(command -v python3 2>/dev/null)"
+            if [ -n "$_py_bin" ] && [ -n "$_venv_real" ]; then
+                _py_real="$(cd "$(dirname "$_py_bin")" >/dev/null 2>&1 && pwd -P)/$(basename "$_py_bin")"
+                case "$_py_real" in
+                    "$_venv_real"/*) ;;
+                    *) echo "[!] python3 resolves to $_py_bin, not $_venv (try: hash -r / rehash)" >&2 ;;
+                esac
+            fi
 
             # PYTHONPATH is searched before site-packages, so a package that
             # also lives in /opt/ros/... would shadow the venv copy. Prepend
@@ -331,6 +351,7 @@ echo $'|\033[1;38;5;208m=====================================================\03
 echo ''
 
 unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
-unset _venv _venv_py _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
+unset _venv _venv_py _venv_real _active_real _py_bin _py_real
+unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
 unset _venv_site _clean_path _venv_missing _shell_kind
 unset -f _short _resolve_setup 2>/dev/null || true
