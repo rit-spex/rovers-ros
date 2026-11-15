@@ -62,7 +62,9 @@ When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex 
 >
 > On Linux, make sure you have docker installed
 
-Run the command `make enter` to enter the ros2 humble bash instance. If this is your first time running this, it will setup and install the environment, so it might take a while.
+To enter the docker environment, run the command `make enter`.
+
+If this is your first time running this, it will setup and install the environment, so it might take a while.
 
 On startup, it will build the project, but on subsequent runs, it will just source the local source file.
 
@@ -101,3 +103,5 @@ ros2 launch main main_launch.xml
 ```
 
 After you see "starting xbee..." enter the password `rovers`.
+
+> If you are running the project in the docker environemnt, you won't be prompted for a password.
