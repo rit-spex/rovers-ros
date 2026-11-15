@@ -33,6 +33,7 @@ services:
 
             # X11 for GUI applications
             - /tmp/.X11-unix:/tmp/.X11-unix
+            - ${XAUTHORITY}:/root/.Xauthority
 
         extra_hosts:
             - "host.docker.internal:host-gateway"
@@ -43,5 +44,5 @@ volumes:
     workspace:
 
 networks:
-  rovers_simulation_udp:
-    name: rovers_simulation_udp
+    rovers_simulation_udp:
+        name: rovers_simulation_udp
