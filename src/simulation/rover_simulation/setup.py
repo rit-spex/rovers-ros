@@ -32,6 +32,8 @@ setup(
             'gazebo_bridge = rover_simulation.gazebo_bridge:main',
             'sim_config_node = rover_simulation.sim_config_node:main',
             'sim_estop_gate = rover_simulation.sim_estop_gate:main',
+            'cmd_vel_bridge = rover_simulation.cmd_vel_bridge:main',
+            'can_drive_bridge = rover_simulation.can_drive_bridge:main',
         ],
     },
 )

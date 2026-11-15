@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import socket
 import sys
 import os
@@ -11,7 +12,7 @@ from typing import Callable, Dict
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16
+from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
 
 
 def _ensure_local_package_path() -> None:
@@ -155,7 +156,9 @@ class TelemetryUplink(Node):
     def _publish_uplink_packets(self) -> None:
         try:
             self._send(self._life_detection, CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID)
-            self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
+            self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID)
+            if all(self._arm_angles_seen.values()):
+                self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
             self._send(self._drive_imu, CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID)
             self._send(self._rover_estop, CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID)
             self._send(self._subsystem_enabled, CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID)

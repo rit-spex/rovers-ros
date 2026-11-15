@@ -3,8 +3,7 @@ import can
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.publisher import Publisher
-from custom_interfaces.msg import CanFD, Can
+from custom_interfaces.msg import Can
 
 from constants.CAN_constants import (
     TEENSY_CAN_MESSAGES,
@@ -16,11 +15,13 @@ from constants.can_encoding import TeensyCommunication
 
 import rclpy.publisher
 import rclpy.subscription
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
+from std_msgs.msg import Bool
 
 INTERFACE = "socketcan"
 CHANNEL = "can0"
 BIT_RATE = 1000000  # 1 Mbps
+ERROR_THRESHOLD = 5  # Number of errors before resetting the CAN network
+CAN_ERROR_TOPIC = "can_err"
 
 
 class CAN(Node):
@@ -33,6 +34,7 @@ class CAN(Node):
     def __init__(self) -> None:
         super().__init__("CAN_node")
         self.__estop = False
+        self.__error_count = 0
         self.reset_network()
 
         can.rc["interface"] = "socketcan"
@@ -60,6 +62,12 @@ class CAN(Node):
                 qos_profile=10,
             )
 
+        self.create_subscription(
+            msg_type=Can,
+            topic=CAN_ERROR_TOPIC,
+            callback=self.__on_can_error,
+            qos_profile=10,
+        )
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -90,6 +98,20 @@ class CAN(Node):
             self.__send_estop_clear()
             self.get_logger().info(
                 "E-STOP cleared, CAN output re-enabled")
+
+    def __on_can_error(self, msg: Can):
+        self.__error_count += 1
+        self.get_logger().info(
+            f"CAN error received: 0x{msg.id:03x} "
+            f"({self.__error_count}/{ERROR_THRESHOLD})"
+        )
+        if self.__error_count >= ERROR_THRESHOLD:
+            self.get_logger().error(
+                f"CAN error threshold reached ({self.__error_count} errors), "
+                "resetting the CAN network"
+            )
+            self.reset_network()
+            self.__error_count = 0
 
     def __send_safe_stop(self, include_estop: bool = True):
         """Send only outgoing messages whose defaults are safe stop values.
@@ -180,25 +202,50 @@ class JETSON_LISTENER(can.Listener):
                 msg_type=Can, topic=message.topic_name, qos_profile=10
             )
 
+        self.__error_publisher = self.__node.create_publisher(
+            msg_type=Can, topic=CAN_ERROR_TOPIC, qos_profile=10
+        )
+
+    @staticmethod
+    def __buffer(msg: can.Message) -> list[int]:
+        """Copy a frame payload into the fixed 8-byte ROS CAN layout."""
+        buf = [0] * 8
+        for i in range(min(msg.dlc, 8)):
+            buf[i] = msg.data[i]
+        return buf
+
+    def on_error(self, exc: Exception) -> bool:
+        """Keep the notifier alive when the interface briefly goes down.
+
+        Resetting can0 makes ``recv`` raise ``CanOperationError``.  Returning
+        True tells python-can the error was handled so the reader thread keeps
+        running until the link is back up.
+        """
+        self.__node.get_logger().warning(f"CAN receive error: {exc}")
+        return True
+
     def on_message_received(self, msg: can.Message) -> None:
+        # Error frames are not addressed to a motor; route them to the bus
+        # health path before the E_STOP/ID lookup below.
+        if msg.is_error_frame:
+            self.__error_publisher.publish(
+                Can(id=msg.arbitration_id, buf=self.__buffer(msg))
+            )
+            return
+
         if msg.arbitration_id == CAN_MESSAGE_IDS.E_STOP:
-            buf = [0] * 8
-            for i in range(msg.dlc):
-                buf[i] = msg.data[i]
-            self.__estop_publisher.publish(Can(id=msg.arbitration_id, buf=buf))
+            self.__estop_publisher.publish(
+                Can(id=msg.arbitration_id, buf=self.__buffer(msg))
+            )
             self.__node.get_logger().info(
                 "Hardware E-STOP frame received from CAN"
             )
             return
 
         if msg.arbitration_id in self.__publishers:
-            buf = [0] * 8  # Initialize buffer with 8 zeros
-            for i in range(msg.dlc):
-                buf[i] = msg.data[i]
-
             ros_msg = Can(
                 id=msg.arbitration_id,
-                buf=buf,
+                buf=self.__buffer(msg),
             )
             self.__node.get_logger().debug(
                 f"ID {msg.arbitration_id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.arbitration_id)].name}): {msg.data}"
