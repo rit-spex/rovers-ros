@@ -33,7 +33,7 @@ services:
 
             # X11 for GUI applications
             - /tmp/.X11-unix:/tmp/.X11-unix
-            - ${XAUTHORITY}:/root/.Xauthority
+            # - ${XAUTHORITY}:/root/.Xauthority
 
         extra_hosts:
             - "host.docker.internal:host-gateway"
