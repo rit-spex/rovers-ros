@@ -237,7 +237,6 @@ def udp_receive_thread(node: CAN_UDP, socket: socket, stop: threading.Event):
             elif rclpy.ok():
                 node.get_logger().info(f"failed to receive can udp packet: {e}")
 
-
 def main():
     rclpy.init()
     can_udp = CAN_UDP()

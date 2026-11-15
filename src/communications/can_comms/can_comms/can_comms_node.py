@@ -31,6 +31,9 @@ class CAN(Node):
     __can_tx_subscriptions: dict[CAN_MESSAGE_IDS, rclpy.subscription.Subscription]
     __notifier: can.Notifier | None
 
+    ERROR_THRESHOLD = 5  # Number of errors before resetting the CAN network
+    __error_count = 0  # Current number of errors
+
     def __init__(self) -> None:
         super().__init__("CAN_node")
         self.__estop = False
@@ -68,6 +71,13 @@ class CAN(Node):
             callback=self.__on_can_error,
             qos_profile=10,
         )
+        self.create_subscription(
+            msg_type=Bool,
+            topic="can_err",
+            callback=self.__on_can_error,
+            qos_profile=10,
+        )
+
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -143,6 +153,19 @@ class CAN(Node):
 
     def __send_can(self, msg: Can):
         self.get_logger().info(
+            f"CAN error received: {msg.error} on channel {msg.channel}"
+        )
+        self.reset_network()
+        self.__error_count += 1
+        if self.__error_count >= self.ERROR_THRESHOLD:
+            self.get_logger().error(
+                f"CAN error threshold reached ({self.__error_count} errors), shutting down can_comms_node"
+            )
+            rclpy.shutdown()
+
+
+    def send_msg(self, msg: Can):
+        self.get_logger().debug(
             f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
         bus_msg = can.Message(
@@ -202,9 +225,17 @@ class JETSON_LISTENER(can.Listener):
                 msg_type=Can, topic=message.topic_name, qos_profile=10
             )
 
-        self.__error_publisher = self.__node.create_publisher(
-            msg_type=Can, topic=CAN_ERROR_TOPIC, qos_profile=10
+        self.error_frame_publisher = self.__node.create_publisher(
+            msg_type=Bool, topic="can_err", qos_profile=10
         )
+
+    def on_message_received(self, msg: can.Message) -> None:
+        if msg.is_error_frame:
+            self.error_frame_publisher.publish(msg)
+        elif msg.arbitration_id in self.__publishers:
+            buf = [0] * 8  # Initialize buffer with 8 zeros
+            for i in range(msg.dlc):
+                buf[i] = msg.data[i]
 
     @staticmethod
     def __buffer(msg: can.Message) -> list[int]:

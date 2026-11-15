@@ -27,6 +27,19 @@ _ensure_local_package_path()
 from command_codes import CONSTANTS
 from encoding import MessageEncoder
 
+# arm_flags protocol bit positions. Keep in sync with the /ARM/STATE/*
+# flag topics published by the arm controller.
+ARM_FLAG_BITS = {
+    "HOMING": 1 << 0,
+    "FLIPPING": 1 << 1,
+    "FLIPPED": 1 << 2,
+    "PLANAR": 1 << 3,
+    "JOINT_DRIVE": 1 << 4,
+    "POSITION_LOCK": 1 << 5,
+    "ORIENTATION_LOCK": 1 << 6,
+    "GRIPPER_DRIVE": 1 << 7,
+}
+
 
 class TelemetryUplink(Node):
     """Collect rover-side telemetry topics and uplink compact protocol packets."""
@@ -38,7 +51,7 @@ class TelemetryUplink(Node):
         # verify end-to-end communication, so tracing should be on unless
         # explicitly disabled.
         self._protocol_trace = (
-            os.environ.get("ROVER_PROTOCOL_TRACE", "1").strip().lower()
+            os.environ.get("ROVER_PROTOCOL_TRACE", "0").strip().lower()
             not in {"0", "false", "no", "off"}
         )
 
@@ -68,7 +81,18 @@ class TelemetryUplink(Node):
             "wrist_bend_position": 0,
             "wrist_twist_position": 0,
             "gripper_position": 0,
+            "arm_operation_mode": 0,
+            "locked_joints": 0,
+            "homing_joints": 0,
+            "arm_flags": 0,
         }
+        # Do not send an arm_encoders packet until every arm joint has
+        # reported.  Otherwise the basestation arm view draws a zero pose
+        # before any real motor/Gazebo feedback exists.
+        self._arm_angles_seen = {
+            key: False for key in (
+                "arm_base_position", "shoulder_position", "elbow_position",
+                "wrist_bend_position", "wrist_twist_position")}
         self._drive_imu = {
             "drive_speed_left": 0.0,
             "drive_speed_right": 0.0,
@@ -83,6 +107,13 @@ class TelemetryUplink(Node):
             "life_enabled": False,
         }
         self._control_mode = {"control_mode": 0}
+        # Last arm command rejection.  Sent even before the arm is
+        # initialized so "waiting for joint angles" is visible.
+        self._arm_status = {
+            "arm_error_code": 0,
+            "arm_error_arg": 0,
+            "arm_error_seq": 0,
+        }
 
         self._register_subscriptions()
         self.create_timer(0.1, self._publish_uplink_packets)
@@ -118,6 +149,30 @@ class TelemetryUplink(Node):
         self._sub_u8("/LIFE/SPEC_SLIDE_POSITION", self._life_detection, "spec_slide_position")
         self._sub_u8("/LIFE/SPEC_COLOR_SENSOR", self._life_detection, "spec_color_sensor")
 
+        # Arm Subscriptions
+        # Joint angles arrive as Float32 radians and are converted to
+        # centi-degrees for the protocol's INT_16 fields.
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_BASE", self._arm_encoders, "arm_base_position")
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_SHOULDER", self._arm_encoders, "shoulder_position")
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_ELBOW", self._arm_encoders, "elbow_position")
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_WRIST_BEND", self._arm_encoders, "wrist_bend_position")
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_WRIST_TWIST", self._arm_encoders, "wrist_twist_position")
+        self._sub_s16_angle("/ARM/JOINT/CURRENT_GRIPPER", self._arm_encoders, "gripper_position")
+        self._sub_u8("/ARM/STATE/LOCKED_JOINTS", self._arm_encoders, "locked_joints")
+        self._sub_u8("/ARM/STATE/HOMING_JOINTS", self._arm_encoders, "homing_joints")
+        self._sub_u8("/ARM/STATE/OPERATION_MODE", self._arm_encoders, "arm_operation_mode")
+        for name, mask in ARM_FLAG_BITS.items():
+            self.create_subscription(
+                Bool, f"/ARM/STATE/{name}", self._flag_setter(mask), 10)
+
+        # One packed topic keeps code/arg/seq from being sampled mid-update.
+        self.create_subscription(
+            UInt32,
+            "/ARM/STATE/ERROR",
+            self._error_setter(self._arm_status),
+            10,
+        )
+
     def _sub_u8(self, topic: str, target: Dict, key: str) -> None:
         self.create_subscription(UInt8, topic, self._setter(target, key), 10)
 
@@ -142,11 +197,33 @@ class TelemetryUplink(Node):
 
         return _callback
 
+    def _flag_setter(self, mask: int) -> Callable:
+        def _callback(msg):
+            if msg.data:
+                self._arm_encoders["arm_flags"] |= mask
+            else:
+                self._arm_encoders["arm_flags"] &= ~mask
+
+        return _callback
+
+    def _error_setter(self, target: Dict) -> Callable:
+        def _callback(msg):
+            value = int(msg.data)
+            target["arm_error_code"] = (value >> 8) & 0xFF
+            target["arm_error_arg"] = value & 0xFF
+            target["arm_error_seq"] = (value >> 16) & 0xFF
+        return _callback
+
     def _angle_setter(self, target: Dict, key: str) -> Callable:
         def _callback(msg):
-            # Convert from degrees to the protocol's expected centi-degrees
-            target[key] = int(msg.data * 180 / 3.141592653589793)
-            self.get_logger().info(f"Angle update received for {key}: {msg.data} radians -> {target[key]} centi-degrees")
+            # The protocol carries centi-degrees in an INT_16, giving the
+            # arm view 0.01 deg resolution instead of whole-degree steps.
+            target[key] = int(round(math.degrees(msg.data) * 100.0))
+            if key in self._arm_angles_seen:
+                self._arm_angles_seen[key] = True
+            self.get_logger().debug(
+                f"Angle update for {key}: {msg.data:.4f} rad -> "
+                f"{target[key]} centi-degrees")
         return _callback
 
     # ------------------------------------------------------------------
