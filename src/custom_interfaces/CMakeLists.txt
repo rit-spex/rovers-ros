@@ -17,6 +17,8 @@ set(msg_files
     "msg/CanFD.msg"
     "msg/UDPPacket.msg"
     "msg/ArmWrist.msg"
+    "msg/ArmVelocity.msg"
+    "msg/ArmPose.msg"
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}

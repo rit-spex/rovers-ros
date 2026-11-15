@@ -1,0 +1,520 @@
+"""Single source of truth for the SPEX arm constants.
+
+Everything the arm package needs lives here: joint order and ROS topic
+names, motor indices and calibration, mechanical limits, the home pose,
+geometry, CAN message mappings, controller tuning (IK tolerances, octant
+rules, path planning), and SpaceMouse sensitivity.
+"""
+
+from __future__ import annotations
+
+import math
+import sys
+from enum import IntEnum
+from pathlib import Path
+from typing import NamedTuple
+
+
+def _shared_constants_dir() -> Path | None:
+    """Locate the workspace ``constants`` package this module shadows."""
+    try:
+        from ament_index_python.packages import get_package_prefix
+
+        prefix = Path(get_package_prefix("constants"))
+        candidate = (
+            prefix
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+            / "constants"
+        )
+        if (candidate / "CAN_constants.py").is_file():
+            return candidate
+    except Exception:
+        pass
+
+    for entry in sys.path:
+        candidate = Path(entry) / "constants"
+        if (candidate / "CAN_constants.py").is_file():
+            return candidate
+    return None
+
+
+_CONSTANTS_PACKAGE_DIR = _shared_constants_dir()
+if _CONSTANTS_PACKAGE_DIR is not None:
+    # Let ``constants.CAN_*`` resolve to the shared package.
+    __path__ = [str(_CONSTANTS_PACKAGE_DIR)]
+
+from constants.CAN_constants import CAN_MESSAGE_IDS  # noqa: E402
+# The bridge module puts the ``lib/rovers-protocol`` submodule on sys.path.
+# Arm nodes import ``rover_protocol.arm_errors`` directly, so trigger it here
+# before any node reaches its own ``rover_protocol`` import.
+import constants.CommandCodes  # noqa: E402,F401
+
+
+# =============================================================================
+# Joints and ROS topics
+# =============================================================================
+
+ARM_JOINTS = (
+    "base",
+    "shoulder",
+    "elbow",
+    "wrist_bend",
+    "wrist_twist",
+    "gripper",
+)
+# Joints in the 5-DOF model; the gripper is tracked separately.
+ARM_JOINT_NAMES = ARM_JOINTS[:-1]
+
+JOINT_TARGET_TOPICS = {
+    name: f"/ARM/JOINT/TARGET_{name.upper()}" for name in ARM_JOINTS
+}
+JOINT_CURRENT_TOPICS = {
+    name: f"/ARM/JOINT/CURRENT_{name.upper()}" for name in ARM_JOINTS
+}
+
+ESTOP_TOPIC = "/ESTOP"
+ARM_COMMAND_TOPIC = "/ARM/COMMAND"
+VELOCITY_TOPIC = "/ARM/CMD_VELOCITY"
+GRIPPER_AXIS_TOPIC = "/ARM/CMD_GRIPPER_AXIS"
+
+SOLENOID_TARGET_TOPIC = "/ARM/JOINT/TARGET_SOLENOID"
+
+# High-level arm state, published as one Bool topic per flag.
+ARM_FLAG_NAMES = (
+    "HOMING",
+    "FLIPPING",
+    "FLIPPED",
+    "PLANAR",
+    "JOINT_DRIVE",
+    "POSITION_LOCK",
+    "ORIENTATION_LOCK",
+    "GRIPPER_DRIVE",
+)
+
+ARM_STATE_TOPICS = {
+    "enabled": "/ARM/STATE/ENABLED",
+    "locked_joints": "/ARM/STATE/LOCKED_JOINTS",
+    "homing_joints": "/ARM/STATE/HOMING_JOINTS",
+    "operation_mode": "/ARM/STATE/OPERATION_MODE",
+    "error": "/ARM/STATE/ERROR",
+    "flags": {name: f"/ARM/STATE/{name}" for name in ARM_FLAG_NAMES},
+}
+ARM_ENABLED_TOPIC = ARM_STATE_TOPICS["enabled"]
+
+# Arm operating modes: name -> (wire code, human-readable label).
+_ARM_OPERATION_MODES = {
+    "PNP": (0, "PICK_AND_PLACE"),
+    "PNP_FLIPPED": (1, "PICK_AND_PLACE_FLIPPED"),
+    "PLANAR": (2, "PLANAR"),
+    "HOMING": (3, "HOMING"),
+}
+ARM_OPERATION_MODES = {
+    name: code for name, (code, _) in _ARM_OPERATION_MODES.items()
+}
+# Human-readable labels for the wire codes (used by debug tools).
+ARM_OPERATION_MODE_LABELS = {
+    code: label for _, (code, label) in _ARM_OPERATION_MODES.items()
+}
+
+
+# =============================================================================
+# Geometry and units
+# =============================================================================
+
+A0 = 6.5        # Elevation of shoulder joint from base [in]
+A1 = 22         # Upper arm length [in]
+A2 = 22         # Fore-arm length [in]
+A3 = 12         # Gripper length [in]
+
+# Key joint indices after each linkage translation.
+KEY_JOINT_IDX = [1, 3, 5, 8]
+
+RAD2DEG = 57.2957795786
+METERS_PER_INCH = 0.0254
+
+
+# =============================================================================
+# Control timing
+# =============================================================================
+
+DT = 0.05                   # Arm control period [s], shared by all nodes
+
+
+# =============================================================================
+# Home pose, gripper travel, and mechanical limits
+# =============================================================================
+
+HOMING_TARGET = [0, math.pi / 4, -math.pi / 4, 0, 0]   # Home: straight ahead
+
+# Physical gripper travel: 0 = open, 90 deg = closed.
+GRIPPER_MIN_ANGLE = 0.0
+GRIPPER_MAX_ANGLE = math.pi / 2
+
+# Mechanical per-joint limits [min, max] in radians - hardware bounds.
+MECHANICAL_LIMITS = [
+    (-math.pi * 3 / 4, math.pi * 3 / 4),   # base
+    (math.radians(2), math.radians(178)),   # shoulder
+    (-math.pi * 3 / 4, math.pi * 3 / 4),   # elbow
+    (-math.pi / 6, math.pi / 6),            # wrist bend
+    (-math.pi / 2, math.pi / 2),            # wrist twist
+]
+
+BASE_LIMIT = MECHANICAL_LIMITS[0]
+SHOULDER_LIMIT = MECHANICAL_LIMITS[1]
+ELBOW_LIMIT = MECHANICAL_LIMITS[2]
+WRIST_BEND_LIMIT = MECHANICAL_LIMITS[3]
+WRIST_TWIST_LIMIT = MECHANICAL_LIMITS[4]
+
+
+# =============================================================================
+# Motor identity and calibration
+# =============================================================================
+
+class ARM_MOTOR_IDX(IntEnum):
+    """Canonical motor order used by the arm hardware and topics."""
+
+    BASE = 0
+    SHOULDER = 1
+    ELBOW = 2
+    BEND_WRIST = 3
+    TWIST_WRIST = 4
+    GRIPPER = 5
+
+
+class ArmMotorParams(NamedTuple):
+    """Per-motor encoder calibration, limits, and speed."""
+
+    ticks_per_rad: float
+    tick_offset: int
+    tick_lower_limit: float
+    tick_upper_limit: float
+    max_speed: int
+
+
+# https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
+ARM_MOTOR_PARAMS = [
+    ArmMotorParams(
+        ticks_per_rad=-415000,
+        tick_offset=9900000,
+        tick_lower_limit=8596000,
+        tick_upper_limit=10225000,
+        max_speed=100,
+    ),  # base
+    ArmMotorParams(
+        ticks_per_rad=-262000,
+        tick_offset=625000,
+        tick_lower_limit=-244000,
+        tick_upper_limit=670700,
+        max_speed=30,
+    ),  # shoulder
+    ArmMotorParams(
+        ticks_per_rad=415000,
+        tick_offset=325000 + 268000,
+        tick_lower_limit=-652821 + 268000,
+        tick_upper_limit=1300000 + 268000,
+        max_speed=100,
+    ),  # elbow
+    # NOTE: Following limits exist on teensy side, currently redundant,
+    # also the teensy expects floats in radians soooo yeah
+    ArmMotorParams(
+        ticks_per_rad=1,
+        tick_offset=0,
+        tick_lower_limit=-10,
+        tick_upper_limit=10,
+        max_speed=100,
+    ),  # bend wrist
+    ArmMotorParams(
+        ticks_per_rad=1,
+        tick_offset=0,
+        tick_lower_limit=-20,
+        tick_upper_limit=20,
+        max_speed=100,
+    ),  # twist wrist
+    ArmMotorParams(
+        ticks_per_rad=1,
+        tick_offset=0,
+        tick_lower_limit=GRIPPER_MIN_ANGLE,
+        tick_upper_limit=GRIPPER_MAX_ANGLE,
+        max_speed=100,
+    ),  # gripper
+]
+
+
+def angle_limits(motor_idx: ARM_MOTOR_IDX) -> tuple[float, float]:
+    """Return the (lower, upper) joint angle limits [rad] for a motor.
+
+    Tick limits and the offset are converted through the same calibration
+    used to talk to the motor, then ordered because a negative
+    ``ticks_per_rad`` flips the tick direction.
+    """
+    params = ARM_MOTOR_PARAMS[motor_idx]
+    lower = (params.tick_lower_limit - params.tick_offset) / params.ticks_per_rad
+    upper = (params.tick_upper_limit - params.tick_offset) / params.ticks_per_rad
+    return (min(lower, upper), max(lower, upper))
+
+
+# =============================================================================
+# CAN mappings
+# =============================================================================
+
+# Command message ID for each OpenCAN motor.
+JOINT_MESSAGE_IDS = {
+    ARM_MOTOR_IDX.BASE:     CAN_MESSAGE_IDS.SEND_BASE,
+    ARM_MOTOR_IDX.SHOULDER: CAN_MESSAGE_IDS.SEND_SHOULDER,
+    ARM_MOTOR_IDX.ELBOW:    CAN_MESSAGE_IDS.SEND_ELBOW,
+}
+
+# Position response message IDs mapped back to their motor.
+MOTOR_FOR_MESSAGE = {
+    CAN_MESSAGE_IDS.READ_BASE:     ARM_MOTOR_IDX.BASE,
+    CAN_MESSAGE_IDS.READ_SHOULDER: ARM_MOTOR_IDX.SHOULDER,
+    CAN_MESSAGE_IDS.READ_ELBOW:    ARM_MOTOR_IDX.ELBOW,
+}
+
+# Standard (non-OpenCAN) joints: the command frame and signal for each one.
+# The wrist axes share a frame but only ever write their own signal.
+STANDARD_CAN_ANGLE_SIGNALS = {
+    ARM_MOTOR_IDX.BEND_WRIST:  (CAN_MESSAGE_IDS.MOVE_WRIST, "Position_Bend"),
+    ARM_MOTOR_IDX.TWIST_WRIST: (CAN_MESSAGE_IDS.MOVE_WRIST, "Position_Twist"),
+    ARM_MOTOR_IDX.GRIPPER:     (CAN_MESSAGE_IDS.MOVE_GRIPPER, "Position"),
+}
+
+# Standard-CAN position responses mapped back to the motor they report.
+STANDARD_CAN_READ_MOTORS = {
+    CAN_MESSAGE_IDS.READ_WRIST_BEND:  ARM_MOTOR_IDX.BEND_WRIST,
+    CAN_MESSAGE_IDS.READ_WRIST_TWIST: ARM_MOTOR_IDX.TWIST_WRIST,
+    CAN_MESSAGE_IDS.READ_GRIPPER:     ARM_MOTOR_IDX.GRIPPER,
+}
+
+# Motor order must match ARM_JOINTS.  The topic maps below depend on it.
+MOTOR_JOINT_NAMES = dict(zip(ARM_MOTOR_IDX, ARM_JOINTS))
+CURRENT_ANGLE_TOPICS = {
+    idx: JOINT_CURRENT_TOPICS[name] for idx, name in MOTOR_JOINT_NAMES.items()
+}
+TARGET_ANGLE_TOPICS = {
+    idx: JOINT_TARGET_TOPICS[name] for idx, name in MOTOR_JOINT_NAMES.items()
+}
+
+
+# =============================================================================
+# Motion tuning
+# =============================================================================
+
+# Maximum joint speed for the simulated mechanical arm [rad/s].
+# At DT=0.05 this caps each joint at ~9 deg per frame.
+MAX_ANG_VEL = math.radians(36)
+
+# Time to ramp from standstill to MAX_ANG_VEL [s].
+ANGULAR_SPEED_RAMP_TIME = 1.0
+
+
+# =============================================================================
+# Homing
+# =============================================================================
+
+HOMING_SPEED = 1 / 100                        # Radians per step during homing
+HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
+
+
+# =============================================================================
+# SpaceMouse input
+# =============================================================================
+
+# Per-axis sign conventions.  +1 = raw HID value used as-is,
+# -1 = raw HID value negated.  Adjust here to match device orientation.
+# Canonical reference: invKin202627/src/constants.py.  The basestation
+# publishes raw HID values, so these signs are applied exactly once.
+AXIS_SIGNS = {
+    "x":  1,
+    "y": -1,
+    "z": -1,
+    "rx": 1,
+    "ry": -1,
+    "rz": -1,
+}
+
+TRANSLATION_SENS = 0.22575    # SpaceMouse translation scale [in/unit]
+ROTATION_SENS = 0.015         # SpaceMouse rotation scale [rad/unit]
+
+RAW_MAX = 127              # Normalization max - SpaceMouse useful range
+DEADZONE = 0.05            # Normalized axis deadzone - kills resting-hand drift
+INPUT_EXPONENT = 1.5       # Power curve - mild fine-control bias, not mushy
+
+SPACEMOUSE_VENDOR_ID = 0x256f
+SPACEMOUSE_PRODUCT_ID = 0xc63a
+
+
+# =============================================================================
+# Target frame behavior
+# =============================================================================
+
+MAX_TRANSLATION_DELTA = 1.0  # Max target translation per frame [inches]
+
+# Orientation snapping: every target axis (n, o, a) must have one dominant
+# world-axis component above this magnitude and both other components below
+# ORIENTATION_SNAP_OFF_AXIS.  Then the desired target is snapped to the
+# nearest exact axis-aligned orientation.
+ORIENTATION_SNAP_THRESHOLD = 0.95
+ORIENTATION_SNAP_OFF_AXIS = 0.25
+
+
+# =============================================================================
+# Inverse-kinematics solver
+# =============================================================================
+
+POS_TOL = 0.01                   # Position convergence tolerance [in]
+ORI_TOL = 0.1                    # Orientation tolerance [rad]
+MAX_STEP = math.pi / 6           # Max angle change per Newton step [rad]
+FD_EPS = 1e-6                    # Jacobian finite-difference step [rad]
+DAMPING_LAMBDA_SQ = 1e-3         # DLS damping lambda^2
+LIMIT_TOL = 1e-9                 # Bound-proximity tolerance [rad]
+MAX_BACKTRACK = 6                # Step halvings before rejecting a step
+BACKTRACK_TOL = 1e-5             # Improvement threshold for stagnation
+MAX_ACTIVE_SET_PASSES = 5        # Extra active-set re-solves
+
+
+# =============================================================================
+# Controller tracking
+# =============================================================================
+
+TRACK_POS_TOL = 1e-4             # Position-drive early-exit tolerance [in]
+TRACK_ORI_TOL = 1e-4             # Orientation-drive early-exit tolerance [rad]
+
+
+# =============================================================================
+# Workspace and limiter behavior
+# =============================================================================
+
+ELBOW_DEADBAND = 0.2               # Radians - keep the elbow away from singularity
+O3_RELAX_MAX = math.radians(35)    # Max overshoot excused by octant relief
+EXCLUSION_RADIUS = 6.0             # End effector keep-out radius around the base [in]
+BASE_ZERO_RANGE = (math.radians(-5), math.radians(5))  # "Base near zero" band
+END_EFFECTOR_MIN_Z = -20.0         # Lower height bound for the end effector [in]
+
+
+# =============================================================================
+# Joint limits
+# =============================================================================
+
+# Per-mode joint limits [min, max] in radians.
+# Modes that use mechanical bounds reference MECHANICAL_LIMITS directly.
+
+# Full Range: mechanical base limits; dynamic overrides (shoulder
+# expansion, octant relief, octant curl) are applied at runtime by
+# FullRangeMode.get_limits().
+FULL_RANGE_LIMITS = list(MECHANICAL_LIMITS)
+
+# Homing: mechanical bounds only - no dynamic overrides
+HOMING_LIMITS = list(MECHANICAL_LIMITS)
+
+# Planar: base locked to +/-5 deg, shoulder 0-180 deg, rest mechanical
+PLANAR_LIMITS = [
+    (-math.radians(5), math.radians(5)),    # base restricted to +/-5 deg
+    (0, math.pi),                           # shoulder 0-180 deg
+    MECHANICAL_LIMITS[2],                   # elbow (mechanical)
+    MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
+    MECHANICAL_LIMITS[4],                   # wrist twist (mechanical)
+]
+
+# Pick and Place: base mechanical, shoulder 0-90 deg, elbow -135-0 deg,
+# wrist mechanical (reach-down workspace for pick-and-place tasks)
+PICK_AND_PLACE_LIMITS = [
+    MECHANICAL_LIMITS[0],                   # base (mechanical)
+    (0, math.radians(90)),                  # shoulder 0-90 deg
+    (-math.pi * 3 / 4, 0),                  # elbow -135-0 deg
+    MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
+    MECHANICAL_LIMITS[4],                   # wrist twist (mechanical)
+]
+
+# Pick and Place Flipped: mirror of Pick and Place - shoulder 90-180 deg,
+# elbow 0-135 deg (reach-down on the opposite side)
+PICK_AND_PLACE_FLIPPED_LIMITS = [
+    MECHANICAL_LIMITS[0],                   # base (mechanical)
+    (math.radians(90), math.pi),            # shoulder 90-180 deg
+    (0, math.pi * 3 / 4),                   # elbow 0-135 deg
+    MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
+    MECHANICAL_LIMITS[4],                   # wrist twist (mechanical)
+]
+
+
+# =============================================================================
+# Octant conventions and rules
+# =============================================================================
+#
+# World axes: +Y = front, -Y = back, +X = right, -X = left,
+#             +Z = up/high, -Z = down/low.
+#
+# Numbering:
+#   High (z >= 0): 1 Front, 2 Right, 3 Back, 4 Left
+#   Low  (z <  0): 5 Front, 6 Right, 7 Back, 8 Left
+
+FRONT_HIGH = 1
+RIGHT_HIGH = 2
+BACK_HIGH = 3
+LEFT_HIGH = 4
+FRONT_LOW = 5
+RIGHT_LOW = 6
+BACK_LOW = 7
+LEFT_LOW = 8
+
+OCTANT_NAMES = {
+    FRONT_HIGH: "Front High (+Y)",
+    RIGHT_HIGH: "Right High (+X)",
+    BACK_HIGH: "Back High (-Y)",
+    LEFT_HIGH: "Left High (-X)",
+    FRONT_LOW: "Front Low (+Y)",
+    RIGHT_LOW: "Right Low (+X)",
+    BACK_LOW: "Back Low (-Y)",
+    LEFT_LOW: "Left Low (-X)",
+}
+
+OCTANT_RELIEF = (BACK_HIGH, FRONT_LOW, BACK_LOW)
+OCTANT_CURL = (RIGHT_LOW, LEFT_LOW)
+
+# Controller-side octant gates (imported by RoverArmController).
+OCTANT_PLANAR_EXIT_LOCK = (BACK_HIGH, FRONT_LOW, BACK_LOW)
+OCTANT_DIRECT_FLIP = (
+    RIGHT_HIGH, LEFT_HIGH, RIGHT_LOW, LEFT_LOW,
+)
+
+# Mode-specific workspace gates.  Normal and Flipped stay out of the
+# restricted relief octants; Planar has a single valid octant per side.
+OCTANT_PLANAR_ALLOWED = (FRONT_HIGH, FRONT_LOW)
+OCTANT_PLANAR_FLIPPED_ALLOWED = (BACK_HIGH, BACK_LOW)
+OCTANT_NORMAL_ALLOWED = (
+    FRONT_HIGH, RIGHT_HIGH, LEFT_HIGH, RIGHT_LOW, LEFT_LOW,
+)
+
+OCTANT_POSITION_LIMITS = {
+    FRONT_HIGH: ((-60, 60), (-60, 60), (0, 60)),
+    RIGHT_HIGH: ((-60, 60), (-60, 60), (0, 60)),
+    BACK_HIGH: ((-60, 60), (-60, 60), (0, 60)),
+    LEFT_HIGH: ((-60, 60), (-60, 60), (0, 60)),
+    FRONT_LOW: ((-60, 60), (-60, 60), (END_EFFECTOR_MIN_Z, 0)),
+    RIGHT_LOW: ((-60, 60), (-60, 60), (END_EFFECTOR_MIN_Z, 0)),
+    BACK_LOW: ((-60, 60), (-60, 60), (END_EFFECTOR_MIN_Z, 0)),
+    LEFT_LOW: ((-60, 60), (-60, 60), (END_EFFECTOR_MIN_Z, 0)),
+}
+
+OCTANT_RULES = {
+    FRONT_HIGH: "position limits only",
+    RIGHT_HIGH: "position limits only",
+    BACK_HIGH: "position limits + upper-limit relief",
+    LEFT_HIGH: "position limits only",
+    FRONT_LOW: "position limits + upper-limit relief",
+    RIGHT_LOW: "position limits + elbow curl",
+    BACK_LOW: "position limits + upper-limit relief",
+    LEFT_LOW: "position limits + elbow curl",
+}
+
+
+# =============================================================================
+# Path planning
+# =============================================================================
+
+# Restricted octants are safe while the base stays inside the planar band.
+PLANAR_BASE = max(abs(PLANAR_LIMITS[0][0]), abs(PLANAR_LIMITS[0][1]))
+PATH_PLANNER_STEP = math.radians(5.0)   # Search-grid step [rad]
+PATH_PLANNER_MAX_EXPANSIONS = 200_000   # A* expansion cap

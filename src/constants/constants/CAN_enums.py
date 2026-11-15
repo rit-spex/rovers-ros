@@ -38,7 +38,7 @@ class CAN_MESSAGE_IDS(IntEnum):
     # MOVE_ELBOW = 23
     MOVE_WRIST = 24
 
-    MOVE_CLAW = 26
+    MOVE_GRIPPER = 26
     MOVE_SOLENOID = 27
 
     # READ_BASE = 30
@@ -46,7 +46,7 @@ class CAN_MESSAGE_IDS(IntEnum):
     # READ_ELBOW = 32
     READ_WRIST_BEND = 33
     READ_WRIST_TWIST = 34
-    READ_CLAW = 35
+    READ_GRIPPER = 35
     
     ENABLE_SCIENCE = 40
     MOVE_AUGER = 41

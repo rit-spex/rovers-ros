@@ -1,3 +1,6 @@
 <launch>
-	<node pkg="arm" exec="arm_node" name = "arm"></node>
+	<node pkg="arm" exec="arm_camera_node" name="arm_camera"></node>
+	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop"></node>
+	<node pkg="arm" exec="arm_controller_node" name="arm_controller"></node>
+	<node pkg="arm" exec="arm_hardware_node" name="arm_hardware"></node>
 </launch>

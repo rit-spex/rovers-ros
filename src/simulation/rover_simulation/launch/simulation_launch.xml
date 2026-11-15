@@ -14,5 +14,6 @@
 	<node pkg="rover_simulation" exec="sim_config_node" name="sim_config">
 		<param name="config" value="$(var robot_config)"/>
 	</node>
-	<node pkg="inverse_kinematics" exec="inverse_kinematics_node" name="inverse_kinematics" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_controller_node" name="arm_controller" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 </launch>

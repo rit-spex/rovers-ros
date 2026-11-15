@@ -127,10 +127,10 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=False,
     ),
-    CAN_MESSAGE_IDS.MOVE_CLAW: Message(
-        id=CAN_MESSAGE_IDS.MOVE_CLAW,
+    CAN_MESSAGE_IDS.MOVE_GRIPPER: Message(
+        id=CAN_MESSAGE_IDS.MOVE_GRIPPER,
         subsystem=Subsystems_Names.ARM,
-        name="MOVE_CLAW",
+        name="MOVE_GRIPPER",
         signals={
             "State": Signal(DATA_TYPES.UINT_8, 0),
             "Position": Signal(DATA_TYPES.FLOAT_32, 0),
@@ -164,10 +164,10 @@ TEENSY_CAN_MESSAGES = {
         },
         isforJetson=True,
     ),
-    CAN_MESSAGE_IDS.READ_CLAW: Message(
-        id=CAN_MESSAGE_IDS.READ_CLAW,
+    CAN_MESSAGE_IDS.READ_GRIPPER: Message(
+        id=CAN_MESSAGE_IDS.READ_GRIPPER,
         subsystem=Subsystems_Names.ARM,
-        name="READ_CLAW",
+        name="READ_GRIPPER",
         signals={
             "State": Signal(DATA_TYPES.UINT_8, 0),
             "Position": Signal(DATA_TYPES.FLOAT_32, 0),
