@@ -34,14 +34,14 @@ class CameraGimbal(Node):
         super().__init__("camera_gimbal_node")
 
         # Start serial
-        ser = serial.Serial(self.UART_port, self.baud)
+        self.ser = serial.Serial(self.UART_port, self.baud)
 
         # Initialize STorM32 command object
-        self.storm = cSTorM32RcCmd(ser=ser)
+        self.storm = cSTorM32RcCmd(ser=self.ser)
 
         # Set initial angles
-        self.reset_angles()
         self.angles = cCMD_SETANGLES(self.ser, self.pitch_deg, self.roll_deg, self.yaw_deg)
+        self.reset_angles()
 
         self.timer=self.create_timer(0.1, self.timer_callback)
 
