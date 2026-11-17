@@ -106,14 +106,17 @@ class CameraGimbal(Node):
         self.angles.send()
 
     def __on_angles_received(self, msg: Float32MultiArray):
-        # Handle received angles 
+        # Publish current camera gimbal angles status
         self.pitch_deg, self.roll_deg, self.yaw_deg = self.angles.getPayload()
-        self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
+        status = Float32MultiArray()
+        status.data = [self.yaw_deg, self.pitch_deg, self.roll_deg]  # list of float32 values
+        self.__angle_publisher.publish(status)
+        # Handle received angles 
         self.update_angles(msg.data[0], msg.data[1], msg.data[2])
         self.get_logger().debug(f"Recieved angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
 
     def __print_status(self, msg: Float32MultiArray):
-        self.get_logger().info(f"Sent angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
+        self.get_logger().info(f"Sent angles: Yaw: {msg.data[0]}, Pitch: {msg.data[1]}, Roll: {msg.data[2]}")
 
     def __on_estop_received(self, msg: Bool):
         self.get_logger().info("E-STOP received, stopping camera gimbal...")
