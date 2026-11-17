@@ -118,11 +118,11 @@ class Basestation(Node):
             publisher = publishers.get(key)
             if publisher is None:
                 continue
-            
+
             signal = signal_defs.get(key)
             if signal is None:
                 continue
-            
+
             # only send data that has changed to avoid spamming the network
             last_val_key = (message_id, key)
             if self.__last_values.get(last_val_key) == value:

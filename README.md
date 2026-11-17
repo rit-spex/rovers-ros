@@ -56,9 +56,25 @@ When enabled, the `basestation_node` and `telemetry_uplink_node` will print hex 
 
 ---
 
-## Building
+## Running using the Docker Environment
 
-Make sure you have ROS 2 (Humble) installed, then:
+> On windows, make sure Docker Desktop is installed and running.
+>
+> On Linux, make sure you have docker installed.
+
+To enter the docker environment, run the command `make enter` in the project directory.
+
+If this is your first time running this, it will setup and install the environment, so it might take a while.
+
+On startup, it will build the project, but on subsequent runs, it will just source the local source file.
+
+### Opening GUI Applications on Windows
+
+Install the program [Xming](http://www.straightrunning.com/XmingNotes/#sect-131) to view GUI applications ran in the Docker environment.
+
+Before launching any program, you need to launch Xming (or XServer) and set the display number to "".
+
+## Building
 
 ```bash
 colcon build
@@ -78,12 +94,14 @@ ros2 launch main simulation_launch.xml
 ## Connection
 
 SSH to the rover:
+
 ```bash
 ssh rovers@129.21.91.140
 # Password: rovers
 ```
 
 Then:
+
 ```bash
 cd ~/ros/rovers-ros
 source source.sh
@@ -91,3 +109,5 @@ ros2 launch main main_launch.xml
 ```
 
 After you see "starting xbee..." enter the password `rovers`.
+
+> If you are running the project in the docker environemnt, you won't be prompted for a password.
