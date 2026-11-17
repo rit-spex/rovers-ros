@@ -1,11 +1,11 @@
 from typing import Any
-from constants.CAN_Constants import TOPICS
-from constants.CommandCodes import CONSTANTS
+# from constants.CAN_Constants import TOPICS
+# from constants.CommandCodes import CONSTANTS
 
 import rclpy
 from rclpy.node import Node
 from rclpy.publisher import Publisher
-from std_msgs.msg import Bool, Float32, Float23MultiArray, UInt8MultiArray, Int8, Int16, Int32
+from std_msgs.msg import Bool, Float32, Float32MultiArray, UInt8MultiArray, Int8, Int16, Int32
 from Jetson.
 from STorM32_lib import *
 
@@ -64,7 +64,7 @@ class CameraGimbal(Node):
             qos_profile=10,
         )
 
-    def timer_callback(self):
+    # def timer_callback(self):
         # Update angles
         # self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
 
