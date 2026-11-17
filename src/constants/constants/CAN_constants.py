@@ -525,7 +525,7 @@ def generate_odrive_can_msgs():
                 },
                 isforJetson=True
             )
-    
+
     return ODRIVE_CAN_MESSAGES
 
 ODRIVE_CAN_MESSAGES = generate_odrive_can_msgs()
