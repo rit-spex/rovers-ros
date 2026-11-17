@@ -10,6 +10,7 @@ Helper scripts for building, sourcing, and running the rover workspace.
 | `restart_gazebo.sh` | Rebuild and restart Gazebo + rover stack (used by the GUI panel) |
 | `autoboot/install.sh` | Install the systemd unit that launches the rover stack at boot |
 | `autoboot/uninstall.sh` | Stop, disable, and remove the autoboot systemd unit |
+| `can/install.sh` | Install the narrow passwordless sudo rule for `can0` setup |
 
 ## Usage
 
@@ -58,6 +59,19 @@ them again. The external basestation process is left running.
 activation alone does not make them use the venv interpreter; this keeps
 `ros2 launch` nodes able to import pip-installed modules such as `can` and
 `digi.xbee`.
+
+## CAN permissions
+
+`can_comms` configures `can0` at startup with `ip link set`, which normally
+requires root. Install the one-time rule:
+
+```bash
+./scripts/can/install.sh
+```
+
+This writes `/etc/sudoers.d/rovers-can` allowing only
+`ip link set can0 ...` for the invoking user. `reset_can.zsh` then uses
+`sudo -n`, so autoboot never blocks on a password prompt.
 
 ## Stale build caches
 
