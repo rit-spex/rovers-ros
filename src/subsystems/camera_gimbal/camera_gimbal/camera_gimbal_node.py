@@ -40,10 +40,13 @@ class CameraGimbal(Node):
         self.storm = cSTorM32RcCmd(ser=self.ser)
 
         # Set initial angles
+        self.yaw_deg = 0.0
+        self.pitch_deg = 0.0
+        self.roll_deg = 0.0
         self.angles = cCMD_SETANGLES(self.ser, self.pitch_deg, self.roll_deg, self.yaw_deg)
         self.reset_angles()
 
-        self.timer=self.create_timer(0.1, self.timer_callback)
+        # self.timer=self.create_timer(0.1, self.timer_callback)
 
         # Subscribe to ESTOP
         self.create_subscription(
@@ -63,6 +66,13 @@ class CameraGimbal(Node):
             msg_type=Float32MultiArray,
             topic="/camera_gimbal/targetangle",
             callback=self.__on_angles_received,
+            qos_profile=10,
+        )
+
+        self.create_subscription(
+            msg_type=Float32MultiArray,
+            topic="/camera_gimbal/currentangle",
+            callback=self.__print_status,
             qos_profile=10,
         )
 
@@ -99,19 +109,21 @@ class CameraGimbal(Node):
         # Handle received angles 
         self.pitch_deg, self.roll_deg, self.yaw_deg = self.angles.getPayload()
         self.__angle_publisher.publish(Float32MultiArray([self.yaw_deg, self.pitch_deg, self.roll_deg]))
-        self.get_logger().debug(f"Sent angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
         self.update_angles(msg.data[0], msg.data[1], msg.data[2])
         self.get_logger().debug(f"Recieved angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
 
+    def __print_status(self, msg: Float32MultiArray):
+        self.get_logger().info(f"Sent angles: Yaw: {self.yaw_deg}, Pitch: {self.pitch_deg}, Roll: {self.roll_deg}")
+
     def __on_estop_received(self, msg: Bool):
-        self.get_logger().info("E-STOP received, stopping status LED...")
+        self.get_logger().info("E-STOP received, stopping camera gimbal...")
         
         rclpy.shutdown()
 
     def run(self):
-        self.get_logger().info("starting status LED...")
+        self.get_logger().info("starting camera gimbal...")
         rclpy.spin(self)
-        self.get_logger().info("stopping status LED")
+        self.get_logger().info("stopping camera gimbal")
 
 
 def main():
