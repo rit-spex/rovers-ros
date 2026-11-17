@@ -59,17 +59,17 @@ class Chassis(Node):
     def __LY_callback(self, msg: Float32):
         if self.__estop:
             return
-        self.__LY_value = msg.data
+        self.__LY_value = -msg.data
         self.__drive_power_can_message.signals["left"].set_value(self.__LY_value)
         self.__publish_drive_power()
         self.get_logger().debug(
-            f"LY axis {msg.data:.3f} -> "
+            f"LY axis {msg.data:.3f} -> {self.__LY_value:.3f} -> "
             f"{self.__drive_power_can_message.topic_name}")
 
     def __RY_callback(self, msg: Float32):
         if self.__estop:
             return
-        self.__RY_value = msg.data
+        self.__RY_value = -msg.data
         self.__drive_power_can_message.signals["right"].set_value(self.__RY_value)
         self.__publish_drive_power()
 
