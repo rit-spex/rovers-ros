@@ -1,3 +1,0 @@
-<launch>
-	<node pkg="inverse_kinematics" exec="inverse_kinematics_node" name="inverse_kinematics"></node>
-</launch>

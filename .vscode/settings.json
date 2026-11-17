@@ -1,6 +1,5 @@
 {
 	"python.autoComplete.extraPaths": [
-		"./lib/rovers-protocol",
 		"./install/xbee/lib/python3.10/site-packages",
 		"./install/main/lib/python3.10/site-packages",
 		"./install/gps/lib/python3.10/site-packages",
@@ -14,7 +13,6 @@
 		"/opt/ros/humble/local/lib/python3.10/dist-packages"
 	],
 	"python.analysis.extraPaths": [
-		"./lib/rovers-protocol",
 		"./install/xbee/lib/python3.10/site-packages",
 		"./install/main/lib/python3.10/site-packages",
 		"./install/gps/lib/python3.10/site-packages",
@@ -28,5 +26,5 @@
 		"/opt/ros/humble/local/lib/python3.10/dist-packages"
 	],
 	"python.analysis.typeCheckingMode": "standard",
-	"cmake.sourceDirectory": "/home/rovers/ros/rovers-ros/build/custom_interfaces__py"
+	"cmake.sourceDirectory": "C:/Users/aidan/VScode/rovers-ros/src/custom_interfaces"
 }

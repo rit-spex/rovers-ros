@@ -12,7 +12,6 @@ setup(
         ("share/" + package_name, ["launch/" + package_name + "_launch.xml"]),
         ("lib/" + package_name, [package_name + "/command_codes.py"]),
         ("lib/" + package_name, [package_name + "/encoding.py"]),
-        ("lib/" + package_name, [package_name + "/telemetry_uplink_node.py"]),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -22,9 +21,6 @@ setup(
     license="TODO: License declaration",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": [
-            "basestation_node = basestation.basestation_node:main",
-            "telemetry_uplink_node = basestation.telemetry_uplink_node:main",
-        ],
+        "console_scripts": ["basestation_node = basestation.basestation_node:main"],
     },
 )

@@ -1,2 +1,0 @@
-float32 wrist_bend
-float32 wrist_twist
