@@ -45,6 +45,7 @@ from encoding import MessageEncoder
 # lives on the basestation; this bridge only translates the semantic action
 # names into controller commands.
 ARM_STATE_JUST_PRESSED = 1
+ARM_STATE_HELD = 2
 ARM_STATE_COMMANDS = {
     "flip": "flip",
     "home": "home",
@@ -68,6 +69,13 @@ ARM_STATE_COMMANDS = {
     # Momentary strike, not a state. The basestation adds the matching
     # arm_state signal; the rover only forwards the pulse.
     "solenoid_strike": "fire_solenoid",
+}
+# Actions that repeat while the key is held.  The end effector jogs the
+# gripper until the stream stops, so these are forwarded on press and on
+# every held state.
+ARM_STATE_HELD_COMMANDS = {
+    "gripper_up": "gripper_up",
+    "gripper_down": "gripper_down",
 }
 
 
@@ -191,8 +199,12 @@ class Basestation(Node):
             # Only send changed values to avoid spamming ROS consumers.
             # Heartbeats are the exception: arrival itself is the liveness
             # signal, so always publish them even if the stamp repeats.
+            # Teleop axes are also the exception: the arm teleop node uses the
+            # repeated values as a liveness signal so a dead link can be told
+            # apart from a held stick.
             last_val_key = (message_id, key)
             if (not is_heartbeat
+                    and message_name not in TELEOP_MESSAGES
                     and self.__last_values.get(last_val_key) == value):
                 continue
             self.__last_values[last_val_key] = value
@@ -205,11 +217,20 @@ class Basestation(Node):
             publisher.publish(value_type(data=value))
 
     def __publish_arm_commands(self, decoded_data: dict) -> None:
-        """Translate just-pressed arm action states into arm commands."""
+        """Translate arm action states into arm commands.
+
+        Edge-triggered actions are forwarded on the just-pressed state.  The
+        held gripper arrows are forwarded on press and on every held state so
+        the end effector can jog until the stream stops.
+        """
         for signal, value in decoded_data.items():
-            if value != ARM_STATE_JUST_PRESSED:
+            if value == ARM_STATE_JUST_PRESSED:
+                command = (ARM_STATE_COMMANDS.get(signal)
+                           or ARM_STATE_HELD_COMMANDS.get(signal))
+            elif value == ARM_STATE_HELD:
+                command = ARM_STATE_HELD_COMMANDS.get(signal)
+            else:
                 continue
-            command = ARM_STATE_COMMANDS.get(signal)
             if command is not None:
                 self.__arm_command_publisher.publish(String(data=command))
 

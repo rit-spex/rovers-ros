@@ -152,8 +152,8 @@ stopped until a heartbeat is published.
 Arm keys are mapped to actions on the basestation and arrive over the radio
 as per-action press states (0 idle, 1 just pressed, 2 held, 3 just released).
 `basestation_node` converts the just-pressed states into `/ARM/COMMAND`
-messages, so `arm_controller_node` never holds the key map or does any edge
-detection. The simulator does not capture keys or drive arm joints directly;
-arm motion comes from the normal `/ARM/JOINT/*` interfaces (IK, SpaceMouse,
-or keyboard).
+messages, so the arm nodes never hold the key map or do any edge detection;
+`arm_master_node` only routes them. The simulator does not capture keys or
+drive arm joints directly; arm motion comes from the normal `/ARM/JOINT/*`
+interfaces (IK, SpaceMouse, or keyboard).
 

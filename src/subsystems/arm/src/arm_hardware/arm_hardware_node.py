@@ -3,7 +3,7 @@
 import math
 import threading
 
-from constants import (
+from arm_constants import (
     ARM_ENABLED_TOPIC, ARM_MOTOR_IDX, CURRENT_ANGLE_TOPICS, DT,
     ESTOP_TOPIC, SOLENOID_TARGET_TOPIC, STANDARD_CAN_ANGLE_SIGNALS,
     STANDARD_CAN_READ_MOTORS, TARGET_ANGLE_TOPICS, angle_limits,

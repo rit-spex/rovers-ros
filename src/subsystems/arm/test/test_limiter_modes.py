@@ -7,25 +7,25 @@ import sys
 
 import numpy as np
 
-from arm_controller.utils.limiters import (
+from arm_route_planner.kinematics.limiters import (
     BaseLimiter, FullRangeMode, PlanarMode, HomingMode,
     PickAndPlaceMode, PickAndPlaceFlippedMode,
     FULL_RANGE_MODE, PLANAR_MODE, HOMING_MODE,
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, LIMIT_MODES,
     arm_constraints, _get_octant,
 )
-from arm_controller.utils.actions.home import HomingController
-from arm_controller.utils.actions.flip import (
+from arm_route_planner.kinematics.actions.home import HomingController
+from arm_route_planner.kinematics.actions.flip import (
     FlipController, FlipSideController, _get_flipped_angles,
 )
-from arm_controller.utils.simulated_arm import (
+from arm_route_planner.kinematics.simulated_arm import (
     RoverArmController, SimulatedMechanicalArm,
     build_arm_solver_object, extract_key_joints,
 )
-from arm_controller.utils.generic_frames import (
+from arm_route_planner.kinematics.generic_frames import (
     OrientationMatrix, limit_respecting_diff, wrap2pi,
 )
-from constants import (
+from arm_constants import (
     HOMING_TARGET, HOMING_THRESHOLD, BASE_LIMIT, ELBOW_DEADBAND,
     MECHANICAL_LIMITS,
 )
@@ -126,8 +126,8 @@ def test_pick_and_place_limits():
           and abs(lim[3][1] - (math.pi/6)) < 1e-12)
 
     # Wrist twist: mechanical
-    check("P&P wrist twist is mechanical", abs(lim[4][0] - (-math.pi/2)) < 1e-12
-          and abs(lim[4][1] - (math.pi/2)) < 1e-12)
+    check("P&P wrist twist is mechanical", lim[4][0] == MECHANICAL_LIMITS[4][0]
+          and lim[4][1] == MECHANICAL_LIMITS[4][1])
 
     # clamp_angles behaviour
     out = PICK_AND_PLACE_MODE.clamp_angles([0.0, math.radians(120), math.radians(-60), 0, 0], None)
@@ -161,7 +161,8 @@ def test_pick_and_place_flipped():
     check("P&P flipped elbow lower is 0", abs(lim[2][0]) < 1e-12)
     check("P&P flipped elbow upper is 135deg", abs(math.degrees(lim[2][1]) - 135) < 1e-6)
     check("P&P flipped wrist bend is mechanical", abs(lim[3][0] - (-math.pi/6)) < 1e-12)
-    check("P&P flipped wrist twist is mechanical", abs(lim[4][0] - (-math.pi/2)) < 1e-12)
+    check("P&P flipped wrist twist is mechanical", lim[4][0] == MECHANICAL_LIMITS[4][0]
+          and lim[4][1] == MECHANICAL_LIMITS[4][1])
 
     # can_set
     check("P&P flipped allowed at shoulder=120 elbow=45",

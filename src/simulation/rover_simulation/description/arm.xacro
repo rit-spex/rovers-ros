@@ -256,7 +256,7 @@
         <child link="arm_wrist_twist_link"/>
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <axis xyz="0 1 0"/>
-        <limit lower="${-pi / 2}" upper="${pi / 2}"
+        <limit lower="${-pi / 4}" upper="${pi / 4}"
                effort="50" velocity="5.0"/>
     </joint>
 

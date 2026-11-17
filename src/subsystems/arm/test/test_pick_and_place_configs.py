@@ -9,15 +9,15 @@ import random
 import sys
 
 
-from constants import HOMING_TARGET, MECHANICAL_LIMITS
-from arm_controller.utils.simulated_arm import (
+from arm_constants import HOMING_TARGET, MECHANICAL_LIMITS
+from arm_route_planner.kinematics.simulated_arm import (
     RoverArmController, random_initial_angles,
 )
-from arm_controller.utils.limiters import (
+from arm_route_planner.kinematics.limiters import (
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, PLANAR_MODE,
     _get_octant,
 )
-from arm_controller.utils.generic_frames import wrap2pi
+from arm_route_planner.kinematics.generic_frames import wrap2pi
 
 PASS = 0
 FAIL = 0
@@ -83,13 +83,15 @@ def normal_even_pose():
 
 # One safe start pose per octant.  Restricted octants (3, 5, 7) start in
 # the planar band so the action itself is responsible for staying there.
+# These poses track the link lengths in arm_constants, so revisit them when
+# A0/A1/A2 change: the low octants are close to the z = 0 diagonal.
 SAFE_OCTANT_POSES = {
     1: (0, 0, -10, 0, 0),
     2: (-135, 0, 0, 0, 0),
     3: (0, 0, 135, 0, 0),
     4: (50, 45, -75, 0, 0),
-    5: (0, 0, -130, 0, 0),
-    6: (-135, 0, -120, 0, 0),
+    5: (0, 0, -45, 0, 0),
+    6: (-90, 0, -100, 0, 0),
     7: (0, 0, -135, 0, 0),
     8: (-120, 0, -135, 0, 0),
 }
@@ -563,7 +565,7 @@ def test_mode_octant_gates():
     set_angles(arm, [0, 0, math.radians(-10), 0, 0])
     check("normal can start in octant 1", arm.ee_octant == 1)
     check("normal refuses octant 5 command",
-          not arm.command_joint_angle(2, math.radians(-130)))
+          not arm.command_joint_angle(2, math.radians(-45)))
     check("normal refusal names octant 5",
           "octant 5" in (arm.take_failure() or "").lower())
 
@@ -571,7 +573,7 @@ def test_mode_octant_gates():
     set_angles(arm, [0, 0, math.radians(-10), 0, 0])
     arm.planar = True
     check("planar accepts octant 5 command",
-          arm.command_joint_angle(2, math.radians(-130)))
+          arm.command_joint_angle(2, math.radians(-45)))
     for _ in range(500):
         arm.update(None)
     check("planar command lands in octant 5", arm.ee_octant == 5)
