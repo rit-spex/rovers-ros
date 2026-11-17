@@ -8,14 +8,16 @@ from rclpy.publisher import Publisher
 from std_msgs.msg import Bool, Float32, Float32MultiArray, UInt8MultiArray, Int8, Int16, Int32
 # from Jetson.
 from STorM32_lib import *
+import serial
 
 class CameraGimbal(Node):
 
     # Configuration
     baud : Int32 = 115200
-    UART_port = "COM3" 
+    UART_port = "/dev/ttyACM0"#"COM3"
 
     # Camera Control Inputs
+    angles : cSTorM32RcCmd
     yaw_deg : Float32
     pitch_deg : Float32
     roll_deg : Float32
@@ -32,7 +34,7 @@ class CameraGimbal(Node):
         super().__init__("camera_gimbal_node")
 
         # Start serial
-        ser = serial.Serial(UART_port, baud)
+        ser = serial.Serial(self.UART_port, self.baud)
 
         # Initialize STorM32 command object
         self.storm = cSTorM32RcCmd(ser=ser)
