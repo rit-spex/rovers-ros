@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from custom_interfaces.msg import CanFD, Can
 
-from constants.CAN_constants import TEENSY_CAN_MESSAGES, CAN_MESSAGE_IDS
+from constants.CAN_constants import CAN_MESSAGES, CAN_MESSAGE_IDS
 from constants.can_encoding import TeensyCommunication
 
 import rclpy.publisher
@@ -40,7 +40,7 @@ class CAN(Node):
         self.__can_tx_subscriptions = {}
 
         # This is for messages coming in
-        for id, message in TEENSY_CAN_MESSAGES.items():
+        for id, message in CAN_MESSAGES.items():
             if message.isforJetson:
                 continue
 
@@ -80,7 +80,7 @@ class CAN(Node):
             "CAN_node: sending default messages before shutting down"
         )
         # clear out all of the messages with default values
-        for message_id, message in TEENSY_CAN_MESSAGES.items():
+        for message_id, message in CAN_MESSAGES.items():
             # Set all of the value to default
             message.reset()
             can_packet = TeensyCommunication.encode_can_message(message)
@@ -107,7 +107,7 @@ class CAN(Node):
 
     def send_msg(self, msg: Can):
         self.get_logger().debug(
-            f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
+            f"ID {msg.id} ({CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
         bus_msg = can.Message(
             arbitration_id=msg.id, data=list(msg.buf), is_extended_id=False
@@ -134,7 +134,7 @@ class JETSON_LISTENER(can.Listener):
         self.__publishers = {}
 
         # This is for messages coming in
-        for id, message in TEENSY_CAN_MESSAGES.items():
+        for id, message in CAN_MESSAGES.items():
             if not message.isforJetson:
                 continue
 
@@ -159,7 +159,7 @@ class JETSON_LISTENER(can.Listener):
                 buf=buf,
             )
             self.__node.get_logger().debug(
-                f"ID {msg.arbitration_id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.arbitration_id)].name}): {msg.data}"
+                f"ID {msg.arbitration_id} ({CAN_MESSAGES[CAN_MESSAGE_IDS(msg.arbitration_id)].name}): {msg.data}"
             )
 
             self.__publishers[msg.arbitration_id].publish(ros_msg)
