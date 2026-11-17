@@ -98,31 +98,32 @@ class Xbee(Node):
 
         self.__xbee_device.add_data_received_callback(self.read_data)
 
-        # try:
-        #     while rclpy.ok():
-        #         data = self.read_data()
-        #         if data is None:
-        #             self.get_logger().info("message was none")
-        #             break
-        #         if len(data) == 0:
-        #             continue
-        # finally:
-        #     try:
-        #         self.__xbee_device.close()
-        #     except Exception:
-        #         pass
+    def shutdown(self) -> None:
+        """Close the radio without letting cleanup mask a shutdown."""
+        try:
+            if self.__xbee_device.is_open():
+                self.__xbee_device.close()
+        except Exception as exc:
+            self.get_logger().warning(f"failed to close xbee device: {exc}")
 
 
 def main() -> None:
     rclpy.init()
-    xbee = Xbee()
+    node = None
     try:
-        xbee.run()
+        node = Xbee()
+        node.run()
+        # Spin inside the try: Ctrl-C and SIGINT arrive here, and the other
+        # arm nodes handle them without a traceback.
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except Exception as exc:
-        xbee.get_logger().error(f"xbee node failed: {exc}")
-    rclpy.spin(xbee)
+    finally:
+        if node is not None:
+            node.shutdown()
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
