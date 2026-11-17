@@ -53,6 +53,12 @@ them again. The external basestation process is left running.
 | `ROBOT_CONFIG` | saved config, else `arm_drivebase` | Build selection |
 | `SIM_STATE_DIR` | `${XDG_RUNTIME_DIR:-/tmp}/rovers-sim` | Tab state and logs |
 
+`source.sh` also appends the venv's `site-packages` directories to
+`PYTHONPATH`. ROS console scripts are generated with `#!/usr/bin/python3`, so
+activation alone does not make them use the venv interpreter; this keeps
+`ros2 launch` nodes able to import pip-installed modules such as `can` and
+`digi.xbee`.
+
 ## Stale build caches
 
 CMake remembers the absolute source path it was configured from. If a package

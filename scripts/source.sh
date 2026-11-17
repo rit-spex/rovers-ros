@@ -284,6 +284,23 @@ if [ -f "$_venv/bin/activate" ]; then
         fi
 
         if [ -n "$_venv_py" ]; then
+            # ROS installs its console scripts with #!/usr/bin/python3, so
+            # activation changes PATH but not the interpreter those processes
+            # run with. Append the venv site directories to PYTHONPATH so
+            # launched nodes can import pip-installed packages (can,
+            # digi.xbee, ...) while ROS and workspace paths stay ahead.
+            _venv_site="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null)"
+            _venv_plat="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_path("platlib"))' 2>/dev/null)"
+            for _venv_lib in "$_venv_site" "$_venv_plat"; do
+                [ -n "$_venv_lib" ] || continue
+                [ -d "$_venv_lib" ] || continue
+                case ":${PYTHONPATH:-}:" in
+                    *":$_venv_lib:"*) ;;
+                    *) PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$_venv_lib" ;;
+                esac
+            done
+            export PYTHONPATH
+
             # Make sure the active python3 really is the venv's interpreter.
             _py_bin="$(command -v python3 2>/dev/null)"
             if [ -n "$_py_bin" ] && [ -n "$_venv_real" ]; then
@@ -305,7 +322,7 @@ for name in sys.argv[1:]:
     except Exception:
         missing.append(name)
 print(" ".join(missing))
-' rclpy em catkin_pkg xbee serial can numpy sympy yaml 2>/dev/null
+' rclpy em catkin_pkg digi.xbee serial can numpy sympy yaml 2>/dev/null
                 }
 
                 _venv_missing="$(_venv_probe)"
@@ -420,6 +437,7 @@ unset _venv _venv_py _venv_real _active_real _py_bin _py_real
 unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
 unset _venv_missing _shell_kind _venv_fresh _venv_install
 unset _venv_req _venv_stamp _venv_hash _venv_stamp_hash
+unset _venv_site _venv_plat _venv_lib
 unset _prune_var _prune_value _prune_noglob _prune_old_ifs _prune_result
 unset _prune_entry
 unset -f _short _resolve_setup _prune_prefix_paths 2>/dev/null || true
