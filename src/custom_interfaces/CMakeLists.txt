@@ -7,18 +7,18 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
 
 set(msg_files
     "msg/Can.msg"
     "msg/CanFD.msg"
     "msg/UDPPacket.msg"
     "msg/ArmWrist.msg"
-    "msg/ArmVelocity.msg"
-    "msg/ArmPose.msg"
+    "msg/Pose.msg"
+    "msg/Velocity.msg"
+    "msg/PointList.msg"
     "msg/ArmCommand.msg"
     "msg/ArmPlannerStatus.msg"
     "msg/ArmTypingPlane.msg"
@@ -27,8 +27,9 @@ set(msg_files
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
+  DEPENDENCIES geometry_msgs std_msgs
 )
-ament_export_dependencies(rosidl_default_runtime)
+ament_export_dependencies(rosidl_default_runtime geometry_msgs std_msgs)
 
 # add_executable(custom_interfaces src/custom_interfaces.cpp)
 # target_include_directories(custom_interfaces PUBLIC

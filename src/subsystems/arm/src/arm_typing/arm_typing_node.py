@@ -29,12 +29,12 @@ Inputs:
     /ARM/TYPING/KEYS           std_msgs/String
     /ARM/STATE/CONTROL_SOURCE  std_msgs/UInt8
     /ARM/PLANNER/STATUS        custom_interfaces/ArmPlannerStatus
-    /ARM/STATE/POSE            custom_interfaces/ArmPose
+    /ARM/STATE/POSE            custom_interfaces/Pose
     /ESTOP                     std_msgs/Bool
 
 Outputs:
     /ARM/CONTROL/REQUEST           std_msgs/UInt8
-    /ARM/AUTONOMOUS/CMD_POSE       custom_interfaces/ArmPose
+    /ARM/AUTONOMOUS/CMD_POSE       custom_interfaces/Pose
     /ARM/AUTONOMOUS/COMMAND        custom_interfaces/ArmCommand
     /BASESTATION/xbox/AXIS_LY      std_msgs/Float32
     /BASESTATION/xbox/AXIS_RY      std_msgs/Float32
@@ -50,7 +50,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import (
     ArmCommand,
     ArmPlannerStatus,
-    ArmPose,
+    Pose,
     ArmTypingPlane,
     ArmTypingStatus,
 )
@@ -152,7 +152,7 @@ class ArmTypingNode(Node):
         self.__control_request_publisher = self.create_publisher(
             UInt8, ARM_CONTROL_REQUEST_TOPIC, 10)
         self.__pose_publisher = self.create_publisher(
-            ArmPose, AUTONOMOUS_POSE_TOPIC, 10)
+            Pose, AUTONOMOUS_POSE_TOPIC, 10)
         self.__command_publisher = self.create_publisher(
             ArmCommand, AUTONOMOUS_COMMAND_TOPIC, 10)
         # Publish the exact topics chassis_node already subscribes to for the
@@ -195,7 +195,7 @@ class ArmTypingNode(Node):
             10,
         )
         self.create_subscription(
-            ArmPose,
+            Pose,
             ARM_STATE_TOPICS["pose"],
             self.__on_pose_received,
             10,
@@ -279,7 +279,7 @@ class ArmTypingNode(Node):
         if not self.__planner_ready:
             self.__typing_mode_sent = False
 
-    def __on_pose_received(self, msg: ArmPose):
+    def __on_pose_received(self, msg: Pose):
         """Latch the measured end-effector pose used for arrival checks."""
         self.__current_pose = msg
 
@@ -317,7 +317,7 @@ class ArmTypingNode(Node):
 
     def __publish_pose(self, target):
         """Publish the current Cartesian key target."""
-        self.__pose_publisher.publish(ArmPose(
+        self.__pose_publisher.publish(Pose(
             x=target.x,
             y=target.y,
             z=target.z,

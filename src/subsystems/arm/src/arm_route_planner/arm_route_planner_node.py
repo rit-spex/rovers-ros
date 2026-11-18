@@ -12,8 +12,8 @@ targets (``/ARM/CMD_POSE``) take priority over teleop and are the interface
 used by ``arm_typing_node``.
 
 Inputs:
-    /ARM/CMD_VELOCITY       custom_interfaces/ArmVelocity
-    /ARM/CMD_POSE           custom_interfaces/ArmPose
+    /ARM/CMD_VELOCITY       custom_interfaces/Velocity
+    /ARM/CMD_POSE           custom_interfaces/Pose
     /ARM/PLANNER/COMMAND    custom_interfaces/ArmCommand
     /ESTOP                  std_msgs/Bool
     /ARM/JOINT/CURRENT_*    std_msgs/Float32 (5-DOF joints only)
@@ -23,7 +23,7 @@ Outputs:
     /ARM/STATE/{HOMING,FLIPPING,FLIPPED,PLANAR,JOINT_DRIVE,
                 POSITION_LOCK,ORIENTATION_LOCK}
     /ARM/STATE/{LOCKED_JOINTS,HOMING_JOINTS,OPERATION_MODE}
-    /ARM/STATE/POSE         custom_interfaces/ArmPose
+    /ARM/STATE/POSE         custom_interfaces/Pose
     /ARM/PLANNER/STATUS     custom_interfaces/ArmPlannerStatus
 
 The master node owns the gripper and solenoid, so this node never touches
@@ -42,8 +42,8 @@ from rclpy.node import Node
 from custom_interfaces.msg import (
     ArmCommand,
     ArmPlannerStatus,
-    ArmPose,
-    ArmVelocity,
+    Pose,
+    Velocity,
 )
 from std_msgs.msg import Bool, Float32, UInt8
 
@@ -204,7 +204,7 @@ class ArmRoutePlannerNode(Node):
             for name in PLANNER_FLAG_NAMES
         }
         self.__pose_publisher = self.create_publisher(
-            ArmPose, ARM_STATE_TOPICS["pose"], 10)
+            Pose, ARM_STATE_TOPICS["pose"], 10)
         self.__status_publisher = self.create_publisher(
             ArmPlannerStatus, PLANNER_STATUS_TOPIC, 10)
 
@@ -219,9 +219,9 @@ class ArmRoutePlannerNode(Node):
             10,
         )
         self.create_subscription(
-            ArmVelocity, VELOCITY_TOPIC, self.__on_velocity_received, 10)
+            Velocity, VELOCITY_TOPIC, self.__on_velocity_received, 10)
         self.create_subscription(
-            ArmPose, POSE_TOPIC, self.__on_pose_received, 10)
+            Pose, POSE_TOPIC, self.__on_pose_received, 10)
 
     # ------------------------------------------------------------------
     # Input callbacks
@@ -240,12 +240,12 @@ class ArmRoutePlannerNode(Node):
             self.get_logger().info("E-STOP cleared: route planner resumed")
             self.__emit_error(ARM_ERROR_NONE, log=False)
 
-    def __on_velocity_received(self, msg: ArmVelocity):
+    def __on_velocity_received(self, msg: Velocity):
         """Latch the latest arbitrated teleop velocity."""
         self.__velocity = msg
         self.__velocity_received_at = time.monotonic()
 
-    def __on_pose_received(self, msg: ArmPose):
+    def __on_pose_received(self, msg: Pose):
         """Latch the latest arbitrated absolute pose target."""
         self.__pose = msg
         self.__pose_received_at = time.monotonic()
@@ -588,7 +588,7 @@ class ArmRoutePlannerNode(Node):
         x, y, z = (float(value) for value in self.__arm.pos[-1])
         roll, pitch, yaw = rotation_to_rpy(
             self.__arm.frames[-1].rotation_matrix())
-        self.__pose_publisher.publish(ArmPose(
+        self.__pose_publisher.publish(Pose(
             x=x * METERS_PER_INCH,
             y=y * METERS_PER_INCH,
             z=z * METERS_PER_INCH,

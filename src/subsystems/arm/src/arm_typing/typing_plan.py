@@ -292,7 +292,7 @@ def pose_matches(current, target,
     """Return True when a measured pose is within the typing tolerances.
 
     ``current`` and ``target`` only need ``x``, ``y``, ``z``, ``roll``,
-    ``pitch``, and ``yaw`` attributes; both ``ArmPose`` and :class:`KeyTarget`
+    ``pitch``, and ``yaw`` attributes; both ``Pose`` and :class:`KeyTarget`
     satisfy that.
     """
     distance = math.sqrt(

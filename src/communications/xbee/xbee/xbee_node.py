@@ -29,15 +29,14 @@ class Xbee(Node):
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__publisher = self.create_publisher(
-            UInt8MultiArray, "/XBEE/MESSAGES",
-            QoSProfile(depth=10,
-                       reliability=ReliabilityPolicy.BEST_EFFORT))
         self.__remote_xbee = None
         self.__shutting_down = False
+        # Keep this interface identical to xbee_udp: /XBEE/MESSAGES/RX is
+        # the transport contract shared by the real and simulated links.
         self.__publisher = self.create_publisher(
-            UInt8MultiArray, "/XBEE/MESSAGES/RX", 10
-        )
+            UInt8MultiArray, "/XBEE/MESSAGES/RX",
+            QoSProfile(depth=10,
+                       reliability=ReliabilityPolicy.BEST_EFFORT))
         self.create_subscription(
             UInt8MultiArray, "/XBEE/MESSAGES/TX", self.send_msg, 10
         )

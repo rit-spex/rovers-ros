@@ -33,15 +33,15 @@ into the new owner's window.
 Inputs:
     /ESTOP                    std_msgs/Bool
     /ARM/COMMAND              std_msgs/String
-    /ARM/MANUAL/CMD_VELOCITY  custom_interfaces/ArmVelocity
-    /ARM/AUTONOMOUS/CMD_POSE  custom_interfaces/ArmPose
+    /ARM/MANUAL/CMD_VELOCITY  custom_interfaces/Velocity
+    /ARM/AUTONOMOUS/CMD_POSE  custom_interfaces/Pose
     /ARM/AUTONOMOUS/COMMAND   custom_interfaces/ArmCommand
     /ARM/CONTROL/REQUEST      std_msgs/UInt8   (control ownership requests)
     /ARM/PLANNER/STATUS       custom_interfaces/ArmPlannerStatus
 
 Outputs:
-    /ARM/CMD_VELOCITY          custom_interfaces/ArmVelocity
-    /ARM/CMD_POSE              custom_interfaces/ArmPose
+    /ARM/CMD_VELOCITY          custom_interfaces/Velocity
+    /ARM/CMD_POSE              custom_interfaces/Pose
     /ARM/PLANNER/COMMAND       custom_interfaces/ArmCommand
     /ARM/END_EFFECTOR/COMMAND  custom_interfaces/ArmCommand
     /ARM/STATE/CONTROL_SOURCE  std_msgs/UInt8   (manual/autonomous/none)
@@ -57,8 +57,8 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import (
     ArmCommand,
     ArmPlannerStatus,
-    ArmPose,
-    ArmVelocity,
+    Pose,
+    Velocity,
 )
 from std_msgs.msg import Bool, String, UInt8, UInt32
 
@@ -253,9 +253,9 @@ class ArmMasterNode(Node):
     def __node_links(self):
         """Create the command publishers, error publisher, and status sub."""
         self.__velocity_publisher = self.create_publisher(
-            ArmVelocity, VELOCITY_TOPIC, 10)
+            Velocity, VELOCITY_TOPIC, 10)
         self.__pose_publisher = self.create_publisher(
-            ArmPose, POSE_TOPIC, 10)
+            Pose, POSE_TOPIC, 10)
         self.__planner_command_publisher = self.create_publisher(
             ArmCommand, PLANNER_COMMAND_TOPIC, 10)
         self.__end_effector_command_publisher = self.create_publisher(
@@ -282,13 +282,13 @@ class ArmMasterNode(Node):
         self.create_subscription(
             String, ARM_COMMAND_TOPIC, self.__on_command_received, 10)
         self.create_subscription(
-            ArmVelocity,
+            Velocity,
             MANUAL_VELOCITY_TOPIC,
             self.__on_manual_velocity_received,
             10,
         )
         self.create_subscription(
-            ArmPose,
+            Pose,
             AUTONOMOUS_POSE_TOPIC,
             self.__on_autonomous_pose_received,
             10,
@@ -331,7 +331,7 @@ class ArmMasterNode(Node):
         if command:
             self.__handle_command(command)
 
-    def __on_manual_velocity_received(self, msg: ArmVelocity):
+    def __on_manual_velocity_received(self, msg: Velocity):
         """Forward manual teleop velocity, or drop it if manual is not active.
 
         The planner consumes only the arbitrated topic, so this node is the
@@ -351,7 +351,7 @@ class ArmMasterNode(Node):
             return
         self.__velocity_publisher.publish(msg)
 
-    def __on_autonomous_pose_received(self, msg: ArmPose):
+    def __on_autonomous_pose_received(self, msg: Pose):
         """Forward an autonomous target while autonomy owns the arm."""
         if self.__estop:
             return
@@ -577,7 +577,7 @@ class ArmMasterNode(Node):
 
     def __publish_zero_velocity(self):
         """Send a clean zero so the planner drops any latched manual motion."""
-        self.__velocity_publisher.publish(ArmVelocity())
+        self.__velocity_publisher.publish(Velocity())
 
     def __publish_hold(self):
         """Tell the planner to hold its measured pose and drop any target."""

@@ -11,7 +11,7 @@ commands, so the SpaceMouse axes are pure 5-DOF motion input.
 
 Current outputs:
 
-* ``/ARM/MANUAL/CMD_VELOCITY`` (``custom_interfaces/ArmVelocity``) - the raw
+* ``/ARM/MANUAL/CMD_VELOCITY`` (``custom_interfaces/Velocity``) - the raw
   manual intent: end-effector linear velocity [m/s] and angular velocity
   [rad/s] in the arm base frame.  ``arm_master_node`` arbitrates this onto
   ``/ARM/CMD_VELOCITY`` while manual owns the arm, so the planner never has
@@ -30,7 +30,7 @@ The pure shaping helpers (``normalize``, ``AxisShaper``,
 file owns the whole device contract.
 
 Autonomy and other non-teleop sources should feed their own command topics
-through a separate input/mux node.  ``custom_interfaces/ArmPose`` is defined
+through a separate input/mux node.  ``custom_interfaces/Pose`` is defined
 for absolute target poses.
 """
 
@@ -41,7 +41,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from custom_interfaces.msg import ArmVelocity, SpaceMouseAxes
+from custom_interfaces.msg import Velocity, SpaceMouseAxes
 
 from arm_constants import (
     AXIS_SIGNS,
@@ -177,7 +177,7 @@ class ArmTeleopNode(Node):
         }
 
         self.__velocity_publisher = self.create_publisher(
-            msg_type=ArmVelocity,
+            msg_type=Velocity,
             topic=MANUAL_VELOCITY_TOPIC,
             qos_profile=10,
         )
@@ -272,7 +272,7 @@ class ArmTeleopNode(Node):
         angular = clamp_vector_norm(
             [shaped["rx"], shaped["ry"], shaped["rz"]])
 
-        velocity = ArmVelocity()
+        velocity = Velocity()
 
         # Sensitivity is defined per control cycle; the ROS command is m/s,
         # so convert at this boundary.

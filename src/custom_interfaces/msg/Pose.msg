@@ -1,4 +1,4 @@
-# Cartesian arm target in the arm base frame.
+# Generic Cartesian pose in a caller-defined frame.
 # Positions are metres; rotations are radians (roll, pitch, yaw).
 float64 x
 float64 y

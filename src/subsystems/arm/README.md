@@ -116,7 +116,7 @@ Inputs:
 | `/ARM/TYPING/KEYS` | `std_msgs/String` | Literal text to type. Spaces, tabs, newlines, and braced names such as `{enter}` or `{space}` are supported. |
 | `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Confirms that autonomy actually owns the arm. |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness. |
-| `/ARM/STATE/POSE` | `custom_interfaces/ArmPose` | Measured end-effector pose used for the arrival check. |
+| `/ARM/STATE/POSE` | `custom_interfaces/Pose` | Measured end-effector pose used for the arrival check. |
 | `/ESTOP` | `std_msgs/Bool` | Aborts the sequence and stops the wheels. |
 
 Outputs:
@@ -124,7 +124,7 @@ Outputs:
 | Topic | Type | Notes |
 | --- | --- | --- |
 | `/ARM/CONTROL/REQUEST` | `std_msgs/UInt8` | Requests `AUTONOMOUS` while typing and hands back `MANUAL` when done. |
-| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/ArmPose` | Absolute key pose in the rover base frame. |
+| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/Pose` | Absolute key pose in the rover base frame. |
 | `/ARM/AUTONOMOUS/COMMAND` | `custom_interfaces/ArmCommand` | `fire_solenoid` at each key. |
 | `/BASESTATION/xbox/AXIS_LY` | `std_msgs/Float32` | Left-wheel forward/back creep, capped at `TYPING_DRIVE_MAX_POWER` (10%). |
 | `/BASESTATION/xbox/AXIS_RY` | `std_msgs/Float32` | Right-wheel forward/back creep, capped at `TYPING_DRIVE_MAX_POWER` (10%). |
@@ -474,7 +474,7 @@ Outputs:
 
 | Topic | Type | Notes |
 | --- | --- | --- |
-| `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Manual teleop intent. The master arbitrates it onto `/ARM/CMD_VELOCITY`. |
+| `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/Velocity` | Manual teleop intent. The master arbitrates it onto `/ARM/CMD_VELOCITY`. |
 
 The node applies axis signs, deadzone with hysteresis, the power curve, a
 vector-magnitude limit, and sensitivity once, then republishes the latched
@@ -485,7 +485,7 @@ idle. An axis whose raw value has not refreshed for
 commanded as zero, so a dead link cannot leave the arm moving. It handles
 teleop only; the master muxes this stream with the keyboard and any future
 autonomous source.
-`custom_interfaces/ArmPose` is the absolute target type. The master forwards
+`custom_interfaces/Pose` is the absolute target type. The master forwards
 it on `/ARM/CMD_POSE` only while an autonomous source owns the arm.
 
 ### `arm_master_node`
@@ -496,8 +496,8 @@ Inputs:
 | --- | --- | --- |
 | `/ESTOP` | `std_msgs/Bool` | While asserted, commands are ignored and the planner health check pauses. |
 | `/ARM/COMMAND` | `std_msgs/String` | One high-level action per message. Manual command surface. |
-| `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Manual teleop intent. Forwarded only while `MANUAL` owns the arm. |
-| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/ArmPose` | Autonomous absolute target. Forwarded only while `AUTONOMOUS` owns the arm; silence for `AUTONOMOUS_POSE_TIMEOUT_SEC` sends a planner hold. |
+| `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/Velocity` | Manual teleop intent. Forwarded only while `MANUAL` owns the arm. |
+| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/Pose` | Autonomous absolute target. Forwarded only while `AUTONOMOUS` owns the arm; silence for `AUTONOMOUS_POSE_TIMEOUT_SEC` sends a planner hold. |
 | `/ARM/AUTONOMOUS/COMMAND` | `custom_interfaces/ArmCommand` | Autonomous gripper/solenoid or planner commands. Forwarded only while `AUTONOMOUS` owns the arm. |
 | `/ARM/CONTROL/REQUEST` | `std_msgs/UInt8` | Request control ownership: `0` none, `1` manual, `2` autonomous. |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness and the latest command/runtime rejection. |
@@ -524,8 +524,8 @@ Outputs:
 
 | Topic | Type | Notes |
 | --- | --- | --- |
-| `/ARM/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Arbitrated teleop velocity. Zeroed on every handover and E-stop; requires a neutral stick before manual motion resumes. |
-| `/ARM/CMD_POSE` | `custom_interfaces/ArmPose` | Arbitrated absolute target from an autonomous source. |
+| `/ARM/CMD_VELOCITY` | `custom_interfaces/Velocity` | Arbitrated teleop velocity. Zeroed on every handover and E-stop; requires a neutral stick before manual motion resumes. |
+| `/ARM/CMD_POSE` | `custom_interfaces/Pose` | Arbitrated absolute target from an autonomous source. |
 | `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. Includes the internal `hold` sent on handover/E-stop. |
 | `/ARM/END_EFFECTOR/COMMAND` | `custom_interfaces/ArmCommand` | Only the gripper/solenoid commands, gated on E-stop and readiness. Includes the internal `stop_jog` sent on a handover. |
 | `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Authoritative control owner (`0` none, `1` manual, `2` autonomous). Diagnostic; published transient-local. |
@@ -570,8 +570,8 @@ Inputs:
 | --- | --- | --- |
 | `/ESTOP` | `std_msgs/Bool` | Pauses the planner while asserted. |
 | `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Forwarded high-level commands. |
-| `/ARM/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Latest teleop velocity; converted to per-cycle deltas at `DT`. |
-| `/ARM/CMD_POSE` | `custom_interfaces/ArmPose` | Absolute Cartesian target; takes priority over teleop while fresh. |
+| `/ARM/CMD_VELOCITY` | `custom_interfaces/Velocity` | Latest teleop velocity; converted to per-cycle deltas at `DT`. |
+| `/ARM/CMD_POSE` | `custom_interfaces/Pose` | Absolute Cartesian target; takes priority over teleop while fresh. |
 | `/ARM/JOINT/CURRENT_*` | `std_msgs/Float32` | Measured 5-DOF joint angles [rad]; the planner initializes once all five arrive. |
 
 Outputs:
@@ -583,7 +583,7 @@ Outputs:
 | `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is motor-locked. |
 | `/ARM/STATE/HOMING_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is being homed. |
 | `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing. |
-| `/ARM/STATE/POSE` | `custom_interfaces/ArmPose` | Measured end-effector pose (metres/radians). |
+| `/ARM/STATE/POSE` | `custom_interfaces/Pose` | Measured end-effector pose (metres/radians). |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Readiness plus the latest command/runtime rejection code. |
 
 The planner waits until all five measured angles arrive before it starts; it

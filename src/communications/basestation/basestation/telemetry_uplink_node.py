@@ -12,7 +12,7 @@ from typing import Callable, Dict
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from custom_interfaces.msg import ArmPose
+from custom_interfaces.msg import Pose
 from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
 
 
@@ -40,7 +40,7 @@ ARM_FLAG_BITS = {
     "ORIENTATION_LOCK": 1 << 6,
 }
 
-# ArmPose carries metres; the compact protocol uses centi-inches.
+# Pose carries metres; the compact protocol uses centi-inches.
 METERS_PER_INCH = 0.0254
 
 
@@ -188,7 +188,7 @@ class TelemetryUplink(Node):
         )
         # Measured end-effector pose from the arm controller.
         self.create_subscription(
-            ArmPose,
+            Pose,
             "/ARM/STATE/POSE",
             self._pose_setter(self._arm_pose),
             10,
@@ -237,7 +237,7 @@ class TelemetryUplink(Node):
 
     def _pose_setter(self, target: Dict) -> Callable:
         def _callback(msg):
-            # ArmPose is metres/radians; the protocol wants centi-inches
+            # Pose is metres/radians; the protocol wants centi-inches
             # and centi-degrees.
             target["pose_x"] = int(round(msg.x / METERS_PER_INCH * 100.0))
             target["pose_y"] = int(round(msg.y / METERS_PER_INCH * 100.0))
