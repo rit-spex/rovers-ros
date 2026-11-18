@@ -24,12 +24,13 @@ setup(
     zip_safe=True,
     maintainer='Garrett Tupper',
     maintainer_email='garrett59100@gmail.com',
-    description='Gazebo assets and simulated hardware bridges for the rover',
+    description='Gazebo assets and simulated hardware nodes for the rover',
     license='Apache License 2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'gazebo_bridge = rover_simulation.gazebo_bridge:main',
+            'arm_sim_node = rover_simulation.arm_sim_node:main',
+            'drivebase_sim_node = rover_simulation.drivebase_sim_node:main',
             'sim_config_node = rover_simulation.sim_config_node:main',
         ],
     },

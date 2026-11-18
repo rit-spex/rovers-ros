@@ -3,7 +3,7 @@
 <package format="3">
   <name>rover_simulation</name>
   <version>0.0.0</version>
-  <description>Gazebo assets and simulated hardware bridges for the SPEX rover</description>
+  <description>Gazebo assets and simulated hardware nodes for the SPEX rover</description>
   <maintainer email="garrett59100@gmail.com">Garrett Tupper</maintainer>
   <license>Apache License 2.0</license>
 
@@ -13,6 +13,8 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>custom_interfaces</exec_depend>
+  <exec_depend>constants</exec_depend>
+  <exec_depend>arm</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
@@ -22,11 +24,12 @@
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>forward_command_controller</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>twist_mux</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>pointcloud_to_laserscan</exec_depend>
   <exec_depend>gazebo_sim_control</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-yaml</test_depend>
 
   <export>
     <build_type>ament_python</build_type>

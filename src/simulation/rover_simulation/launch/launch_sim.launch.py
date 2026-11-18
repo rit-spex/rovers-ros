@@ -132,12 +132,16 @@ def generate_launch_description():
         name='pointcloud_to_laserscan'
     )
 
-    twist_mux_params = os.path.join(package_share, 'config', 'twist_mux.yaml')
-    twist_mux = Node(
-            package="twist_mux",
-            executable="twist_mux",
-            parameters=[twist_mux_params, {'use_sim_time': use_sim_time}],
-            remappings=[('/cmd_vel_out','/GAZEBO/CHASSIS/diff_cont/cmd_vel_unstamped')]
+    # Stands in for the chassis Teensy: turns the same CAN Drive_Power frame
+    # the real rover's chassis_node publishes into a diff-drive command.
+    # It also arbitrates the simulation-only navigation and joystick inputs,
+    # handles /ESTOP, applies the motor deadzone, and talks to diff_cont
+    # directly.
+    drivebase_sim = Node(
+            package='rover_simulation',
+            executable='drivebase_sim_node',
+            name='drivebase_sim_node',
+            parameters=[{'use_sim_time': use_sim_time}],
         )
 
     # Launch them all!
@@ -167,5 +171,5 @@ def generate_launch_description():
         spawn_arm,
         lidar_transform,
         points_2_scan,
-        twist_mux,
+        drivebase_sim,
     ])
