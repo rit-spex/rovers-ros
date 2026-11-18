@@ -3,7 +3,7 @@
 import pytest
 from geometry_msgs.msg import Twist
 
-from rover_simulation.cmd_vel_bridge import apply_motor_deadzone
+from rover_simulation.drivebase_sim_node import apply_motor_deadzone
 
 SEPARATION = 0.58
 DEADZONE = 0.02

@@ -7,7 +7,7 @@
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
 	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>
 	<node pkg="chassis" exec="chassis_node" name="chassis"></node>
-	<node pkg="rover_simulation" exec="gazebo_bridge" name="arm_gazebo_bridge" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)">
+	<node pkg="rover_simulation" exec="arm_sim_node" name="arm_sim" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)">
 		<param name="randomize_start" value="true"/>
 	</node>
 	<node pkg="main" exec="master_node" name="master_node"></node>
@@ -15,6 +15,7 @@
 		<param name="config" value="$(var robot_config)"/>
 	</node>
 	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_typing_node" name="arm_typing" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_route_planner_node" name="arm_route_planner" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_master_node" name="arm_master" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_end_effector_node" name="arm_end_effector" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>

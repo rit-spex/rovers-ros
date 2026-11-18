@@ -132,35 +132,15 @@ def generate_launch_description():
         name='pointcloud_to_laserscan'
     )
 
-    twist_mux_params = os.path.join(package_share, 'config', 'twist_mux.yaml')
-    twist_mux = Node(
-            package="twist_mux",
-            executable="twist_mux",
-            parameters=[twist_mux_params, {'use_sim_time': use_sim_time}],
-            remappings=[('/cmd_vel_out', '/GAZEBO/CHASSIS/diff_cont/cmd_vel_mux')]
-        )
-
-    # Highest-priority twist_mux input, active only while /ESTOP is latched.
-    estop_gate = Node(
+    # Stands in for the chassis Teensy: turns the same CAN Drive_Power frame
+    # the real rover's chassis_node publishes into a diff-drive command.
+    # It also arbitrates the simulation-only navigation and joystick inputs,
+    # handles /ESTOP, applies the motor deadzone, and talks to diff_cont
+    # directly.
+    drivebase_sim = Node(
             package='rover_simulation',
-            executable='sim_estop_gate',
-            name='sim_estop_gate',
-            parameters=[{'use_sim_time': use_sim_time}],
-        )
-
-    cmd_vel_bridge = Node(
-            package='rover_simulation',
-            executable='cmd_vel_bridge',
-            name='cmd_vel_bridge',
-            parameters=[{'use_sim_time': use_sim_time}],
-        )
-
-    # Stands in for the Teensy: turns the same CAN Drive_Power frame the real
-    # rover's chassis_node publishes into a diff-drive command.
-    can_drive_bridge = Node(
-            package='rover_simulation',
-            executable='can_drive_bridge',
-            name='can_drive_bridge',
+            executable='drivebase_sim_node',
+            name='drivebase_sim_node',
             parameters=[{'use_sim_time': use_sim_time}],
         )
 
@@ -191,8 +171,5 @@ def generate_launch_description():
         spawn_arm,
         lidar_transform,
         points_2_scan,
-        twist_mux,
-        estop_gate,
-        cmd_vel_bridge,
-        can_drive_bridge,
+        drivebase_sim,
     ])

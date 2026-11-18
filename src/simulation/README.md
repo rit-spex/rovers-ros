@@ -7,23 +7,28 @@ src/simulation/
   rover_simulation/
     description/   robot xacro, Gazebo plugins, ros2_control interfaces
     worlds/        empty.world, obstacles.world
-    config/        Gazebo params, controller config, twist mux
+    config/        Gazebo params and controller config
     rviz/          sim.rviz (RViz view for the simulated rover)
     launch/        launch_sim.launch.py, rsp.launch.py,
                    simulation_launch.xml (simulated rover node stack)
     rover_simulation/
-      gazebo_bridge.py     arm topics <-> Gazebo joint commands
-      sim_config_node.py   publishes the selected build to telemetry
+      arm_sim_node.py        simulated arm hardware (replaces arm_hardware)
+      drivebase_sim_node.py  simulated drive hardware (replaces the Teensy)
+      sim_config_node.py     publishes the selected build to telemetry
   gazebo_sim_control/
     Gazebo GUI plugin: robot configuration and restart panel
 ```
 
-## Why the bridge lives here
+## Why the simulation-only nodes live here
 
-`gazebo_bridge.py`, `sim_config_node.py`, `can_drive_bridge.py`, and the
-`cmd_vel` helpers only exist for simulation. They are not used by
-`main_launch.xml` on the real rover, so they are installed by
-`rover_simulation` rather than by `arm`, `chassis`, or `main`.
+`arm_sim_node.py`, `drivebase_sim_node.py`, and `sim_config_node.py` only
+exist for simulation. They are not used by `main_launch.xml` on the real
+rover, so they are installed by `rover_simulation` rather than by `arm`,
+`chassis`, or `main`.
+
+They are not a second command path. They are the simulated hardware
+backends: they implement the same interfaces as `arm_hardware_node` and the
+chassis Teensy, and only the final link to Gazebo is different.
 
 ## Topic namespaces
 
@@ -33,9 +38,8 @@ cannot be confused with the real rover's interfaces:
 ```text
 /GAZEBO/joint_states                           shared joint state bus
 /GAZEBO/ARM/arm_cont/commands                  arm forward command controller
-/GAZEBO/CHASSIS/diff_cont/cmd_vel_can          CAN Drive_Power mapped to a twist
 /GAZEBO/CHASSIS/diff_cont/cmd_vel_unstamped    drive controller velocity command
-/GAZEBO/CHASSIS/diff_cont/cmd_vel_joy          twist_mux joystick input
+/GAZEBO/CHASSIS/diff_cont/cmd_vel_joy          simulated joystick input
 /GAZEBO/CHASSIS/diff_cont/odom                 drive odometry
 ```
 
@@ -68,16 +72,16 @@ Use the workspace entry point:
 ```
 
 `launch_sim.launch.py` starts Gazebo, the robot state publisher, the
-controllers, `sim_estop_gate`, `cmd_vel_bridge`, and `can_drive_bridge`. The
-gate holds the simulated diff drive at zero through `twist_mux` while
-`/ESTOP` is active. `simulation_launch.xml`
-starts the simulated rover nodes (`xbee_udp`, `can_udp`, chassis, arm bridge,
-IK, etc.).
+controllers, and `drivebase_sim_node`. The drivebase node handles `/ESTOP`,
+the CAN `Drive_Power` path, navigation input, joystick input, and the motor
+deadzone. `simulation_launch.xml`
+starts the simulated rover nodes (`xbee_udp`, `can_udp`, chassis,
+`arm_sim_node`, IK, etc.).
 
-`cmd_vel_bridge` relays the mux output to `diff_drive_controller` and applies
-a small per-wheel motor deadzone (`motor_deadzone`, default `0.1` m/s), so
-tiny drive commands do not creep the simulated rover. Override it with
-`-p motor_deadzone:=<m/s>`; `wheel_separation` (default `0.58` m) must match
+`drivebase_sim_node` applies a small per-wheel motor deadzone
+(`motor_deadzone`, default `0.1` m/s) so tiny drive commands do not creep the
+simulated rover. Override it with `-p motor_deadzone:=<m/s>`;
+`wheel_separation` (default `0.58` m) must match
 `config/my_controllers.yaml`.
 
 ## Drive path parity
@@ -89,28 +93,28 @@ than inventing a second one:
 
 ```text
 chassis_node -> CAN/TX/CHASSIS/Drive_Power
-             -> can_drive_bridge (stands in for the Teensy)
-             -> /GAZEBO/CHASSIS/diff_cont/cmd_vel_can
-             -> twist_mux -> cmd_vel_bridge -> diff_cont -> 4 wheels
+             -> drivebase_sim_node (stands in for the Teensy)
+             -> /GAZEBO/CHASSIS/diff_cont/cmd_vel_unstamped
+             -> diff_cont -> 4 wheels
 ```
 
-`can_drive_bridge` decodes the frame with the same `constants` helpers the
+`drivebase_sim_node` decodes the frame with the same `constants` helpers the
 CAN transports use, scales per-side power in `[-1, 1]` by
 `max_wheel_angular_velocity` (default `10` rad/s, matching the joint command
-limit) times the wheel radius, and republishes at 10 Hz so `twist_mux` does
-not time the input out between joystick frames.
+limit) times the wheel radius, and writes the result directly to the
+diff-drive controller. There is no separate twist mux or relay stage.
 
 It is only authoritative while it is commanding motion: a neutral stream
-publishes nothing, and a released command publishes zero for `0.3` s before
-going quiet. That way `/cmd_vel` navigation (priority `10`) and the direct
-`joystick.launch.py` path (priority `100`) still reach the drive when nobody
-is driving from the basestation, while basestation input (priority `200`)
-wins when the sticks move. E-STOP stays highest at `255`.
+goes passive, and a released command publishes zero for `0.3` s before
+letting another source take over. The same node accepts `/cmd_vel`
+navigation (priority `10`) and the direct `joystick.launch.py` topic
+(priority `100`), while basestation input (priority `200`) wins when the
+sticks move. `/ESTOP` stays highest.
 
 Because the CAN input is latched, extended silence on `Drive_Power`
-(`1.0` s) is treated as a lost command path: the bridge publishes a final
-stop and goes passive. Link loss itself is handled upstream, where
-`master_node` latches `/ESTOP` after the basestation heartbeat stops.
+(`1.0` s) is treated as a lost command path: the node publishes a final stop
+and goes passive. Link loss itself is handled upstream, where `master_node`
+latches `/ESTOP` after the basestation heartbeat stops.
 
 ## Robot configuration
 

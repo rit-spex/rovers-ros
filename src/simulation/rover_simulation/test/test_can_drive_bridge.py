@@ -3,7 +3,7 @@
 import pytest
 from geometry_msgs.msg import Twist
 
-from rover_simulation.can_drive_bridge import drive_power_to_twist
+from rover_simulation.drivebase_sim_node import drive_power_to_twist
 
 SEPARATION = 0.58
 RADIUS = 0.081674
