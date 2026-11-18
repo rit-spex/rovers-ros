@@ -7,10 +7,13 @@ master node can focus on local actuators.
 
 It also consumes teleop velocity directly.  The master node does not convert
 or forward motion deltas; it only reports whether gripper drive is active so
-this node can hold the arm still while the gripper moves.
+this node can hold the arm still while the gripper moves.  Absolute Cartesian
+targets (``/ARM/CMD_POSE``) take priority over teleop and are the interface
+used by ``arm_typing_node``.
 
 Inputs:
     /ARM/CMD_VELOCITY       custom_interfaces/ArmVelocity
+    /ARM/CMD_POSE           custom_interfaces/ArmPose
     /ARM/PLANNER/COMMAND    custom_interfaces/ArmCommand
     /ESTOP                  std_msgs/Bool
     /ARM/JOINT/CURRENT_*    std_msgs/Float32 (5-DOF joints only)
@@ -51,13 +54,16 @@ from arm_constants import (
     ARM_JOINT_NAMES,
     ARM_OPERATION_MODES,
     ARM_STATE_TOPICS,
+    AUTONOMOUS_POSE_TIMEOUT_SEC,
     DT,
     ESTOP_TOPIC,
     JOINT_CURRENT_TOPICS,
     JOINT_TARGET_TOPICS,
     METERS_PER_INCH,
     PLANNER_COMMAND_TOPIC,
+    PLANNER_HOLD_COMMAND,
     PLANNER_STATUS_TOPIC,
+    POSE_TOPIC,
     VELOCITY_TIMEOUT_SEC,
     VELOCITY_TOPIC,
 )
@@ -105,6 +111,18 @@ def rotation_to_rpy(rotation) -> tuple[float, float, float]:
     return roll, pitch, yaw
 
 
+def rotation_from_rpy(roll: float, pitch: float, yaw: float):
+    """Return ``Rz(yaw) @ Ry(pitch) @ Rx(roll)`` as a 3x3 list."""
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+
+
 class ArmRoutePlannerNode(Node):
     """Compute and publish the 5-DOF arm joint targets and planner state."""
 
@@ -133,6 +151,13 @@ class ArmRoutePlannerNode(Node):
         self.__last_status_key = None
         self.__last_targets = None
         self.__publish_counter = 0
+
+        # Latest absolute Cartesian target.  The master forwards it only
+        # while an autonomous source owns the arm, so this node stays
+        # source-agnostic.
+        self.__pose = None
+        self.__pose_received_at = 0.0
+        self.__pose_active = False
         # Last published target for each joint.  Locked joints hold this
         # value instead of echoing noisy measured angles straight back.
         self.__locked_targets = [None] * len(ARM_JOINT_NAMES)
@@ -195,6 +220,8 @@ class ArmRoutePlannerNode(Node):
         )
         self.create_subscription(
             ArmVelocity, VELOCITY_TOPIC, self.__on_velocity_received, 10)
+        self.create_subscription(
+            ArmPose, POSE_TOPIC, self.__on_pose_received, 10)
 
     # ------------------------------------------------------------------
     # Input callbacks
@@ -217,6 +244,11 @@ class ArmRoutePlannerNode(Node):
         """Latch the latest arbitrated teleop velocity."""
         self.__velocity = msg
         self.__velocity_received_at = time.monotonic()
+
+    def __on_pose_received(self, msg: ArmPose):
+        """Latch the latest arbitrated absolute pose target."""
+        self.__pose = msg
+        self.__pose_received_at = time.monotonic()
 
     def __on_command_received(self, msg: ArmCommand):
         """Handle one high-level operator command."""
@@ -261,6 +293,12 @@ class ArmRoutePlannerNode(Node):
                 f"{reason or error_text(code, arg)}")
 
     def __handle_command(self, command: str):
+        # Holding is always legal: the master emits it on a handover or
+        # E-stop so a previous owner's target cannot keep moving the arm.
+        if command in (PLANNER_HOLD_COMMAND, "stop"):
+            self.__hold_position()
+            return
+
         # Gripper and solenoid commands never reach this node; the master
         # routes them to the end effector.  Anything unrecognised here is a
         # motion command validation failure.
@@ -326,6 +364,10 @@ class ArmRoutePlannerNode(Node):
             return True, self.__arm.toggle_orientation_lock()
         if command == "guide_orientation":
             return True, self.__arm.guide_orientation()
+        if command in ("typing_mode", "typing"):
+            return True, self.__arm.set_typing_mode(True)
+        if command in ("typing_off", "typing_disable"):
+            return True, self.__arm.set_typing_mode(False)
 
         if ":" in command:
             action, _, argument = command.partition(":")
@@ -340,9 +382,51 @@ class ArmRoutePlannerNode(Node):
 
         return False, False
 
+    def __hold_position(self):
+        """Drop any pose/velocity target and hold the measured pose."""
+        self.__pose = None
+        self.__pose_received_at = 0.0
+        self.__pose_active = False
+        self.__velocity = None
+        self.__velocity_received_at = 0.0
+        if self.__arm is not None:
+            self.__arm.hold()
+        self.get_logger().info("Arm target held")
+
     # ------------------------------------------------------------------
     # Control cycle
     # ------------------------------------------------------------------
+
+    def __pose_is_fresh(self) -> bool:
+        """True when an absolute target has refreshed recently."""
+        if self.__pose is None:
+            return False
+        if (time.monotonic() - self.__pose_received_at
+                > AUTONOMOUS_POSE_TIMEOUT_SEC):
+            if self.__pose_active:
+                self.__pose_active = False
+                self.get_logger().warning(
+                    "Absolute pose target stale; holding measured pose")
+            self.__pose = None
+            return False
+        return True
+
+    def __apply_pose_target(self):
+        """Solve and latch the current absolute Cartesian target."""
+        if self.__arm is None or self.__pose is None:
+            return
+        msg = self.__pose
+        position = (
+            float(msg.x) / METERS_PER_INCH,
+            float(msg.y) / METERS_PER_INCH,
+            float(msg.z) / METERS_PER_INCH,
+        )
+        rotation = rotation_from_rpy(
+            float(msg.roll), float(msg.pitch), float(msg.yaw))
+        if not self.__pose_active:
+            self.__pose_active = True
+            self.get_logger().debug("Absolute pose target acquired")
+        self.__arm.command_pose(position, rotation, drive=False)
 
     def __next_deltas(self):
         """Return the current teleop delta, or None when idle.
@@ -412,7 +496,10 @@ class ArmRoutePlannerNode(Node):
         self.__arm.sync_angles(
             list(self.__measured), reset_target=False)
 
-        deltas = self.__next_deltas()
+        pose_active = self.__pose_is_fresh()
+        if pose_active:
+            self.__apply_pose_target()
+        deltas = None if pose_active else self.__next_deltas()
         consumed = self.__arm.update(deltas)
         self.__publish_counter += 1
         self.__publish_targets(force=self.__publish_counter % 20 == 0)

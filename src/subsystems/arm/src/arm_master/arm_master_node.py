@@ -26,18 +26,22 @@ basestation error banner reads.  The planner reports error events in
 counter has exactly one writer.
 
 The control source is published for diagnostics, not as a gate the actuators
-read.  A handover publishes a zero velocity and an explicit gripper-jog stop,
-so stale manual intent cannot leak into the new owner's window.
+read.  A handover publishes a zero velocity, an explicit gripper-jog stop, and
+an internal planner ``hold``, so stale manual or autonomous intent cannot leak
+into the new owner's window.
 
 Inputs:
     /ESTOP                    std_msgs/Bool
     /ARM/COMMAND              std_msgs/String
     /ARM/MANUAL/CMD_VELOCITY  custom_interfaces/ArmVelocity
+    /ARM/AUTONOMOUS/CMD_POSE  custom_interfaces/ArmPose
+    /ARM/AUTONOMOUS/COMMAND   custom_interfaces/ArmCommand
     /ARM/CONTROL/REQUEST      std_msgs/UInt8   (control ownership requests)
     /ARM/PLANNER/STATUS       custom_interfaces/ArmPlannerStatus
 
 Outputs:
     /ARM/CMD_VELOCITY          custom_interfaces/ArmVelocity
+    /ARM/CMD_POSE              custom_interfaces/ArmPose
     /ARM/PLANNER/COMMAND       custom_interfaces/ArmCommand
     /ARM/END_EFFECTOR/COMMAND  custom_interfaces/ArmCommand
     /ARM/STATE/CONTROL_SOURCE  std_msgs/UInt8   (manual/autonomous/none)
@@ -50,7 +54,12 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from custom_interfaces.msg import ArmCommand, ArmPlannerStatus, ArmVelocity
+from custom_interfaces.msg import (
+    ArmCommand,
+    ArmPlannerStatus,
+    ArmPose,
+    ArmVelocity,
+)
 from std_msgs.msg import Bool, String, UInt8, UInt32
 
 from arm_constants import (
@@ -58,6 +67,9 @@ from arm_constants import (
     ARM_CONTROL_REQUEST_TOPIC,
     ARM_CONTROL_SOURCE_TOPIC,
     ARM_STATE_TOPICS,
+    AUTONOMOUS_COMMAND_TOPIC,
+    AUTONOMOUS_POSE_TOPIC,
+    AUTONOMOUS_POSE_TIMEOUT_SEC,
     DEFAULT_ARM_CONTROL_SOURCE,
     DT,
     END_EFFECTOR_COMMANDS,
@@ -68,8 +80,10 @@ from arm_constants import (
     JOG_REJECT_INTERVAL_SEC,
     MANUAL_VELOCITY_TOPIC,
     PLANNER_COMMAND_TOPIC,
+    PLANNER_HOLD_COMMAND,
     PLANNER_STATUS_TOPIC,
     PLANNER_TIMEOUT_SEC,
+    POSE_TOPIC,
     PRE_READY_END_EFFECTOR_COMMANDS,
     VELOCITY_NEUTRAL_EPSILON,
     VELOCITY_TOPIC,
@@ -213,6 +227,13 @@ class ArmMasterNode(Node):
         self.__planner_ready = False
         self.__last_error_seq = None
 
+        # Autonomous pose stream watchdog.  The producer refreshes the target
+        # while it is active; silence means it died or deliberately paused, so
+        # the master holds the measured pose instead of chasing stale intent.
+        self.__autonomous_pose_seen = False
+        self.__autonomous_pose_lost = False
+        self.__autonomous_pose_received_at = 0.0
+
         # Last error republished on /ARM/STATE/ERROR.
         self.__error_seq = 0
         self.__last_error = None
@@ -233,6 +254,8 @@ class ArmMasterNode(Node):
         """Create the command publishers, error publisher, and status sub."""
         self.__velocity_publisher = self.create_publisher(
             ArmVelocity, VELOCITY_TOPIC, 10)
+        self.__pose_publisher = self.create_publisher(
+            ArmPose, POSE_TOPIC, 10)
         self.__planner_command_publisher = self.create_publisher(
             ArmCommand, PLANNER_COMMAND_TOPIC, 10)
         self.__end_effector_command_publisher = self.create_publisher(
@@ -265,6 +288,18 @@ class ArmMasterNode(Node):
             10,
         )
         self.create_subscription(
+            ArmPose,
+            AUTONOMOUS_POSE_TOPIC,
+            self.__on_autonomous_pose_received,
+            10,
+        )
+        self.create_subscription(
+            ArmCommand,
+            AUTONOMOUS_COMMAND_TOPIC,
+            self.__on_autonomous_command_received,
+            10,
+        )
+        self.create_subscription(
             UInt8,
             ARM_CONTROL_REQUEST_TOPIC,
             self.__on_control_request_received,
@@ -284,6 +319,7 @@ class ArmMasterNode(Node):
         # a held stick after the latch clears.
         self.__velocity_gate.reset()
         self.__publish_zero_velocity()
+        self.__publish_hold()
         if self.__estop:
             self.__publish_stop_jog()
             self.get_logger().info("E-STOP latched: arm master paused")
@@ -315,6 +351,31 @@ class ArmMasterNode(Node):
             return
         self.__velocity_publisher.publish(msg)
 
+    def __on_autonomous_pose_received(self, msg: ArmPose):
+        """Forward an autonomous target while autonomy owns the arm."""
+        if self.__estop:
+            return
+        if self.__control_source != ArmControlSource.AUTONOMOUS:
+            return
+        self.__pose_publisher.publish(msg)
+        self.__autonomous_pose_received_at = time.monotonic()
+        self.__autonomous_pose_seen = True
+        if self.__autonomous_pose_lost:
+            self.__autonomous_pose_lost = False
+            self.get_logger().info("Autonomous pose stream resumed")
+
+    def __on_autonomous_command_received(self, msg: ArmCommand):
+        """Route an autonomous command through the same ownership gate."""
+        command = msg.command.strip()
+        if not command or self.__estop:
+            return
+        if self.__control_source != ArmControlSource.AUTONOMOUS:
+            return
+        if command in END_EFFECTOR_COMMANDS:
+            self.__forward(self.__end_effector_command_publisher, command)
+        else:
+            self.__forward(self.__planner_command_publisher, command)
+
     def __on_control_request_received(self, msg: UInt8):
         """Apply one control-ownership request or explain the refusal."""
         requested = int(msg.data)
@@ -336,11 +397,17 @@ class ArmMasterNode(Node):
         self.__control_source = source
         self.__publish_control_source()
         # A handover invalidates the previous owner's in-flight intent.  The
-        # zero velocity and the explicit jog stop land after any earlier
-        # forwarded sample on the same publisher, so ordering is defined.
+        # zero velocity, planner hold, and explicit jog stop land after any
+        # earlier forwarded sample on the same publisher, so ordering is
+        # defined.
         self.__velocity_gate.reset()
         self.__publish_zero_velocity()
+        self.__publish_hold()
         self.__publish_stop_jog()
+        if source == ArmControlSource.AUTONOMOUS:
+            self.__autonomous_pose_seen = False
+            self.__autonomous_pose_lost = False
+            self.__autonomous_pose_received_at = 0.0
         self.get_logger().info(
             f"Control source: {control_source_label(source)} ({reason})")
 
@@ -512,6 +579,11 @@ class ArmMasterNode(Node):
         """Send a clean zero so the planner drops any latched manual motion."""
         self.__velocity_publisher.publish(ArmVelocity())
 
+    def __publish_hold(self):
+        """Tell the planner to hold its measured pose and drop any target."""
+        self.__planner_command_publisher.publish(
+            ArmCommand(command=PLANNER_HOLD_COMMAND))
+
     def __publish_stop_jog(self):
         """Release a held jog so the actuator need not read ownership."""
         self.__end_effector_command_publisher.publish(
@@ -528,6 +600,21 @@ class ArmMasterNode(Node):
         if self.__estop:
             return
         self.__check_planner_health()
+        self.__check_autonomous_pose()
+
+    def __check_autonomous_pose(self):
+        """Hold the arm if an autonomous target stream disappears."""
+        if self.__control_source != ArmControlSource.AUTONOMOUS:
+            return
+        if not self.__autonomous_pose_seen or self.__autonomous_pose_lost:
+            return
+        if (time.monotonic() - self.__autonomous_pose_received_at
+                <= AUTONOMOUS_POSE_TIMEOUT_SEC):
+            return
+        self.__autonomous_pose_lost = True
+        self.get_logger().warning(
+            "Autonomous pose stream stale; holding the measured pose")
+        self.__publish_hold()
 
     def run(self):
         self.get_logger().info("Arm master started")

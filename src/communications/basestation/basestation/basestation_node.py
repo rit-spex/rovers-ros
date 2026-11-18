@@ -23,6 +23,7 @@ from std_msgs.msg import (
     UInt16,
     UInt32,
 )
+from custom_interfaces.msg import SpaceMouseAxes
 
 XBEE_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 TELEOP_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -116,6 +117,14 @@ class Basestation(Node):
             qos_profile=10,
         )
 
+        # One atomic sample of the six SpaceMouse axes.  The per-axis
+        # publishers are suppressed below so this is the only axis topic.
+        self.__spacemouse_axes_publisher = self.create_publisher(
+            msg_type=SpaceMouseAxes,
+            topic="/BASESTATION/spacemouse/axes",
+            qos_profile=TELEOP_QOS,
+        )
+
         self.create_subscription(
             msg_type=UInt8MultiArray,
             topic="/XBEE/MESSAGES/RX",
@@ -145,6 +154,11 @@ class Basestation(Node):
             message_name = message["name"]
             qos = TELEOP_QOS if message_name in TELEOP_MESSAGES else 10
             for signal_name, signal in message["values"].items():
+                # The six SpaceMouse axes are published together on
+                # /BASESTATION/spacemouse/axes; only buttons stay per-signal.
+                if (message_name == "spacemouse"
+                        and signal_name in CONSTANTS.SPACEMOUSE.ALL_AXES):
+                    continue
                 signal_type = signal.type
                 ros_type = self.__value_types.get(signal_type)
                 if ros_type is None:
@@ -171,6 +185,15 @@ class Basestation(Node):
             return
 
         message_name = self.__encoder.get_message_name(message_id)
+        if message_name == "spacemouse":
+            self.__spacemouse_axes_publisher.publish(SpaceMouseAxes(
+                x=int(decoded_data.get("x", 0)),
+                y=int(decoded_data.get("y", 0)),
+                z=int(decoded_data.get("z", 0)),
+                rx=int(decoded_data.get("rx", 0)),
+                ry=int(decoded_data.get("ry", 0)),
+                rz=int(decoded_data.get("rz", 0)),
+            ))
         if self._protocol_trace:
             self.get_logger().info(
                 "[protocol rx] id=0x%02X name=%s payload=%s bytes=%s"

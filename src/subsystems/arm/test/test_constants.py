@@ -134,10 +134,8 @@ def test_spacemouse_axis_map_lives_in_the_arm_constants_module():
 
     assert arm_constants.SPACEMOUSE_AXIS_NAMES == (
         "x", "y", "z", "rx", "ry", "rz")
-    assert arm_constants.SPACEMOUSE_AXIS_TOPICS["rz"] == (
-        "/BASESTATION/spacemouse/rz")
-    assert set(arm_constants.SPACEMOUSE_AXIS_TOPICS) == set(
-        arm_constants.SPACEMOUSE_AXIS_NAMES)
+    assert arm_constants.SPACEMOUSE_AXES_TOPIC == (
+        "/BASESTATION/spacemouse/axes")
     assert set(arm_constants.AXIS_SIGNS) == set(
         arm_constants.SPACEMOUSE_AXIS_NAMES)
 

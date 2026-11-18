@@ -1,6 +1,7 @@
 <launch>
 	<node pkg="arm" exec="arm_camera_node" name="arm_camera"></node>
 	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop"></node>
+	<node pkg="arm" exec="arm_typing_node" name="arm_typing"></node>
 	<node pkg="arm" exec="arm_route_planner_node" name="arm_route_planner"></node>
 	<node pkg="arm" exec="arm_master_node" name="arm_master"></node>
 	<node pkg="arm" exec="arm_end_effector_node" name="arm_end_effector"></node>

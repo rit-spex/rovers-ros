@@ -23,6 +23,9 @@ src/subsystems/arm/
 │   │   └── arm_camera_node.py
 │   ├── arm_teleop/                # teleop input normalization
 │   │   └── arm_teleop_node.py
+│   ├── arm_typing/                # autonomous keyboard typing
+│   │   ├── arm_typing_node.py
+│   │   └── typing_plan.py
 │   ├── arm_master/
 │   │   └── arm_master_node.py     # command router, readiness, errors
 │   ├── arm_end_effector/
@@ -44,29 +47,36 @@ src/subsystems/arm/
 
 ## Nodes
 
-The package provides six runtime nodes plus an opt-in debug tool.
-`arm_launch.xml` starts the first six and renames them to `arm_camera`,
-`arm_teleop`, `arm_route_planner`, `arm_master`, `arm_end_effector`, and
-`arm_hardware`.
+The package provides seven runtime nodes plus an opt-in debug tool.
+`arm_launch.xml` starts the first seven and renames them to `arm_camera`,
+`arm_teleop`, `arm_typing`, `arm_route_planner`, `arm_master`,
+`arm_end_effector`, and `arm_hardware`.
 
 | Executable | Standalone node name | Launched by default | Responsibility |
 | --- | --- | --- | --- |
 | `arm_teleop_node` | `arm_teleop_node` | yes | Owns SpaceMouse semantics; publishes normalized velocity and gripper commands. |
+| `arm_typing_node` | `arm_typing_node` | yes | Autonomous keyboard typing: plane/key inputs, drive-edge alignment, Cartesian key targets, and solenoid strikes. |
 | `arm_route_planner_node` | `arm_route_planner_node` | yes | Owns 5-DOF target generation: IK, limit modes, flips, homing, locks, pose, and the arm target topics. |
 | `arm_master_node` | `arm_master_node` | yes | Arm subsystem master: arbitrates control ownership, routes commands, watches planner readiness, and is the sole `/ARM/STATE/ERROR` writer. |
 | `arm_end_effector_node` | `arm_end_effector_node` | yes | Owns the gripper target, gripper drive, and solenoid strike. |
-| `arm_hardware_node` | `arm_hardware_node` | yes | Owns the CAN link: sends targets, polls measured angles, enforces enable/E-stop. Replaced by `gazebo_bridge` in simulation. |
+| `arm_hardware_node` | `arm_hardware_node` | yes | Owns the CAN link: sends targets, polls measured angles, enforces enable/E-stop. Replaced by `rover_simulation/arm_sim_node` in simulation. |
 | `arm_camera_node` | `arm_camera_node` | yes | Placeholder; no logic yet. |
 | `arm_sniffer_node` | `arm_sniffer_node` | no | Read-only diagnostic printer. |
 
+---
+
 ### `arm_teleop_node`
 
-The only node that knows the SpaceMouse exists. It subscribes to the six raw
-`/BASESTATION/spacemouse/*` axes, applies the sign convention, deadzone with
-entry hysteresis, power curve, vector-magnitude limit, and sensitivity, then
-republishes the result as manual velocity on `/ARM/MANUAL/CMD_VELOCITY` at
-`TELEOP_PUBLISH_RATE_HZ` (default 50 Hz). It republishes continuously so the
-master always has a fresh sample.
+The only node that knows the SpaceMouse exists. It subscribes to the single
+`/BASESTATION/spacemouse/axes` topic (`custom_interfaces/SpaceMouseAxes`),
+applies the sign convention, deadzone with entry hysteresis, power curve,
+vector-magnitude limit, and sensitivity, then republishes the result as
+manual velocity on `/ARM/MANUAL/CMD_VELOCITY` at `TELEOP_PUBLISH_RATE_HZ`
+(default 50 Hz). It republishes continuously so the master always has a fresh
+sample.
+
+The basestation packs all six axes into one message so a sample is atomic and
+the teleop node has one liveness timestamp instead of six.
 
 - Axis processing happens exactly once, here; downstream nodes consume
   normalized values only.
@@ -87,6 +97,92 @@ Tuning lives in `arm_constants.py` (`TELEOP_PUBLISH_RATE_HZ`,
 `INPUT_EXPONENT`, `TELEOP_INPUT_TIMEOUT_SEC`). The node does not declare ROS
 parameters because nothing overrides them; changing the constants requires a
 rebuild, which matches the rest of the arm tuning.
+
+---
+
+### `arm_typing_node`
+
+Autonomous keyboard typing. It is the first user of the autonomous command
+surface: it requests `AUTONOMOUS` control, publishes absolute arm poses on
+`/ARM/AUTONOMOUS/CMD_POSE`, and publishes solenoid commands on
+`/ARM/AUTONOMOUS/COMMAND`. `arm_master_node` is still the only mux and
+forwards those topics only while autonomy owns the arm.
+
+Inputs:
+
+| Topic | Type | Notes |
+| --- | --- | --- |
+| `/ARM/TYPING/PLANE` | `custom_interfaces/ArmTypingPlane` | Keyboard face in the rover base frame. The origin is the keyboard centre; `+X` runs along the keyboard, `+Y` up the face, and `+Z` out toward the rover. `side` may be `+1` (left), `-1` (right), or `0` to infer from `x`. |
+| `/ARM/TYPING/KEYS` | `std_msgs/String` | Literal text to type. Spaces, tabs, newlines, and braced names such as `{enter}` or `{space}` are supported. |
+| `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Confirms that autonomy actually owns the arm. |
+| `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness. |
+| `/ARM/STATE/POSE` | `custom_interfaces/ArmPose` | Measured end-effector pose used for the arrival check. |
+| `/ESTOP` | `std_msgs/Bool` | Aborts the sequence and stops the wheels. |
+
+Outputs:
+
+| Topic | Type | Notes |
+| --- | --- | --- |
+| `/ARM/CONTROL/REQUEST` | `std_msgs/UInt8` | Requests `AUTONOMOUS` while typing and hands back `MANUAL` when done. |
+| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/ArmPose` | Absolute key pose in the rover base frame. |
+| `/ARM/AUTONOMOUS/COMMAND` | `custom_interfaces/ArmCommand` | `fire_solenoid` at each key. |
+| `/BASESTATION/xbox/AXIS_LY` | `std_msgs/Float32` | Left-wheel forward/back creep, capped at `TYPING_DRIVE_MAX_POWER` (10%). |
+| `/BASESTATION/xbox/AXIS_RY` | `std_msgs/Float32` | Right-wheel forward/back creep, capped at `TYPING_DRIVE_MAX_POWER` (10%). |
+| `/ARM/TYPING/STATUS` | `custom_interfaces/ArmTypingStatus` | State, current key, progress, and detail for debugging. |
+
+How a sequence runs:
+
+1. Parse the string into keys from `TYPING_KEYBOARD` in
+   `arm_constants.py`. The table is a reference layout, not a measurement;
+   calibrate the per-key positions and sizes in key units against the real
+   keyboard, then adjust the pitch if needed.
+2. Request autonomous ownership and wait for the planner to report ready.
+3. Send `typing_mode` once so the planner selects the typing limits: base
+   restricted to +/-90 deg and the wrist locks released for a level tool.
+4. For each key, compute its position in the plane. If the key is not on the
+   arm's lateral reach line, drive forward/back at up to 10% until it is.
+   The rover must already be parallel to the keyboard and at the right
+   standoff; the differential drive cannot correct those without turning.
+   The drive command is published on the normal Xbox axes
+   (`/BASESTATION/xbox/AXIS_LY` and `AXIS_RY`), so `chassis_node` handles it
+   exactly like an operator holding the sticks and needs no autonomous-drive
+   code path. Do not hold the sticks while typing: the basestation publishes
+   on the same topics, so a live stick takes over until it returns to
+   neutral.
+5. Publish the key pose with the tool at `TYPING_STANDOFF_M` from the face.
+6. Wait until `/ARM/STATE/POSE` is within the position and orientation
+   tolerances, then fire the solenoid and advance.
+
+This works because the keyboard sits on the rover's left or right: the arm
+base can stay near `+90` or `-90` deg while the drivebase moves the next key
+onto the reach line. It deliberately does not ask the wrist to sweep across
+the keyboard.
+
+Example for a vertical keyboard on the rover's right (plane normal points at
+the rover, `-X`; adjust `x`/`z` to a reachable standoff):
+
+```bash
+ros2 topic pub --once /ARM/TYPING/PLANE \
+  custom_interfaces/msg/ArmTypingPlane \
+  "{x: 0.5, y: 0.0, z: 0.45, roll: 1.5708, pitch: 0.0, yaw: -1.5708, side: -1}"
+
+ros2 topic pub --once /ARM/TYPING/KEYS \
+  std_msgs/msg/String "{data: 'hello'}"
+```
+
+The node publishes progress on `/ARM/TYPING/STATUS` and waits for a fresh
+plane stream while it drives; publish the plane repeatedly from the camera or
+localization source while a sequence is running.
+
+The node rejects uppercase and shifted symbols: the solenoid is a momentary
+striker and cannot hold Shift while another key is pressed. It also refuses
+to drive without a fresh plane pose, releases ownership when finished, and
+stops the wheels on every state transition. It leaves the planner in typing
+limits when the sequence ends so the arm is not pulled out of a side pose;
+select homing or another limit mode to restore the normal P&P setup.
+
+---
+
 
 ### `arm_master_node`
 
@@ -121,12 +217,19 @@ It is also the control arbiter and the single writer of
 autonomous needs a live and ready planner outside an E-stop) and publishes
 the result with transient-local QoS. `/ARM/COMMAND` and
 `/ARM/MANUAL/CMD_VELOCITY` are the manual surfaces, so they are ignored while
-an autonomous source owns the arm.
+an autonomous source owns the arm. `/ARM/AUTONOMOUS/CMD_POSE` and
+`/ARM/AUTONOMOUS/COMMAND` are the autonomous surfaces and are ignored while
+manual owns the arm.
 
-A handover publishes a zero velocity on `/ARM/CMD_VELOCITY` and an internal
-`stop_jog` command to the end effector, so the previous owner's last sample
-cannot leak into the new owner's window. Manual velocity also requires a
-neutral stick after every handover or E-stop before motion resumes.
+A handover publishes a zero velocity, an internal `hold` to the planner, and
+an internal `stop_jog` command to the end effector, so the previous owner's
+last sample cannot leak into the new owner's window. Manual velocity also
+requires a neutral stick after every handover or E-stop before motion resumes.
+If an autonomous pose stream stops for `AUTONOMOUS_POSE_TIMEOUT_SEC`, the
+master holds the measured pose instead of chasing a dead target.
+
+---
+
 
 ### `arm_end_effector_node`
 
@@ -144,6 +247,9 @@ the Teensy fires and retracts the solenoid itself. The node freezes its
 outputs while E-stopped, matching the other arm nodes. It publishes the
 gripper target as soon as a measured angle is available; `arm_hardware_node`
 and the Gazebo bridge drop targets while the arm is disabled.
+
+---
+
 
 ### `arm_route_planner_node`
 
@@ -170,6 +276,9 @@ noise. Command rejections and runtime failures are reported in
 `/ARM/PLANNER/STATUS`, and the master republishes them on
 `/ARM/STATE/ERROR` so that topic has one writer.
 
+---
+
+
 ### `arm_hardware_node`
 
 The real-hardware CAN boundary. It receives joint targets and routes each one
@@ -189,11 +298,17 @@ the planner can initialize. A solenoid strike sends one
 `MOVE_SOLENOID.Enabled=1` frame; the Teensy retracts it, so there is no disable
 command. `destroy_node()` makes a best-effort attempt to disable the motors.
 
+---
+
+
 ### `arm_camera_node`
 
 Placeholder only: it creates a node and spins, with no publishers or
 subscribers. It is included in `arm_launch.xml` so the launch composition does
 not change when the camera is implemented.
+
+---
+
 
 ### `arm_sniffer_node`
 
@@ -201,6 +316,9 @@ Read-only diagnostic tool, deliberately excluded from every launch file. It
 subscribes to the current/target joint topics plus the arm state and
 E-stop topics and prints one snapshot per second. See
 [Debugging](#debugging).
+
+---
+
 
 ### Composition roots
 
@@ -219,20 +337,25 @@ topics.
   spacemouse ──► arm_teleop ──/ARM/MANUAL/CMD_VELOCITY──┐
                                                         │
   keyboard ──► arm_master ──────────────────────────────┤
- (basestation)     │  ▲                                 │
-                   │  └──/ARM/CONTROL/REQUEST            │
-                   │                                    ▼
-                   │  /ARM/CMD_VELOCITY ──────► arm_route_planner
-                   │  /ARM/PLANNER/COMMAND ───►        │ /ARM/JOINT/TARGET_{5}
-                   │                                   │ /ARM/STATE/*
-                   │  /ARM/STATE/CONTROL_SOURCE
-                   │        (diagnostic, transient-local)
-                   │  /ARM/END_EFFECTOR/COMMAND
-                   ▼
-             arm_end_effector ──/ARM/JOINT/TARGET_GRIPPER
-                   │           ──/ARM/JOINT/TARGET_SOLENOID
-                   │
-                   └──/ARM/STATE/ERROR (master)
+ (basestation)     ▲  │                                 │
+                   │  ├──/ARM/CONTROL/REQUEST            │
+  plane + keys ────┘  │                                 │
+  arm_typing ─────────┘                                 │
+      │  /ARM/AUTONOMOUS/CMD_POSE                       │
+      │  /ARM/AUTONOMOUS/COMMAND                        │
+      │                                                 ▼
+      │            /ARM/CMD_VELOCITY ────────► arm_route_planner
+      │            /ARM/CMD_POSE ────────────►        │ /ARM/JOINT/TARGET_{5}
+      │            /ARM/PLANNER/COMMAND ─────►        │ /ARM/STATE/*
+      │                                               │
+      │            /ARM/STATE/CONTROL_SOURCE
+      │                  (diagnostic, transient-local)
+      │            /ARM/END_EFFECTOR/COMMAND
+      ▼                                               ▼
+  chassis ◄──/BASESTATION/xbox/AXIS_LY + AXIS_RY   arm_end_effector
+                                                    │ /ARM/JOINT/TARGET_GRIPPER
+                                                    │ /ARM/JOINT/TARGET_SOLENOID
+                                                    └──/ARM/STATE/ERROR (master)
 
                          arm_hardware_node ──CAN──► Teensy
                                              ▲        motors
@@ -248,8 +371,9 @@ five joint targets and the end effector's gripper target both feed
 `arm_hardware_node`.
 
 In simulation `arm_hardware_node` is swapped for
-`rover_simulation/gazebo_bridge`, which maps the same target/current topics
-onto the Gazebo `arm_cont` position controller.
+`rover_simulation/arm_sim_node`. It exposes the same target, enable, E-stop,
+solenoid, and current-angle topics, but sends joint positions to the Gazebo
+`arm_cont` controller instead of the CAN motors.
 
 ## Control ownership
 
@@ -276,10 +400,11 @@ Any source requests a change by publishing the value on
 
 Ownership is enforced in one place: the master drops manual velocity and
 manual commands while another source owns the arm, and publishes a zero
-velocity plus `stop_jog` on every handover. The planner and end effector
-consume only the master's arbitrated topics, so they stay source-agnostic.
-The autonomous setpoint/command surface is the next step and should be a
-separate input topic, fed into the same mux.
+velocity, planner `hold`, and `stop_jog` on every handover. The planner and
+end effector consume only the master's arbitrated topics, so they stay
+source-agnostic. `arm_typing_node` is the first autonomous source; it uses
+`/ARM/AUTONOMOUS/CMD_POSE` and `/ARM/AUTONOMOUS/COMMAND` rather than the
+manual surfaces.
 
 ## Debugging
 
@@ -328,8 +453,9 @@ Output is spread over multiple lines with blank separators, for example:
 
 | Node | Publishes | Subscribes |
 | --- | --- | --- |
-| `arm_teleop_node` | `/ARM/MANUAL/CMD_VELOCITY` | `/BASESTATION/spacemouse/*` |
-| `arm_master_node` | `/ARM/CMD_VELOCITY`, `/ARM/PLANNER/COMMAND`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/STATE/ERROR` | `/ESTOP`, `/ARM/COMMAND`, `/ARM/MANUAL/CMD_VELOCITY`, `/ARM/CONTROL/REQUEST`, `/ARM/PLANNER/STATUS` |
+| `arm_teleop_node` | `/ARM/MANUAL/CMD_VELOCITY` | `/BASESTATION/spacemouse/axes` |
+| `arm_typing_node` | `/ARM/CONTROL/REQUEST`, `/ARM/AUTONOMOUS/CMD_POSE`, `/ARM/AUTONOMOUS/COMMAND`, `/BASESTATION/xbox/AXIS_LY`, `/BASESTATION/xbox/AXIS_RY`, `/ARM/TYPING/STATUS` | `/ARM/TYPING/PLANE`, `/ARM/TYPING/KEYS`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/PLANNER/STATUS`, `/ARM/STATE/POSE`, `/ESTOP` |
+| `arm_master_node` | `/ARM/CMD_VELOCITY`, `/ARM/CMD_POSE`, `/ARM/PLANNER/COMMAND`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/STATE/ERROR` | `/ESTOP`, `/ARM/COMMAND`, `/ARM/MANUAL/CMD_VELOCITY`, `/ARM/AUTONOMOUS/CMD_POSE`, `/ARM/AUTONOMOUS/COMMAND`, `/ARM/CONTROL/REQUEST`, `/ARM/PLANNER/STATUS` |
 | `arm_end_effector_node` | `/ARM/JOINT/TARGET_GRIPPER`, `/ARM/JOINT/TARGET_SOLENOID` | `/ESTOP`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/JOINT/CURRENT_GRIPPER` |
 | `arm_route_planner_node` | `/ARM/JOINT/TARGET_*` (5-DOF), planner `/ARM/STATE/*` topics, `/ARM/STATE/POSE`, `/ARM/PLANNER/STATUS` | `/ESTOP`, `/ARM/PLANNER/COMMAND`, `/ARM/CMD_VELOCITY`, `/ARM/JOINT/CURRENT_*` (5-DOF) |
 | `arm_hardware_node` | `/ARM/JOINT/CURRENT_*`, CAN frames to the Teensy | `/ARM/JOINT/TARGET_*`, `/ARM/JOINT/TARGET_SOLENOID`, `/ARM/STATE/ENABLED`, `/ESTOP`, CAN frames from the Teensy |
@@ -342,7 +468,7 @@ Inputs:
 
 | Topic | Type | Notes |
 | --- | --- | --- |
-| `/BASESTATION/spacemouse/{x,y,z,rx,ry,rz}` | `std_msgs/Int16` | Raw HID axes (`BEST_EFFORT`). Republished every basestation cycle so the teleop node can detect a dead link. |
+| `/BASESTATION/spacemouse/axes` | `custom_interfaces/SpaceMouseAxes` | Raw HID axes (`BEST_EFFORT`). One atomic sample of all six axes, republished every basestation cycle so the teleop node can detect a dead link. |
 
 Outputs:
 
@@ -359,8 +485,8 @@ idle. An axis whose raw value has not refreshed for
 commanded as zero, so a dead link cannot leave the arm moving. It handles
 teleop only; the master muxes this stream with the keyboard and any future
 autonomous source.
-`custom_interfaces/ArmPose` is defined for absolute target poses
-(`/ARM/CMD_POSE`), but nothing consumes it yet.
+`custom_interfaces/ArmPose` is the absolute target type. The master forwards
+it on `/ARM/CMD_POSE` only while an autonomous source owns the arm.
 
 ### `arm_master_node`
 
@@ -371,6 +497,8 @@ Inputs:
 | `/ESTOP` | `std_msgs/Bool` | While asserted, commands are ignored and the planner health check pauses. |
 | `/ARM/COMMAND` | `std_msgs/String` | One high-level action per message. Manual command surface. |
 | `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Manual teleop intent. Forwarded only while `MANUAL` owns the arm. |
+| `/ARM/AUTONOMOUS/CMD_POSE` | `custom_interfaces/ArmPose` | Autonomous absolute target. Forwarded only while `AUTONOMOUS` owns the arm; silence for `AUTONOMOUS_POSE_TIMEOUT_SEC` sends a planner hold. |
+| `/ARM/AUTONOMOUS/COMMAND` | `custom_interfaces/ArmCommand` | Autonomous gripper/solenoid or planner commands. Forwarded only while `AUTONOMOUS` owns the arm. |
 | `/ARM/CONTROL/REQUEST` | `std_msgs/UInt8` | Request control ownership: `0` none, `1` manual, `2` autonomous. |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness and the latest command/runtime rejection. |
 
@@ -397,7 +525,8 @@ Outputs:
 | Topic | Type | Notes |
 | --- | --- | --- |
 | `/ARM/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Arbitrated teleop velocity. Zeroed on every handover and E-stop; requires a neutral stick before manual motion resumes. |
-| `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. |
+| `/ARM/CMD_POSE` | `custom_interfaces/ArmPose` | Arbitrated absolute target from an autonomous source. |
+| `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. Includes the internal `hold` sent on handover/E-stop. |
 | `/ARM/END_EFFECTOR/COMMAND` | `custom_interfaces/ArmCommand` | Only the gripper/solenoid commands, gated on E-stop and readiness. Includes the internal `stop_jog` sent on a handover. |
 | `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Authoritative control owner (`0` none, `1` manual, `2` autonomous). Diagnostic; published transient-local. |
 | `/ARM/STATE/ERROR` | `std_msgs/UInt32` | Last rejection, packed as `(seq << 16) \| (code << 8) \| arg`; codes are in `rover_protocol.arm_errors`. |
@@ -442,6 +571,7 @@ Inputs:
 | `/ESTOP` | `std_msgs/Bool` | Pauses the planner while asserted. |
 | `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Forwarded high-level commands. |
 | `/ARM/CMD_VELOCITY` | `custom_interfaces/ArmVelocity` | Latest teleop velocity; converted to per-cycle deltas at `DT`. |
+| `/ARM/CMD_POSE` | `custom_interfaces/ArmPose` | Absolute Cartesian target; takes priority over teleop while fresh. |
 | `/ARM/JOINT/CURRENT_*` | `std_msgs/Float32` | Measured 5-DOF joint angles [rad]; the planner initializes once all five arrive. |
 
 Outputs:
@@ -502,10 +632,12 @@ No topics yet; it only constructs and spins.
 
 ### Simulation
 
-`rover_simulation/gazebo_bridge` replaces `arm_hardware_node`: it subscribes
-to the same `/ARM/JOINT/TARGET_*` and `/ARM/JOINT/TARGET_SOLENOID` topics and
-publishes `/ARM/JOINT/CURRENT_*` from the Gazebo `arm_cont` position
-controller. The master, planner, teleop, and basestation topics are
+`rover_simulation/arm_sim_node` replaces `arm_hardware_node`: it subscribes
+to the same `/ARM/JOINT/TARGET_*`, `/ARM/JOINT/TARGET_SOLENOID`,
+`/ARM/STATE/ENABLED`, and `/ESTOP` topics and publishes
+`/ARM/JOINT/CURRENT_*`. Internally it sends the six-joint position command to
+the Gazebo `arm_cont` controller and republishes the Gazebo joint states as
+arm feedback. The master, planner, teleop, and basestation topics are
 identical between simulation and hardware.
 
 ## Controller behaviour
@@ -516,10 +648,16 @@ identical between simulation and hardware.
   target. This runs in the route planner.
 - **Joint drive:** `rx → elbow`, `ry → shoulder`, `rz → base`; no IK. The
   planner applies the joint limits.
+- **Absolute pose:** `/ARM/CMD_POSE` replaces the target frame and runs the
+  same IK/limit path. It takes priority over teleop while the target stream
+  is fresh; the master's stale-target hold stops the chase.
 - **Limit modes:** Pick-and-Place normal and flipped, Planar (base lock),
-  and Homing. Restricted octants (3, 5, 7) require Planar.
-- **Actions:** `flip`, `planar`, `pnp_normal`, `homing`, `joint_drive`,
-  `guide_orientation`, and joint locks run in the route planner.
+  Typing (base limited to +/-90 deg, wrist locks released), and Homing.
+  Restricted octants (3, 5, 7) require Planar.
+- **Actions:** `flip`, `planar`, `pnp_normal`, `typing_mode` /
+  `typing_off`, `homing`, `joint_drive`, `guide_orientation`, and joint
+  locks run in the route planner. `typing_mode` is normally sent by
+  `arm_typing_node` on the autonomous command surface, not by the operator.
   `gripper_up`, `gripper_down`, and `fire_solenoid` stay in the end effector
   node. The full command list and syntax are documented in the module
   docstrings of `arm_master_node.py` and `arm_route_planner_node.py`.
@@ -534,7 +672,10 @@ identical between simulation and hardware.
   unavailable after `PLANNER_TIMEOUT_SEC` (5 s) without status and reports
   `ARM_ERROR_REJECTED`. The planner runs path searches inside its command
   callback, so a long homing or flip plan can delay status; the 5 s watchdog
-  covers that gap.
+  covers that gap. An autonomous pose target stops after
+  `AUTONOMOUS_POSE_TIMEOUT_SEC` (0.5 s) without a refresh, and
+  `arm_typing_node` stops the drivebase when its plane pose goes stale or it
+  loses ownership.
 
 ## Arm constants
 
@@ -546,6 +687,9 @@ waypoint following, SpaceMouse axis map and sensitivity).  It also holds the
 node-level defaults that must stay consistent across processes: teleop
 publish rate, teleop/velocity/planner timeouts, the gripper-jog rejection
 throttle, the manual re-arm neutral epsilon, and the debug sniffer cadence.
+The typing reference layout (`TYPING_KEYBOARD`, key units, pitch) and
+the typing motion/safety tuning also live here, so the node and its geometry
+tests share one definition.
 
 Only node infrastructure stays local: ROS `QoSProfile` objects, the
 gripper jog direction table tied to that node's command handling, and small

@@ -41,8 +41,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
-from custom_interfaces.msg import ArmVelocity
-from std_msgs.msg import Int16
+from custom_interfaces.msg import ArmVelocity, SpaceMouseAxes
 
 from arm_constants import (
     AXIS_SIGNS,
@@ -53,8 +52,8 @@ from arm_constants import (
     METERS_PER_INCH,
     RAW_MAX,
     ROTATION_SENS,
+    SPACEMOUSE_AXES_TOPIC,
     SPACEMOUSE_AXIS_NAMES,
-    SPACEMOUSE_AXIS_TOPICS,
     TELEOP_INPUT_TIMEOUT_SEC,
     TELEOP_PUBLISH_RATE_HZ,
     TRANSLATION_SENS,
@@ -167,9 +166,9 @@ class ArmTeleopNode(Node):
         # Latched raw axis values.  The basestation republishes teleop axes
         # every cycle, so the node can tell a held stick apart from a dead
         # link.  The timestamp is what makes an axis go stale.
-        self.__axes = dict.fromkeys(SPACEMOUSE_AXIS_TOPICS, 0)
+        self.__axes = dict.fromkeys(SPACEMOUSE_AXIS_NAMES, 0)
         self.__axes_received_at = dict.fromkeys(
-            SPACEMOUSE_AXIS_TOPICS, None)
+            SPACEMOUSE_AXIS_NAMES, None)
         self.__stale_axes = set()
         self.__shapers = {
             axis: AxisShaper(
@@ -183,13 +182,12 @@ class ArmTeleopNode(Node):
             qos_profile=10,
         )
 
-        for axis, topic in SPACEMOUSE_AXIS_TOPICS.items():
-            self.create_subscription(
-                msg_type=Int16,
-                topic=topic,
-                callback=self.__make_axis_callback(axis),
-                qos_profile=TELEOP_QOS,
-            )
+        self.create_subscription(
+            msg_type=SpaceMouseAxes,
+            topic=SPACEMOUSE_AXES_TOPIC,
+            callback=self.__on_axes_received,
+            qos_profile=TELEOP_QOS,
+        )
 
         self.create_timer(1.0 / self.__rate_hz, self.__publish_commands)
 
@@ -217,16 +215,16 @@ class ArmTeleopNode(Node):
     # Input callbacks
     # ------------------------------------------------------------------
 
-    def __make_axis_callback(self, axis: str):
-        """Build a callback that latches one raw axis value."""
-        def callback(msg: Int16):
-            self.__axes[axis] = int(msg.data)
-            self.__axes_received_at[axis] = time.monotonic()
+    def __on_axes_received(self, msg: SpaceMouseAxes):
+        """Latch one atomic sample of every raw axis."""
+        now = time.monotonic()
+        for axis in SPACEMOUSE_AXIS_NAMES:
+            self.__axes[axis] = int(getattr(msg, axis))
+            self.__axes_received_at[axis] = now
             if axis in self.__stale_axes:
                 self.__stale_axes.discard(axis)
                 self.get_logger().info(
                     f"Teleop axis '{axis}' refreshed; input live again")
-        return callback
 
     # ------------------------------------------------------------------
     # Command shaping

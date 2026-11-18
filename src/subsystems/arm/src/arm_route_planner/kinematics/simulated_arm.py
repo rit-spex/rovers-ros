@@ -23,7 +23,7 @@ from .generic_frames import (
 )
 from .limiters import (
     PLANAR_MODE, HOMING_MODE,
-    PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE,
+    PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, TYPING_MODE,
     OCTANT_DIRECT_FLIP, OCTANT_PLANAR_EXIT_LOCK,
     OCTANT_NORMAL_ALLOWED, OCTANT_PLANAR_ALLOWED,
     OCTANT_PLANAR_FLIPPED_ALLOWED,
@@ -458,6 +458,8 @@ class RoverArmController:
         self.limit_mode = PICK_AND_PLACE_MODE
         self.flipped = False           # Pick-and-Place side modifier
         self.planar = False            # base-locked vertical modifier
+        self.typing = False            # keyboard-typing limits/modifier
+        self._typing_saved_locks = None  # wrist locks restored when typing ends
         self.solver_history = []       # debug: last IK iteration results
         self.last_failure = None       # last user-facing rejection message
 
@@ -670,8 +672,10 @@ class RoverArmController:
         return self._ee_octant()
 
     def _active_limits(self, angles=None):
-        """Limits for Pick and Place with its planar/flipped modifiers."""
-        if self.planar:
+        """Limits for Pick and Place with its planar/flipped/typing modifiers."""
+        if self.typing:
+            source = TYPING_MODE.limits
+        elif self.planar:
             source = PLANAR_MODE.limits
         elif self.flipped:
             source = PICK_AND_PLACE_FLIPPED_MODE.limits
@@ -696,7 +700,7 @@ class RoverArmController:
 
     def _settle_side(self):
         """Update the flipped flag from the achieved pose, if possible."""
-        if self.planar:
+        if self.planar or self.typing:
             return
         if PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
             self.flipped = True
@@ -728,6 +732,8 @@ class RoverArmController:
         """
         if self.is_flipping or self.is_homing:
             return [tuple(pair) for pair in MECHANICAL_LIMITS]
+        if self.typing:
+            return [tuple(pair) for pair in TYPING_MODE.limits]
         return self._active_limits(self.angles)
 
     @property
@@ -751,6 +757,35 @@ class RoverArmController:
     # Modifier transitions (called by the simulator via keyboard actions)
     # ------------------------------------------------------------------
 
+    def set_typing_mode(self, enabled):
+        """Select or leave the keyboard-typing limits.
+
+        Typing widens the shoulder/elbow travel beyond Pick and Place and
+        releases the wrist locks, because a key press needs a level tool
+        orientation.  The previous wrist lock state is restored on exit.
+        """
+        if enabled:
+            if not self.typing:
+                self._typing_saved_locks = list(self.locked_joints)
+            self.typing = True
+            self.planar = False
+            self.flipped = False
+            self.joint_drive = False
+            self.limit_mode = TYPING_MODE
+            self.locked_joints[3] = False
+            self.locked_joints[4] = False
+            return True
+
+        if not self.typing:
+            return True
+        self.typing = False
+        self.limit_mode = PICK_AND_PLACE_MODE
+        if self._typing_saved_locks is not None:
+            self.locked_joints = list(self._typing_saved_locks)
+            self._typing_saved_locks = None
+        self._settle_side()
+        return True
+
     def set_pnp_normal(self):
         """Select normal Pick-and-Place limits when the arm fits them."""
         if self.planar and not self._planar_exit_allowed():
@@ -759,6 +794,7 @@ class RoverArmController:
         if not PICK_AND_PLACE_MODE.can_set(self.angles):
             return self._fail(
                 "Normal unavailable: pose is outside normal limits")
+        self.set_typing_mode(False)
         self.planar = False
         self.flipped = False
         return True
@@ -776,12 +812,14 @@ class RoverArmController:
             if not PICK_AND_PLACE_MODE.can_set(self.angles):
                 return self._fail(
                     "Normal unavailable: pose is outside normal limits")
+            self.set_typing_mode(False)
             self.flipped = False
             return True
 
         if not PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
             return self._fail(
                 "Flipped unavailable: pose is outside flipped limits")
+        self.set_typing_mode(False)
         self.planar = False
         self.flipped = True
         return True
@@ -797,10 +835,12 @@ class RoverArmController:
                 return self._fail(
                     "Planar locked: restricted octant requires planar")
             if PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
+                self.set_typing_mode(False)
                 self.planar = False
                 self.flipped = True
                 return True
             if PICK_AND_PLACE_MODE.can_set(self.angles):
+                self.set_typing_mode(False)
                 self.planar = False
                 self.flipped = False
                 return True
@@ -809,6 +849,7 @@ class RoverArmController:
 
         if not PLANAR_MODE.can_set(self.angles):
             return self._fail("Planar needs base within +/-5 deg")
+        self.set_typing_mode(False)
         self.planar = True
         return True
 
@@ -992,6 +1033,41 @@ class RoverArmController:
         desired = self.limit_mode.clamp_target_position(
             desired, self.angles)
         return self._solve_desired_frame(desired)
+
+    def command_pose(self, position, rotation, drive=True):
+        """Command a full Cartesian target pose.
+
+        Args:
+            position: Target position ``[x, y, z]`` in inches.
+            rotation: 3x3 target rotation, rows in world coordinates.
+            drive: When True, step the mechanical arm immediately.  The
+                planner passes False because its control cycle drives the
+                target right after this call.
+
+        Returns:
+            bool: True when the target was accepted.
+        """
+        if self.homing.active or self.is_flipping:
+            return self._fail("Command blocked: action is running")
+        if len(position) != 3:
+            return self._fail("Command blocked: invalid position")
+
+        desired = OrientationMatrix([
+            [rotation[0][0], rotation[0][1], rotation[0][2], position[0]],
+            [rotation[1][0], rotation[1][1], rotation[1][2], position[1]],
+            [rotation[2][0], rotation[2][1], rotation[2][2], position[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        desired = self.limit_mode.clamp_target_position(
+            desired, self.target_angles)
+        return self._solve_desired_frame(desired, drive=drive)
+
+    def hold(self):
+        """Drop the current target and hold the measured pose."""
+        if self.homing.active or self.is_flipping:
+            return self._fail("Hold blocked: action is running")
+        self._sync_target_to_fk()
+        return True
 
     def activate_flip(self):
         """Start the single side-flip action.
@@ -1319,7 +1395,7 @@ class RoverArmController:
         self._command_mechanical(self.target_angles,
                                  self._locked_limits(limits))
 
-    def _solve_desired_frame(self, desired):
+    def _solve_desired_frame(self, desired, drive=True):
         """Run IK toward a desired frame and command the mechanical arm."""
         # Locked joints are pinned to a zero-width limit so the solver
         # distributes the motion across the remaining motors.
@@ -1347,8 +1423,9 @@ class RoverArmController:
         frame = self.model.solve_forward_kinematics(self.target_angles)
         self.target_frame = self._frame_with_orientation_lock(frame)
         self.target_pos = list(self.target_frame.position())
-        self._command_mechanical(self.target_angles,
-                                 self._locked_limits(limits))
+        if drive:
+            self._command_mechanical(self.target_angles,
+                                     self._locked_limits(limits))
         return True
 
     def guide_orientation(self):

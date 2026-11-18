@@ -5,6 +5,7 @@ import numpy as np
 from arm_constants import (
     MECHANICAL_LIMITS, FULL_RANGE_LIMITS, PLANAR_LIMITS,
     PICK_AND_PLACE_LIMITS, PICK_AND_PLACE_FLIPPED_LIMITS, HOMING_LIMITS,
+    TYPING_LIMITS,
     ELBOW_DEADBAND, O3_RELAX_MAX, EXCLUSION_RADIUS,
     BASE_ZERO_RANGE, HOMING_TARGET, END_EFFECTOR_MIN_Z,
     FRONT_HIGH, RIGHT_HIGH, BACK_HIGH, LEFT_HIGH,
@@ -261,6 +262,13 @@ class PickAndPlaceFlippedMode(BaseLimiter):
                    for a, (lo, hi) in zip(angles, self.limits))
 
 
+class TypingMode(BaseLimiter):
+    """Keyboard-typing mode with the base limited to the rover's sides."""
+
+    name = "Typing"
+    limits = TYPING_LIMITS
+
+
 class HomingMode(BaseLimiter):
     """Limits used while the homing controller is driving the arm.
 
@@ -279,6 +287,7 @@ FULL_RANGE_MODE = FullRangeMode()
 PLANAR_MODE = PlanarMode()
 PICK_AND_PLACE_MODE = PickAndPlaceMode()
 PICK_AND_PLACE_FLIPPED_MODE = PickAndPlaceFlippedMode()
+TYPING_MODE = TypingMode()
 HOMING_MODE = HomingMode()
 
 LIMIT_MODES = [PICK_AND_PLACE_MODE]

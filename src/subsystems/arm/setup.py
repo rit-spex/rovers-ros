@@ -40,6 +40,7 @@ setup(
             'arm_route_planner_node = arm_route_planner.arm_route_planner_node:main',
             'arm_hardware_node = arm_hardware.arm_hardware_node:main',
             'arm_teleop_node = arm_teleop.arm_teleop_node:main',
+            'arm_typing_node = arm_typing.arm_typing_node:main',
             'arm_sniffer_node = arm_sniffer.arm_sniffer_node:main',
         ],
     },

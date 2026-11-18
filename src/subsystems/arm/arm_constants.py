@@ -53,6 +53,10 @@ ARM_COMMAND_TOPIC = "/ARM/COMMAND"
 MANUAL_VELOCITY_TOPIC = "/ARM/MANUAL/CMD_VELOCITY"
 VELOCITY_TOPIC = "/ARM/CMD_VELOCITY"
 
+# Absolute Cartesian target consumed by the route planner.  The typing node
+# is the first producer; the master arbitrates it like every other command.
+POSE_TOPIC = "/ARM/CMD_POSE"
+
 SOLENOID_TARGET_TOPIC = "/ARM/JOINT/TARGET_SOLENOID"
 
 # Master <-> functional nodes.  The master forwards every /ARM/COMMAND
@@ -89,6 +93,17 @@ PRE_READY_END_EFFECTOR_COMMANDS = {
 # handover so a held gripper jog stops immediately instead of coasting to its
 # timeout.
 END_EFFECTOR_STOP_COMMAND = "stop_jog"
+
+# Internal planner command.  The master emits it whenever a control handover
+# or E-stop invalidates the previous owner's target, so the planner holds the
+# measured pose instead of chasing an abandoned Cartesian target.
+PLANNER_HOLD_COMMAND = "hold"
+
+# Autonomous command inputs.  The arm master forwards these only while the
+# AUTONOMOUS control source owns the arm, so functional nodes remain
+# source-agnostic.  The typing node is the first user of this surface.
+AUTONOMOUS_POSE_TOPIC = "/ARM/AUTONOMOUS/CMD_POSE"
+AUTONOMOUS_COMMAND_TOPIC = "/ARM/AUTONOMOUS/COMMAND"
 
 # High-level arm state, published as one Bool topic per flag.
 ARM_FLAG_NAMES = (
@@ -197,14 +212,20 @@ DT = 0.05                   # Arm control period [s], shared by all nodes
 # Stop applying teleop motion once the command source goes quiet.
 # The planner uses this for /ARM/CMD_VELOCITY.
 VELOCITY_TIMEOUT_SEC = 0.5
-# The teleop node zeroes an axis whose raw /BASESTATION/spacemouse/* value
-# has not refreshed for this long.  The basestation republishes teleop axes
-# every cycle precisely so a dead link can be told apart from a held stick.
+# The teleop node zeroes every axis when the consolidated
+# /BASESTATION/spacemouse/axes sample has not refreshed for this long.  The
+# basestation republishes teleop samples every cycle precisely so a dead link
+# can be told apart from a held stick.
 TELEOP_INPUT_TIMEOUT_SEC = 0.5
 # Treat the route planner as unavailable when its status stops arriving.
 # Path planning runs in the planner's command callback, so allow several
 # seconds before declaring it dead.
 PLANNER_TIMEOUT_SEC = 5.0
+
+# An autonomous target is a stream, not a one-shot.  If the producer dies
+# while the arm is chasing a pose, hold the measured pose instead of driving
+# on a command nobody is refreshing.
+AUTONOMOUS_POSE_TIMEOUT_SEC = 0.5
 
 # Teleop republish rate.  The node exposes this as a parameter, and the
 # default lives here so the node and its tests share one source.
@@ -406,13 +427,11 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # SpaceMouse input
 # =============================================================================
 
-# Every axis the SpaceMouse reports, in linear/angular pairs, and the raw
-# topics the basestation bridge publishes them on.  The device vocabulary
-# lives here so the teleop node and its tests cannot drift apart.
+# Every axis the SpaceMouse reports, in linear/angular pairs.  The basestation
+# publishes all six as one atomic sample on SPACEMOUSE_AXES_TOPIC; the device
+# vocabulary lives here so the teleop node and its tests cannot drift apart.
 SPACEMOUSE_AXIS_NAMES = ("x", "y", "z", "rx", "ry", "rz")
-SPACEMOUSE_AXIS_TOPICS = {
-    axis: f"/BASESTATION/spacemouse/{axis}" for axis in SPACEMOUSE_AXIS_NAMES
-}
+SPACEMOUSE_AXES_TOPIC = "/BASESTATION/spacemouse/axes"
 
 # Per-axis sign conventions.  +1 = raw HID value used as-is,
 # -1 = raw HID value negated.  Adjust here to match device orientation.
@@ -445,6 +464,113 @@ ZERO_HYSTERESIS = 0.02
 
 SPACEMOUSE_VENDOR_ID = 0x256f
 SPACEMOUSE_PRODUCT_ID = 0xc63a
+
+
+# =============================================================================
+# Keyboard typing
+# =============================================================================
+
+# Inputs owned by arm_typing_node.  The plane is published in the rover base
+# frame; the key string is literal text (see parse_key_sequence in
+# arm_typing/typing_plan.py for the small token syntax).
+TYPING_PLANE_TOPIC = "/ARM/TYPING/PLANE"
+TYPING_KEYS_TOPIC = "/ARM/TYPING/KEYS"
+TYPING_STATUS_TOPIC = "/ARM/TYPING/STATUS"
+
+# Typing drives by publishing the same Xbox axes the basestation publishes.
+# chassis_node already subscribes to those topics and applies its normal
+# stick inversion, so the typing node needs no autonomous drive topic and no
+# chassis-side changes.  Positive power means "stick forward".
+
+# Reference keyboard geometry in the keyboard-plane frame.  Each value is
+# ``[x, y, width, height]`` in key units: ``(0, 0)`` is the keyboard centre,
+# ``+x`` runs along the keyboard, and ``+y`` runs up the face.  Multiply by
+# TYPING_KEY_PITCH_M to get metres.  Measure the real keyboard and edit these
+# entries first when the layout does not line up.
+TYPING_KEY_PITCH_M = 0.01905          # 19.05 mm = 0.75 in key pitch
+TYPING_KEYBOARD = {
+    # Top row
+    "`": [-7.125, 2, 1, 1],
+    "1": [-6.125, 2, 1, 1],
+    "2": [-5.125, 2, 1, 1],
+    "3": [-4.125, 2, 1, 1],
+    "4": [-3.125, 2, 1, 1],
+    "5": [-2.125, 2, 1, 1],
+    "6": [-1.125, 2, 1, 1],
+    "7": [-0.125, 2, 1, 1],
+    "8": [0.875, 2, 1, 1],
+    "9": [1.875, 2, 1, 1],
+    "0": [2.875, 2, 1, 1],
+    "-": [3.875, 2, 1, 1],
+    "=": [4.875, 2, 1, 1],
+    "backspace": [5.875, 2, 2, 1],
+    # Tab row
+    "tab": [-6.875, 1, 1.5, 1],
+    "q": [-5.875, 1, 1, 1],
+    "w": [-4.875, 1, 1, 1],
+    "e": [-3.875, 1, 1, 1],
+    "r": [-2.875, 1, 1, 1],
+    "t": [-1.875, 1, 1, 1],
+    "y": [-0.875, 1, 1, 1],
+    "u": [0.125, 1, 1, 1],
+    "i": [1.125, 1, 1, 1],
+    "o": [2.125, 1, 1, 1],
+    "p": [3.125, 1, 1, 1],
+    "[": [4.125, 1, 1, 1],
+    "]": [5.125, 1, 1, 1],
+    "\\": [6.125, 1, 1.5, 1],
+    # Caps row
+    "caps": [-6.625, 0, 1.75, 1],
+    "a": [-5.625, 0, 1, 1],
+    "s": [-4.625, 0, 1, 1],
+    "d": [-3.625, 0, 1, 1],
+    "f": [-2.625, 0, 1, 1],
+    "g": [-1.625, 0, 1, 1],
+    "h": [-0.625, 0, 1, 1],
+    "j": [0.375, 0, 1, 1],
+    "k": [1.375, 0, 1, 1],
+    "l": [2.375, 0, 1, 1],
+    ";": [3.375, 0, 1, 1],
+    "'": [4.375, 0, 1, 1],
+    "enter": [5.375, 0, 2.25, 1],
+    # Shift row
+    "shift": [-6.375, -1, 2.25, 1],
+    "z": [-5.375, -1, 1, 1],
+    "x": [-4.375, -1, 1, 1],
+    "c": [-3.375, -1, 1, 1],
+    "v": [-2.375, -1, 1, 1],
+    "b": [-1.375, -1, 1, 1],
+    "n": [-0.375, -1, 1, 1],
+    "m": [0.625, -1, 1, 1],
+    ",": [1.625, -1, 1, 1],
+    ".": [2.625, -1, 1, 1],
+    "/": [3.625, -1, 1, 1],
+    # Bottom row
+    "ctrl": [-7.125, -2, 1.25, 1],
+    "alt": [-6.125, -2, 1.25, 1],
+    "space": [0, -2, 6.25, 1],
+}
+
+# Typing control loop and safety.  The drive cap is deliberately below the
+# normal teleop authority: the node is only allowed to creep along the
+# keyboard edge.
+TYPING_RATE_HZ = 10.0
+TYPING_DRIVE_MAX_POWER = 0.10
+TYPING_DRIVE_GAIN = 1.5               # power per metre of edge error
+TYPING_ALIGN_DEADBAND_M = 0.005
+TYPING_ALIGN_TOL_M = 0.010
+TYPING_STANDOFF_M = 0.06              # tool tip distance from the plane
+TYPING_ARM_POS_TOL_M = 0.012
+TYPING_ARM_ORI_TOL_RAD = 0.15
+TYPING_PRESS_SETTLE_SEC = 0.35
+TYPING_MODE_SETTLE_SEC = 0.2
+TYPING_PLANE_TIMEOUT_SEC = 0.5
+TYPING_CONTROL_RETRY_SEC = 1.0
+# A keyboard that is nearly in front of the rover would force the base away
+# from +/-90 deg.  Warn below this lateral offset instead of silently
+# pretending the side is well defined.
+TYPING_MIN_SIDE_OFFSET_M = 0.10
+TYPING_STATUS_PERIOD_SEC = 0.5
 
 
 # =============================================================================
@@ -535,6 +661,18 @@ PICK_AND_PLACE_FLIPPED_LIMITS = [
     MECHANICAL_LIMITS[0],                   # base (mechanical)
     (math.radians(90), math.pi),            # shoulder 90-180 deg
     (0, math.pi * 3 / 4),                   # elbow 0-135 deg
+    MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
+    MECHANICAL_LIMITS[4],                   # wrist twist (mechanical)
+]
+
+# Typing: the keyboard sits on the rover's left or right, so the base stays
+# within +/-90 deg and the drivebase moves the next key onto the reach line.
+# Shoulder, elbow, and wrist use their mechanical travel; the wrist locks that
+# guard teleop are released while this mode is active.
+TYPING_LIMITS = [
+    (-math.pi / 2, math.pi / 2),            # base limited to the sides
+    MECHANICAL_LIMITS[1],                   # shoulder (mechanical)
+    MECHANICAL_LIMITS[2],                   # elbow (mechanical)
     MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
     MECHANICAL_LIMITS[4],                   # wrist twist (mechanical)
 ]

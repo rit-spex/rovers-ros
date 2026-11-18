@@ -21,6 +21,9 @@ set(msg_files
     "msg/ArmPose.msg"
     "msg/ArmCommand.msg"
     "msg/ArmPlannerStatus.msg"
+    "msg/ArmTypingPlane.msg"
+    "msg/ArmTypingStatus.msg"
+    "msg/SpaceMouseAxes.msg"
 )
 rosidl_generate_interfaces(${PROJECT_NAME}
   ${msg_files}
