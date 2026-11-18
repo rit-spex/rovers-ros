@@ -26,20 +26,60 @@ class Xbee(Node):
             UInt8MultiArray, "/XBEE/MESSAGES",
             QoSProfile(depth=10,
                        reliability=ReliabilityPolicy.BEST_EFFORT))
+        self.__remote_xbee = None
+        self.__shutting_down = False
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES/RX", 10
+        )
+        self.create_subscription(
+            UInt8MultiArray, "/XBEE/MESSAGES/TX", self.send_msg, 10
+        )
 
-    def read_data(self) -> list[int] | None:
-        message = None
+    def read_data(self, message) -> None:
+        """Publish one radio frame unless the node is shutting down."""
+        if self.__shutting_down or not rclpy.ok():
+            return
         try:
             message = self.__xbee_device.read_data(0.0004)
             if message is None:
                 return None
-            return list(message.data)
-        except TimeoutException:
-            return []
-            # self.get_logger().info("timed out")
-        except Exception:
-            self.get_logger().info("failed to read data")
-            return None
+
+            # update the remote xbee's connection
+            self.__remote_xbee = message.remote_device
+            self.publish_data(list(message.data))
+        except Exception as e:
+            # The device callback runs on a driver thread and can race with
+            # interpreter/context teardown; do not log into a dead context.
+            if not self.__shutting_down and rclpy.ok():
+                self.get_logger().info(f"failed to read data {e}")
+            return
+
+    def send_msg(self, msg: UInt8MultiArray) -> None:
+        """
+        pack and send the message to the basestation
+        """
+
+        # only send if we have a remote xbee to send to
+        if self.__remote_xbee is None:
+            self.get_logger().error("no remote xbee to send to, message not sent")
+            return
+
+        # only send if we have a remote xbee to send to
+        if self.__xbee_device is None:
+            self.get_logger().error("no remote xbee to send to, message not sent")
+            return
+
+        try:
+            message_bytes = bytes(msg.data)
+            self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
+            self.get_logger().debug(f"sent data, {msg.data}")
+
+        except ValueError as e:
+            self.get_logger().error(f"value error {e}")
+            raise
+        except Exception as e:
+            self.get_logger().error(f"failed to send data: {e}")
+            return
 
     def publish_data(self, data: list[int]) -> None:
         msg = UInt8MultiArray()
@@ -57,33 +97,42 @@ class Xbee(Node):
             rclpy.spin(self)
             return
 
+        self.__xbee_device.add_data_received_callback(self.read_data)
+
+    def shutdown(self) -> None:
+        """Stop the radio callback and close the device during teardown."""
+        self.__shutting_down = True
         try:
-            while rclpy.ok():
-                data = self.read_data()
-                if data is None:
-                    self.get_logger().info("message was none")
-                    break
-                if len(data) == 0:
-                    continue
-                self.publish_data(data)
-        finally:
-            try:
+            if self.__xbee_device.is_open():
+                try:
+                    self.__xbee_device.del_data_received_callback(
+                        self.read_data)
+                except Exception:
+                    # Older digi-xbee versions may not have the callback
+                    # registered under the same bound method.
+                    pass
                 self.__xbee_device.close()
-            except Exception:
-                pass
+        except Exception as exc:
+            if rclpy.ok():
+                self.get_logger().warning(
+                    f"failed to close xbee device: {exc}")
 
 
 def main() -> None:
     rclpy.init()
-    xbee = Xbee()
+    node = None
     try:
-        xbee.run()
+        node = Xbee()
+        node.run()
+        # Spin inside the try: Ctrl-C and SIGINT arrive here, and the other
+        # arm nodes handle them without a traceback.
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except Exception as exc:
-        xbee.get_logger().error(f"xbee node failed: {exc}")
     finally:
-        xbee.destroy_node()
+        if node is not None:
+            node.shutdown()
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 

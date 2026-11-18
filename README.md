@@ -45,7 +45,9 @@ composition roots: they select real versus simulated transports while
 sharing the same subsystem nodes.
 
 See `src/simulation/README.md` for the Gazebo stack, its topic namespaces,
-and its launch entry points.
+and its launch entry points. For a primer on the ROS 2 runtime graph, node
+lifecycle, QoS, and adding a new node, see
+[`ROS2_EXPLAINED.md`](ROS2_EXPLAINED.md).
 
 ## Shared Protocol Submodule
 
@@ -126,6 +128,12 @@ colcon build --symlink-install
 source scripts/source.sh
 ```
 
+Or do both with:
+
+```bash
+source scripts/source.sh --build
+```
+
 `--symlink-install` is what the helper scripts use; it keeps Python package
 files live-linked so source edits do not require a rebuild. `scripts/source.sh`
 reports the overlay and the last build time.
@@ -136,6 +144,12 @@ reports the overlay and the last build time.
 
 ```bash
 ros2 launch main main_launch.xml
+```
+
+Or source and launch in one step:
+
+```bash
+source scripts/source.sh --run
 ```
 
 This starts the real transports (`can_comms`, `xbee`), `basestation_node`,
@@ -198,9 +212,15 @@ source scripts/source.sh
 ros2 launch main main_launch.xml
 ```
 
-`can_comms` resets the `can0` interface with `sudo` when it starts, so expect
-a second password prompt (use the rover password again) shortly after the
-nodes come up.
+`can_comms` resets the `can0` interface when it starts. Install the narrow
+passwordless sudo rule once so neither manual launches nor autoboot prompt for
+a password:
+
+```bash
+./scripts/can/install.sh
+```
+
+It only allows `ip link set can0 ...`, not general root access.
 
 If autoboot is installed, the real rover stack is already running after boot;
 launching it again starts duplicate nodes.

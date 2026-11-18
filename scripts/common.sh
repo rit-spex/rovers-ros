@@ -66,6 +66,27 @@ load_robot_config() {
     export ROBOT_CONFIG
 }
 
+# Remove build/install trees whose CMake cache points at a source directory
+# that no longer exists.  This happens when a package is moved in the repo
+# (for example src/autonomous -> src/subsystems/autonomous): colcon reuses the
+# old build directory and CMake aborts with "source directory ... does not
+# exist".  Only the affected package is cleaned, so the rest of the workspace
+# stays warm.
+clean_stale_cmake_builds() {
+    local cache pkg source_dir
+    for cache in "$ROS_WS"/build/*/CMakeCache.txt; do
+        [ -f "$cache" ] || continue
+        source_dir="$(sed -n 's/^CMAKE_HOME_DIRECTORY:[^=]*=//p' "$cache" | head -n 1)"
+        [ -n "$source_dir" ] || continue
+        [ -d "$source_dir" ] && continue
+
+        pkg="$(basename "$(dirname "$cache")")"
+        echo "[+] Removing stale build cache for $pkg"
+        echo "    cached source: $source_dir"
+        rm -rf "$ROS_WS/build/$pkg" "$ROS_WS/install/$pkg"
+    done
+}
+
 build_workspace() {
     if [ ! -f "$ROS_SETUP" ]; then
         echo "[!] ROS setup not found: $ROS_SETUP" >&2
@@ -75,10 +96,13 @@ build_workspace() {
     # shellcheck disable=SC1090
     source "$ROS_SETUP" || return 1
     cd "$ROS_WS" || return 1
+    clean_stale_cmake_builds
     echo "[+] Building rover workspace..."
     # Keep this list in sync with simulation_launch.xml and
     # launch_sim.launch.py. Missing packages here means `sim.sh start` can
-    # launch stale or unbuilt code on a fresh checkout.
+    # launch stale or unbuilt code on a fresh checkout. gazebo_sim_control is
+    # optional at CMake level: it installs an empty package when Gazebo is
+    # absent, so this list is safe on hardware-only machines too.
     colcon build \
         --packages-select \
         constants custom_interfaces \

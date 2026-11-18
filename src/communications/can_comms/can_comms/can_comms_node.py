@@ -68,6 +68,7 @@ class CAN(Node):
             callback=self.__on_can_error,
             qos_profile=10,
         )
+
         self.create_subscription(
             msg_type=Bool,
             topic="/ESTOP",
@@ -90,7 +91,13 @@ class CAN(Node):
             self.get_logger().info(
                 "E-STOP received, sending safe CAN defaults")
             self.__send_safe_stop()
-            self.bus.flush_tx_buffer()
+            try:
+                self.bus.flush_tx_buffer()
+            except NotImplementedError:
+                # SocketCAN transmits synchronously and does not implement
+                # flush_tx_buffer; without this guard the E-STOP callback
+                # raises and takes the whole node down.
+                pass
         else:
             if not self.__estop:
                 return
@@ -142,7 +149,7 @@ class CAN(Node):
         self.__send_can(msg)
 
     def __send_can(self, msg: Can):
-        self.get_logger().info(
+        self.get_logger().debug(
             f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
         bus_msg = can.Message(
@@ -221,10 +228,16 @@ class JETSON_LISTENER(can.Listener):
         True tells python-can the error was handled so the reader thread keeps
         running until the link is back up.
         """
-        self.__node.get_logger().warning(f"CAN receive error: {exc}")
+        # The notifier thread can still deliver an error after Ctrl-C has
+        # invalidated the ROS context; logging then would publish into a dead
+        # context and emit another warning.
+        if rclpy.ok():
+            self.__node.get_logger().warning(f"CAN receive error: {exc}")
         return True
 
     def on_message_received(self, msg: can.Message) -> None:
+        if not rclpy.ok():
+            return
         # Error frames are not addressed to a motor; route them to the bus
         # health path before the E_STOP/ID lookup below.
         if msg.is_error_frame:
