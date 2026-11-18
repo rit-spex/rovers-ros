@@ -500,6 +500,14 @@ class ArmRoutePlannerNode(Node):
         if pose_active:
             self.__apply_pose_target()
         deltas = None if pose_active else self.__next_deltas()
+        # Teleop is a position target, not a trajectory.  Once the operator
+        # releases the SpaceMouse, hold the achieved pose instead of spending
+        # seconds catching up to the last target frame.  Absolute pose targets
+        # and the homing/flip actions still finish normally.
+        if (not pose_active and deltas is None
+                and not self.__arm.homing.active
+                and not self.__arm.is_flipping):
+            self.__arm.hold()
         consumed = self.__arm.update(deltas)
         self.__publish_counter += 1
         self.__publish_targets(force=self.__publish_counter % 20 == 0)

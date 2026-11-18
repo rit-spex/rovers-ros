@@ -645,7 +645,8 @@ identical between simulation and hardware.
 - **Position drive (default):** stick translation/rotation moves the
   target frame; the frame is clamped by the active limiter, solved with
   damped-least-squares IK, then rate-limited before it becomes a joint
-  target. This runs in the route planner.
+  target. This runs in the route planner. Releasing the stick holds the
+  achieved pose instead of chasing the old target frame.
 - **Joint drive:** `rx → elbow`, `ry → shoulder`, `rz → base`; no IK. The
   planner applies the joint limits.
 - **Absolute pose:** `/ARM/CMD_POSE` replaces the target frame and runs the
