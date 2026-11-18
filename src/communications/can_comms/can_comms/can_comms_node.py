@@ -71,12 +71,6 @@ class CAN(Node):
             callback=self.__on_can_error,
             qos_profile=10,
         )
-        self.create_subscription(
-            msg_type=Bool,
-            topic="can_err",
-            callback=self.__on_can_error,
-            qos_profile=10,
-        )
 
         self.create_subscription(
             msg_type=Bool,
@@ -100,7 +94,13 @@ class CAN(Node):
             self.get_logger().info(
                 "E-STOP received, sending safe CAN defaults")
             self.__send_safe_stop()
-            self.bus.flush_tx_buffer()
+            try:
+                self.bus.flush_tx_buffer()
+            except NotImplementedError:
+                # SocketCAN transmits synchronously and does not implement
+                # flush_tx_buffer; without this guard the E-STOP callback
+                # raises and takes the whole node down.
+                pass
         else:
             if not self.__estop:
                 return
@@ -152,19 +152,6 @@ class CAN(Node):
         self.__send_can(msg)
 
     def __send_can(self, msg: Can):
-        self.get_logger().info(
-            f"CAN error received: {msg.error} on channel {msg.channel}"
-        )
-        self.reset_network()
-        self.__error_count += 1
-        if self.__error_count >= self.ERROR_THRESHOLD:
-            self.get_logger().error(
-                f"CAN error threshold reached ({self.__error_count} errors), shutting down can_comms_node"
-            )
-            rclpy.shutdown()
-
-
-    def send_msg(self, msg: Can):
         self.get_logger().debug(
             f"ID {msg.id} ({TEENSY_CAN_MESSAGES[CAN_MESSAGE_IDS(msg.id)].name}): {msg.buf}"
         )
@@ -225,8 +212,8 @@ class JETSON_LISTENER(can.Listener):
                 msg_type=Can, topic=message.topic_name, qos_profile=10
             )
 
-        self.error_frame_publisher = self.__node.create_publisher(
-            msg_type=Bool, topic="can_err", qos_profile=10
+        self.__error_publisher = self.__node.create_publisher(
+            msg_type=Can, topic=CAN_ERROR_TOPIC, qos_profile=10
         )
 
     def on_message_received(self, msg: can.Message) -> None:
