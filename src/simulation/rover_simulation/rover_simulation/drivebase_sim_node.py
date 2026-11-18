@@ -40,7 +40,7 @@ RELEASE_HOLD_SEC = 0.3
 # Drive_Power frames are streamed.  Silence this long means the command path
 # is gone, so stop treating the latched command as current.
 COMMAND_TIMEOUT_SEC = 1.0
-# Navigation and joystick use the same timeout the old twist_mux config had.
+# Navigation and joystick use the same 0.5 s freshness timeout.
 MUX_TIMEOUT_SEC = 0.5
 
 # Keep in sync with config/my_controllers.yaml.
@@ -226,7 +226,7 @@ class DrivebaseSimNode(Node):
     # ------------------------------------------------------------------
 
     def __selected_twist(self, now: float) -> Twist:
-        """Pick the highest-priority fresh command, mirroring twist_mux."""
+        """Pick the highest-priority fresh command, mirroring the old mux."""
         if self.__estop:
             return Twist()
 

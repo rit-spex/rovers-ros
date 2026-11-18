@@ -28,7 +28,6 @@ SIM_PATTERNS=(
     "gzclient"
     "robot_state_publisher"
     "static_transform_publisher"
-    "twist_mux"
     "pointcloud_to_laserscan"
     "controller_manager/spawner"
     "$ROS_WS/install/"
@@ -45,7 +44,6 @@ SIM_STACK_PATTERNS=(
     "gzclient"
     "robot_state_publisher"
     "static_transform_publisher"
-    "twist_mux"
     "pointcloud_to_laserscan"
     "controller_manager/spawner"
     "$ROS_WS/install/"
@@ -87,6 +85,15 @@ clean_stale_cmake_builds() {
     done
 }
 
+# Remove symlinks left behind when a source file or whole package was moved
+# or deleted.  setuptools/--symlink-install keeps pointing at the old path,
+# and the next build fails trying to copy it (for example a removed
+# twist_mux.yaml under build/rover_simulation/config).
+clean_stale_build_links() {
+    [ -d "$ROS_WS/build" ] || return 0
+    find "$ROS_WS/build" -xtype l -delete 2>/dev/null || true
+}
+
 build_workspace() {
     if [ ! -f "$ROS_SETUP" ]; then
         echo "[!] ROS setup not found: $ROS_SETUP" >&2
@@ -97,6 +104,7 @@ build_workspace() {
     source "$ROS_SETUP" || return 1
     cd "$ROS_WS" || return 1
     clean_stale_cmake_builds
+    clean_stale_build_links
     echo "[+] Building rover workspace..."
     # Keep this list in sync with simulation_launch.xml and
     # launch_sim.launch.py. Missing packages here means `sim.sh start` can
