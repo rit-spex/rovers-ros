@@ -4,7 +4,7 @@
 #   source scripts/source.sh
 #
 # Works from any directory. Sources ROS 2, the colcon overlay, and the
-# optional Python virtual environment when present.
+# workspace Python virtual environment (created and populated on demand).
 #
 # The workspace is located from this file's own path, so the script does not
 # have to be sourced from the workspace root. ROS_SETUP is honoured only when
@@ -190,17 +190,37 @@ fi
 # never shadow the real ROS 2 installation.
 #
 #   ROVER_VENV           venv location        (default: <workspace>/.venv)
-#   ROVER_VENV_CREATE=1  create it with --system-site-packages when missing
-#   ROVER_VENV_INSTALL=1 install requirements.txt when modules are missing
+#   ROVER_VENV_CREATE=0  do not create it when missing
+#   ROVER_VENV_INSTALL=0 do not install requirements.txt into it
 #   ROVER_VENV_CHECK=0   skip the import probe (faster sourcing)
+#
+# Creation and dependency installation are on by default: a checked-out
+# workspace should come up with the same interpreter whether or not someone
+# remembered to run the venv setup first.  The venv is created with
+# --system-site-packages so ROS 2's rclpy stays visible, and a COLCON_IGNORE
+# marker keeps colcon from discovering the venv as a package.
 # ---------------------------------------------------------------------------
 _venv="${ROVER_VENV:-$_ws_dir/.venv}"
+case "$_venv" in
+    /*) ;;
+    *) _venv="$_ws_dir/$_venv" ;;
+esac
 
-if [ ! -d "$_venv" ] && [ "${ROVER_VENV_CREATE:-0}" = "1" ]; then
+_venv_fresh=0
+if [ ! -f "$_venv/bin/activate" ] && [ "${ROVER_VENV_CREATE:-1}" = "1" ]; then
     echo "[+] Creating Python venv at $_venv"
-    if ! python3 -m venv --system-site-packages "$_venv"; then
+    if python3 -m venv --system-site-packages --prompt rover "$_venv"; then
+        _venv_fresh=1
+    else
         echo "[!] Could not create $_venv; continuing without it." >&2
+        echo "    On Debian/Ubuntu install python3-venv, then re-source." >&2
     fi
+fi
+
+if [ -d "$_venv" ]; then
+    # colcon walks the workspace recursively; never let it treat the venv as
+    # a package source tree.
+    : >"$_venv/COLCON_IGNORE" 2>/dev/null || true
 fi
 
 if [ -f "$_venv/bin/activate" ]; then
@@ -264,6 +284,23 @@ if [ -f "$_venv/bin/activate" ]; then
         fi
 
         if [ -n "$_venv_py" ]; then
+            # ROS installs its console scripts with #!/usr/bin/python3, so
+            # activation changes PATH but not the interpreter those processes
+            # run with. Append the venv site directories to PYTHONPATH so
+            # launched nodes can import pip-installed packages (can,
+            # digi.xbee, ...) while ROS and workspace paths stay ahead.
+            _venv_site="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null)"
+            _venv_plat="$("$_venv_py" -c 'import sysconfig; print(sysconfig.get_path("platlib"))' 2>/dev/null)"
+            for _venv_lib in "$_venv_site" "$_venv_plat"; do
+                [ -n "$_venv_lib" ] || continue
+                [ -d "$_venv_lib" ] || continue
+                case ":${PYTHONPATH:-}:" in
+                    *":$_venv_lib:"*) ;;
+                    *) PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$_venv_lib" ;;
+                esac
+            done
+            export PYTHONPATH
+
             # Make sure the active python3 really is the venv's interpreter.
             _py_bin="$(command -v python3 2>/dev/null)"
             if [ -n "$_py_bin" ] && [ -n "$_venv_real" ]; then
@@ -285,26 +322,44 @@ for name in sys.argv[1:]:
     except Exception:
         missing.append(name)
 print(" ".join(missing))
-' rclpy empy catkin_pkg xbee serial can numpy sympy yaml 2>/dev/null
+' rclpy em catkin_pkg digi.xbee serial can numpy sympy yaml 2>/dev/null
                 }
 
                 _venv_missing="$(_venv_probe)"
 
-                if [ -n "$_venv_missing" ] && [ "${ROVER_VENV_INSTALL:-0}" = "1" ] && [ -f "$_ws_dir/requirements.txt" ]; then
-                    echo "[+] Installing requirements.txt into $_venv"
-                    "$_venv_py" -m pip --version >/dev/null 2>&1 || "$_venv_py" -m ensurepip --upgrade >/dev/null 2>&1 || true
-                    # Ignore the ROS PYTHONPATH here so pip does not mistake
-                    # ROS-installed packages for venv-installed ones.
-                    env -u PYTHONPATH -u PYTHONHOME "$_venv_py" -m pip install \
-                        --disable-pip-version-check -q -r "$_ws_dir/requirements.txt" ||
-                        echo "[!] pip install failed; see the output above." >&2
-                    _venv_missing="$(_venv_probe)"
+                _venv_install="${ROVER_VENV_INSTALL:-1}"
+                _venv_req="$_ws_dir/requirements.txt"
+                _venv_stamp="$_venv/.rover-requirements.sha256"
+                _venv_hash=""
+                [ -f "$_venv_req" ] && _venv_hash="$(sha256sum "$_venv_req" 2>/dev/null | awk '{print $1}')"
+
+                if [ -n "$_venv_missing" ] && [ "$_venv_install" != "0" ] && [ -f "$_venv_req" ]; then
+                    # Install when the venv is new, when requirements changed,
+                    # or when the caller explicitly asks for a retry.  A
+                    # module that pip cannot provide (for example a ROS-only
+                    # import) must not force a network install on every
+                    # source.
+                    _venv_stamp_hash="$(cat "$_venv_stamp" 2>/dev/null)"
+                    if [ "$_venv_fresh" = "1" ] || [ "$_venv_install" = "force" ] || [ "$_venv_stamp_hash" != "$_venv_hash" ]; then
+                        echo "[+] Installing requirements.txt into $_venv"
+                        "$_venv_py" -m pip --version >/dev/null 2>&1 || "$_venv_py" -m ensurepip --upgrade >/dev/null 2>&1 || true
+                        # Ignore the ROS PYTHONPATH here so pip does not
+                        # mistake ROS-installed packages for venv ones.
+                        if env -u PYTHONPATH -u PYTHONHOME "$_venv_py" -m pip install \
+                            --disable-pip-version-check -q -r "$_venv_req"; then
+                            printf '%s\n' "$_venv_hash" >"$_venv_stamp" 2>/dev/null || true
+                        else
+                            echo "[!] pip install failed; see the output above." >&2
+                        fi
+                        _venv_missing="$(_venv_probe)"
+                    fi
                 fi
 
                 if [ -n "$_venv_missing" ]; then
                     echo "[!] $_venv cannot import: $_venv_missing" >&2
-                    echo "    Install: $_venv/bin/python -m pip install -r $_ws_dir/requirements.txt" >&2
-                    echo "    Or let this script do it: ROVER_VENV_INSTALL=1 source scripts/source.sh" >&2
+                    echo "    Install: $_venv/bin/python -m pip install -r $_venv_req" >&2
+                    echo "    Or force this script to retry:" >&2
+                    echo "    ROVER_VENV_INSTALL=force source scripts/source.sh" >&2
                     echo "    Or recreate with system packages visible:" >&2
                     echo "    rm -rf $_venv && python3 -m venv --system-site-packages $_venv" >&2
                 fi
@@ -314,6 +369,42 @@ print(" ".join(missing))
         fi
     fi
 fi
+
+# Drop entries that point at deleted prefix directories.  Deleting
+# build/install while a shell is still sourced leaves AMENT_PREFIX_PATH and
+# CMAKE_PREFIX_PATH pointing at paths that no longer exist; colcon then warns
+# on every build (and older tooling can fail outright).  Pruning happens after
+# ROS, the overlay, and the venv have been sourced, so all live entries stay.
+_prune_prefix_paths() {
+    _prune_var="$1"
+    eval "_prune_value=\${$_prune_var:-}"
+    [ -n "$_prune_value" ] || return 0
+
+    _prune_noglob=0
+    case "$-" in *f*) _prune_noglob=1 ;; esac
+    [ "$_prune_noglob" = "1" ] || set -f
+
+    _prune_old_ifs="$IFS"
+    IFS=:
+    _prune_result=""
+    for _prune_entry in $_prune_value; do
+        [ -n "$_prune_entry" ] || continue
+        [ -d "$_prune_entry" ] || continue
+        if [ -n "$_prune_result" ]; then
+            _prune_result="$_prune_result:$_prune_entry"
+        else
+            _prune_result="$_prune_entry"
+        fi
+    done
+    IFS="$_prune_old_ifs"
+    [ "$_prune_noglob" = "1" ] || set +f
+
+    export "$_prune_var=$_prune_result"
+}
+
+_prune_prefix_paths AMENT_PREFIX_PATH
+_prune_prefix_paths CMAKE_PREFIX_PATH
+_prune_prefix_paths COLCON_PREFIX_PATH
 
 # Shorten long paths so the summary box keeps its shape.
 _short() {
@@ -344,5 +435,9 @@ echo ''
 unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
 unset _venv _venv_py _venv_real _active_real _py_bin _py_real
 unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
-unset _venv_missing _shell_kind
-unset -f _short _resolve_setup 2>/dev/null || true
+unset _venv_missing _shell_kind _venv_fresh _venv_install
+unset _venv_req _venv_stamp _venv_hash _venv_stamp_hash
+unset _venv_site _venv_plat _venv_lib
+unset _prune_var _prune_value _prune_noglob _prune_old_ifs _prune_result
+unset _prune_entry
+unset -f _short _resolve_setup _prune_prefix_paths 2>/dev/null || true

@@ -34,6 +34,7 @@ class Xbee(Node):
             QoSProfile(depth=10,
                        reliability=ReliabilityPolicy.BEST_EFFORT))
         self.__remote_xbee = None
+        self.__shutting_down = False
         self.__publisher = self.create_publisher(
             UInt8MultiArray, "/XBEE/MESSAGES/RX", 10
         )
@@ -42,6 +43,9 @@ class Xbee(Node):
         )
 
     def read_data(self, message) -> None:
+        """Publish one radio frame unless the node is shutting down."""
+        if self.__shutting_down or not rclpy.ok():
+            return
         try:
             # message = self.__xbee_device.read_data(0.0004)
             if message is None:
@@ -51,7 +55,10 @@ class Xbee(Node):
             self.__remote_xbee = message.remote_device
             self.publish_data(list(message.data))
         except Exception as e:
-            self.get_logger().info(f"failed to read data {e}")
+            # The device callback runs on a driver thread and can race with
+            # interpreter/context teardown; do not log into a dead context.
+            if not self.__shutting_down and rclpy.ok():
+                self.get_logger().info(f"failed to read data {e}")
             return
 
     def send_msg(self, msg: UInt8MultiArray) -> None:
@@ -98,31 +105,42 @@ class Xbee(Node):
 
         self.__xbee_device.add_data_received_callback(self.read_data)
 
-        # try:
-        #     while rclpy.ok():
-        #         data = self.read_data()
-        #         if data is None:
-        #             self.get_logger().info("message was none")
-        #             break
-        #         if len(data) == 0:
-        #             continue
-        # finally:
-        #     try:
-        #         self.__xbee_device.close()
-        #     except Exception:
-        #         pass
+    def shutdown(self) -> None:
+        """Stop the radio callback and close the device during teardown."""
+        self.__shutting_down = True
+        try:
+            if self.__xbee_device.is_open():
+                try:
+                    self.__xbee_device.del_data_received_callback(
+                        self.read_data)
+                except Exception:
+                    # Older digi-xbee versions may not have the callback
+                    # registered under the same bound method.
+                    pass
+                self.__xbee_device.close()
+        except Exception as exc:
+            if rclpy.ok():
+                self.get_logger().warning(
+                    f"failed to close xbee device: {exc}")
 
 
 def main() -> None:
     rclpy.init()
-    xbee = Xbee()
+    node = None
     try:
-        xbee.run()
+        node = Xbee()
+        node.run()
+        # Spin inside the try: Ctrl-C and SIGINT arrive here, and the other
+        # arm nodes handle them without a traceback.
+        rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    except Exception as exc:
-        xbee.get_logger().error(f"xbee node failed: {exc}")
-    rclpy.spin(xbee)
+    finally:
+        if node is not None:
+            node.shutdown()
+            node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

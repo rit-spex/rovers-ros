@@ -200,9 +200,15 @@ source scripts/source.sh
 ros2 launch main main_launch.xml
 ```
 
-`can_comms` resets the `can0` interface with `sudo` when it starts, so expect
-a second password prompt (use the rover password again) shortly after the
-nodes come up.
+`can_comms` resets the `can0` interface when it starts. Install the narrow
+passwordless sudo rule once so neither manual launches nor autoboot prompt for
+a password:
+
+```bash
+./scripts/can/install.sh
+```
+
+It only allows `ip link set can0 ...`, not general root access.
 
 If autoboot is installed, the real rover stack is already running after boot;
 launching it again starts duplicate nodes.

@@ -216,14 +216,6 @@ class JETSON_LISTENER(can.Listener):
             msg_type=Can, topic=CAN_ERROR_TOPIC, qos_profile=10
         )
 
-    def on_message_received(self, msg: can.Message) -> None:
-        if msg.is_error_frame:
-            self.error_frame_publisher.publish(msg)
-        elif msg.arbitration_id in self.__publishers:
-            buf = [0] * 8  # Initialize buffer with 8 zeros
-            for i in range(msg.dlc):
-                buf[i] = msg.data[i]
-
     @staticmethod
     def __buffer(msg: can.Message) -> list[int]:
         """Copy a frame payload into the fixed 8-byte ROS CAN layout."""
@@ -239,10 +231,16 @@ class JETSON_LISTENER(can.Listener):
         True tells python-can the error was handled so the reader thread keeps
         running until the link is back up.
         """
-        self.__node.get_logger().warning(f"CAN receive error: {exc}")
+        # The notifier thread can still deliver an error after Ctrl-C has
+        # invalidated the ROS context; logging then would publish into a dead
+        # context and emit another warning.
+        if rclpy.ok():
+            self.__node.get_logger().warning(f"CAN receive error: {exc}")
         return True
 
     def on_message_received(self, msg: can.Message) -> None:
+        if not rclpy.ok():
+            return
         # Error frames are not addressed to a motor; route them to the bus
         # health path before the E_STOP/ID lookup below.
         if msg.is_error_frame:

@@ -4,12 +4,13 @@ Helper scripts for building, sourcing, and running the rover workspace.
 
 | Script | Purpose |
 |---|---|
-| `source.sh` | Source ROS 2, the workspace overlay, and `.venv` if present |
+| `source.sh` | Source ROS 2, the workspace overlay, and the workspace `.venv` (created/installed by default) |
 | `common.sh` | Shared paths, build helpers, and process cleanup (source only) |
 | `sim.sh` | Start/stop the simulation, run the rover stack headless, or open the RViz view |
 | `restart_gazebo.sh` | Rebuild and restart Gazebo + rover stack (used by the GUI panel) |
 | `autoboot/install.sh` | Install the systemd unit that launches the rover stack at boot |
 | `autoboot/uninstall.sh` | Stop, disable, and remove the autoboot systemd unit |
+| `can/install.sh` | Install the narrow passwordless sudo rule for `can0` setup |
 
 ## Usage
 
@@ -44,11 +45,61 @@ them again. The external basestation process is left running.
 | Variable | Default | Meaning |
 |---|---|---|
 | `ROS_SETUP` | `/opt/ros/humble/setup.bash` | ROS 2 underlay to source |
+| `ROVER_VENV` | `$ROS_WS/.venv` | Python venv location |
+| `ROVER_VENV_CREATE` | `1` | Create the venv when missing; set `0` to skip |
+| `ROVER_VENV_INSTALL` | `1` | Install `requirements.txt` when modules are missing; `force` retries |
 | `ROS_WS` | directory containing `scripts/` | Rover workspace root |
 | `BASE_WS` | `$ROS_WS/../rovers-basestation` | Basestation workspace |
 | `WORLD` | `empty.world` | World file in `rover_simulation/worlds/` |
 | `ROBOT_CONFIG` | saved config, else `arm_drivebase` | Build selection |
 | `SIM_STATE_DIR` | `${XDG_RUNTIME_DIR:-/tmp}/rovers-sim` | Tab state and logs |
+
+`source.sh` also appends the venv's `site-packages` directories to
+`PYTHONPATH`. ROS console scripts are generated with `#!/usr/bin/python3`, so
+activation alone does not make them use the venv interpreter; this keeps
+`ros2 launch` nodes able to import pip-installed modules such as `can` and
+`digi.xbee`.
+
+## CAN permissions
+
+`can_comms` configures `can0` at startup with `ip link set`, which normally
+requires root. Install the one-time rule:
+
+```bash
+./scripts/can/install.sh
+```
+
+This writes `/etc/sudoers.d/rovers-can` allowing only
+`ip link set can0 ...` for the invoking user. `reset_can.zsh` then uses
+`sudo -n`, so autoboot never blocks on a password prompt.
+
+## Stale build caches
+
+CMake remembers the absolute source path it was configured from. If a package
+is moved in the repo, an existing `build/<pkg>` directory aborts with:
+
+```text
+The source directory ".../src/autonomous/pointcloud_to_laserscan" does not exist
+```
+
+`build_workspace()` in `common.sh` now detects this and removes only the
+affected `build/<pkg>` and `install/<pkg>` trees before rebuilding. To fix a
+checkout by hand:
+
+```bash
+rm -rf build/pointcloud_to_laserscan build/pathfinding \
+       install/pointcloud_to_laserscan install/pathfinding
+```
+
+Deleting `install/` while a shell still has it sourced leaves dead entries in
+`AMENT_PREFIX_PATH` / `CMAKE_PREFIX_PATH`; colcon then warns that those paths
+do not exist. `source.sh` prunes entries whose directory is gone, or you can
+open a fresh shell and source `/opt/ros/humble/setup.bash` again.
+
+`gazebo_sim_control` is optional at CMake level: if Gazebo Classic or Qt5 is
+not installed, it configures and installs as an empty package instead of
+failing. That lets a hardware-only Jetson build the entire workspace with
+`colcon build`, even though the simulation GUI plugin is not needed there.
 
 ## Gazebo ros2_control plugin
 
