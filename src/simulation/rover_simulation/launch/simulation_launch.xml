@@ -15,5 +15,7 @@
 		<param name="config" value="$(var robot_config)"/>
 	</node>
 	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
-	<node pkg="arm" exec="arm_controller_node" name="arm_controller" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_route_planner_node" name="arm_route_planner" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_master_node" name="arm_master" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_end_effector_node" name="arm_end_effector" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 </launch>

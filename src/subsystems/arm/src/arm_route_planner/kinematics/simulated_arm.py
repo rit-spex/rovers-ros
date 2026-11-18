@@ -6,7 +6,7 @@ import random
 
 import sympy as sp
 
-from constants import (
+from arm_constants import (
     A0, A1, A2, A3,
     HOMING_TARGET, HOMING_SPEED, HOMING_THRESHOLD,
     MAX_TRANSLATION_DELTA, MAX_ANG_VEL, ANGULAR_SPEED_RAMP_TIME,
@@ -15,6 +15,7 @@ from constants import (
     ORIENTATION_SNAP_THRESHOLD, ORIENTATION_SNAP_OFF_AXIS,
     END_EFFECTOR_MIN_Z, TRACK_POS_TOL, TRACK_ORI_TOL, DT,
     PATH_PLANNER_STEP, PATH_PLANNER_MAX_EXPANSIONS,
+    PATH_PLANAR_BASE, WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
 )
 from .generic_frames import (
     InverseKinematicsSolver, RobotOrientationModel, OrientationMatrix,
@@ -30,22 +31,6 @@ from .limiters import (
 )
 from .actions.home import HomingController
 from .actions.flip import FlipController
-
-# Waypoint follower tolerance and stall guard.
-#
-# The follower compares the *measured* arm pose (synced from hardware every
-# cycle) against a waypoint.  A physical/simulated arm always has encoder
-# noise and tracking lag, so requiring an exact match (the old 1e-9 rad)
-# makes an action stop at a waypoint forever while the remaining joints sit
-# still.  Advance once every joint is within the normal homing threshold,
-# and fall back/skip if a waypoint makes no progress at all.
-WAYPOINT_TOL = HOMING_THRESHOLD
-WAYPOINT_STALL_LIMIT = 40  # consecutive no-progress control cycles (~2 s)
-
-# Path planning leaves headroom for waypoint-following lag.  The arm stops
-# within WAYPOINT_TOL of a waypoint, so a plan that relies on the exact
-# planar-band boundary can drift outside it while closing on the next point.
-PATH_PLANAR_BASE = max(0.0, PLANAR_BASE - WAYPOINT_TOL)
 
 
 class KinematicsManager:

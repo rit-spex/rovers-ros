@@ -38,7 +38,6 @@ ARM_FLAG_BITS = {
     "JOINT_DRIVE": 1 << 4,
     "POSITION_LOCK": 1 << 5,
     "ORIENTATION_LOCK": 1 << 6,
-    "GRIPPER_DRIVE": 1 << 7,
 }
 
 # ArmPose carries metres; the compact protocol uses centi-inches.

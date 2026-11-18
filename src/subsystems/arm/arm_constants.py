@@ -9,46 +9,15 @@ rules, path planning), and SpaceMouse sensitivity.
 from __future__ import annotations
 
 import math
-import sys
 from enum import IntEnum
-from pathlib import Path
 from typing import NamedTuple
 
-
-def _shared_constants_dir() -> Path | None:
-    """Locate the workspace ``constants`` package this module shadows."""
-    try:
-        from ament_index_python.packages import get_package_prefix
-
-        prefix = Path(get_package_prefix("constants"))
-        candidate = (
-            prefix
-            / "lib"
-            / f"python{sys.version_info.major}.{sys.version_info.minor}"
-            / "site-packages"
-            / "constants"
-        )
-        if (candidate / "CAN_constants.py").is_file():
-            return candidate
-    except Exception:
-        pass
-
-    for entry in sys.path:
-        candidate = Path(entry) / "constants"
-        if (candidate / "CAN_constants.py").is_file():
-            return candidate
-    return None
-
-
-_CONSTANTS_PACKAGE_DIR = _shared_constants_dir()
-if _CONSTANTS_PACKAGE_DIR is not None:
-    # Let ``constants.CAN_*`` resolve to the shared package.
-    __path__ = [str(_CONSTANTS_PACKAGE_DIR)]
-
-from constants.CAN_constants import CAN_MESSAGE_IDS  # noqa: E402
-# The bridge module puts the ``lib/rovers-protocol`` submodule on sys.path.
-# Arm nodes import ``rover_protocol.arm_errors`` directly, so trigger it here
-# before any node reaches its own ``rover_protocol`` import.
+# The shared workspace ``constants`` ament package resolves normally now that
+# this module has its own name.
+from constants.CAN_constants import CAN_MESSAGE_IDS
+# ``constants.CommandCodes`` puts the ``lib/rovers-protocol`` submodule on
+# sys.path.  Arm nodes import ``rover_protocol.arm_errors`` directly, so
+# trigger that bridge before any node reaches its own import.
 import constants.CommandCodes  # noqa: E402,F401
 
 
@@ -76,10 +45,50 @@ JOINT_CURRENT_TOPICS = {
 
 ESTOP_TOPIC = "/ESTOP"
 ARM_COMMAND_TOPIC = "/ARM/COMMAND"
+
+# Teleop input and the arbitrated output are separate topics.  The teleop node
+# publishes MANUAL_VELOCITY_TOPIC; the master forwards it to VELOCITY_TOPIC
+# only while manual owns the arm, so the planner never needs to know who the
+# source is.
+MANUAL_VELOCITY_TOPIC = "/ARM/MANUAL/CMD_VELOCITY"
 VELOCITY_TOPIC = "/ARM/CMD_VELOCITY"
-GRIPPER_AXIS_TOPIC = "/ARM/CMD_GRIPPER_AXIS"
 
 SOLENOID_TARGET_TOPIC = "/ARM/JOINT/TARGET_SOLENOID"
+
+# Master <-> functional nodes.  The master forwards every /ARM/COMMAND
+# message to the planner so it can validate them; the end effector receives
+# only the gripper/solenoid commands it executes.  The planner owns all
+# 5-DOF target generation and reports errors back through its status topic.
+PLANNER_COMMAND_TOPIC = "/ARM/PLANNER/COMMAND"
+PLANNER_STATUS_TOPIC = "/ARM/PLANNER/STATUS"
+END_EFFECTOR_COMMAND_TOPIC = "/ARM/END_EFFECTOR/COMMAND"
+
+# Commands owned by the end effector node.  The master routes these directly
+# to it and never forwards them to the planner.  The up/down arrows arrive
+# as a stream while the operator holds the key; the end effector jogs until
+# the stream stops for GRIPPER_JOG_TIMEOUT_SEC.
+END_EFFECTOR_COMMANDS = {
+    "gripper_up",
+    "gripper_down",
+    "fire_solenoid",
+    "toggle_solenoid",
+}
+GRIPPER_JOG_COMMANDS = {
+    "gripper_up",
+    "gripper_down",
+}
+# End-effector commands that are legal before the 5-DOF model has
+# initialized.  The solenoid is a one-shot hardware pulse and does not need
+# arm feedback.
+PRE_READY_END_EFFECTOR_COMMANDS = {
+    "fire_solenoid",
+    "toggle_solenoid",
+}
+# Internal master -> end effector command.  The operator cannot send it: it
+# is not part of END_EFFECTOR_COMMANDS.  The master emits it on a control
+# handover so a held gripper jog stops immediately instead of coasting to its
+# timeout.
+END_EFFECTOR_STOP_COMMAND = "stop_jog"
 
 # High-level arm state, published as one Bool topic per flag.
 ARM_FLAG_NAMES = (
@@ -90,11 +99,11 @@ ARM_FLAG_NAMES = (
     "JOINT_DRIVE",
     "POSITION_LOCK",
     "ORIENTATION_LOCK",
-    "GRIPPER_DRIVE",
 )
 
 ARM_STATE_TOPICS = {
     "enabled": "/ARM/STATE/ENABLED",
+    "control_source": "/ARM/STATE/CONTROL_SOURCE",
     "locked_joints": "/ARM/STATE/LOCKED_JOINTS",
     "homing_joints": "/ARM/STATE/HOMING_JOINTS",
     "operation_mode": "/ARM/STATE/OPERATION_MODE",
@@ -103,6 +112,49 @@ ARM_STATE_TOPICS = {
     "flags": {name: f"/ARM/STATE/{name}" for name in ARM_FLAG_NAMES},
 }
 ARM_ENABLED_TOPIC = ARM_STATE_TOPICS["enabled"]
+ARM_CONTROL_SOURCE_TOPIC = ARM_STATE_TOPICS["control_source"]
+
+# Control ownership.  Sources request a change on the request topic; the arm
+# master validates it and is the single writer of the state topic.  Manual
+# always preempts autonomous, and NONE means no source may move the arm.
+# The default keeps the pre-autonomy behaviour: the operator owns the arm
+# until a source explicitly asks for it.
+#
+# The master is the mux: it is the only node that reads this state to gate
+# commands.  Actuators consume only the master's arbitrated output, and the
+# state topic is diagnostic telemetry.
+ARM_CONTROL_REQUEST_TOPIC = "/ARM/CONTROL/REQUEST"
+
+
+class ArmControlSource(IntEnum):
+    """Which source currently owns arm commands."""
+
+    NONE = 0
+    MANUAL = 1
+    AUTONOMOUS = 2
+
+
+ARM_CONTROL_SOURCE_LABELS = {
+    ArmControlSource.NONE: "NONE",
+    ArmControlSource.MANUAL: "MANUAL",
+    ArmControlSource.AUTONOMOUS: "AUTONOMOUS",
+}
+DEFAULT_ARM_CONTROL_SOURCE = ArmControlSource.MANUAL
+
+
+def parse_control_source(value):
+    """Return the ArmControlSource for a wire value, or None if unknown."""
+    try:
+        return ArmControlSource(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def control_source_label(source) -> str:
+    """Return a human-readable name for a control source value."""
+    return ARM_CONTROL_SOURCE_LABELS.get(
+        parse_control_source(source), f"UNKNOWN({source})")
+
 
 # Arm operating modes: name -> (wire code, human-readable label).
 _ARM_OPERATION_MODES = {
@@ -124,9 +176,9 @@ ARM_OPERATION_MODE_LABELS = {
 # Geometry and units
 # =============================================================================
 
-A0 = 6.5        # Elevation of shoulder joint from base [in]
-A1 = 22         # Upper arm length [in]
-A2 = 22         # Fore-arm length [in]
+A0 = 6.32        # Elevation of shoulder joint from base [in]
+A1 = 18.25         # Upper arm length [in]
+A2 = 19.5         # Fore-arm length [in]
 A3 = 12         # Gripper length [in]
 
 # Key joint indices after each linkage translation.
@@ -141,6 +193,35 @@ METERS_PER_INCH = 0.0254
 # =============================================================================
 
 DT = 0.05                   # Arm control period [s], shared by all nodes
+
+# Stop applying teleop motion once the command source goes quiet.
+# The planner uses this for /ARM/CMD_VELOCITY.
+VELOCITY_TIMEOUT_SEC = 0.5
+# The teleop node zeroes an axis whose raw /BASESTATION/spacemouse/* value
+# has not refreshed for this long.  The basestation republishes teleop axes
+# every cycle precisely so a dead link can be told apart from a held stick.
+TELEOP_INPUT_TIMEOUT_SEC = 0.5
+# Treat the route planner as unavailable when its status stops arriving.
+# Path planning runs in the planner's command callback, so allow several
+# seconds before declaring it dead.
+PLANNER_TIMEOUT_SEC = 5.0
+
+# Teleop republish rate.  The node exposes this as a parameter, and the
+# default lives here so the node and its tests share one source.
+TELEOP_PUBLISH_RATE_HZ = 50.0
+
+# A held arrow sends a command every basestation cycle.  The master reports
+# a rejected hold at most this often, keeping the log and /ARM/STATE/ERROR
+# readable.
+JOG_REJECT_INTERVAL_SEC = 1.0
+
+# A shaped teleop axis is exactly zero at rest, so a tight epsilon rejects
+# noise without demanding bit-exact zeros when re-arming manual motion.
+VELOCITY_NEUTRAL_EPSILON = 1e-6
+
+# Debug sniffer print cadence.  Slow enough to read, fast enough to see
+# motion.
+SNIFFER_PERIOD_SEC = 1.0
 
 
 # =============================================================================
@@ -159,7 +240,7 @@ MECHANICAL_LIMITS = [
     (math.radians(2), math.radians(178)),   # shoulder
     (-math.pi * 3 / 4, math.pi * 3 / 4),   # elbow
     (-math.pi / 6, math.pi / 6),            # wrist bend
-    (-math.pi / 2, math.pi / 2),            # wrist twist
+    (-math.pi / 4, math.pi / 4),            # wrist twist
 ]
 
 BASE_LIMIT = MECHANICAL_LIMITS[0]
@@ -193,6 +274,8 @@ class ArmMotorParams(NamedTuple):
     tick_upper_limit: float
     max_speed: int
 
+
+# NOTE: IMPORTANT COMMENT: THE CURRENT MOTOR PARAMETERS AND LIMITS ARE INCORRECT, DO NOT USE THEM AS A REFERENCE FOR DEBUGGING
 
 # https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
 ARM_MOTOR_PARAMS = [
@@ -323,6 +406,14 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # SpaceMouse input
 # =============================================================================
 
+# Every axis the SpaceMouse reports, in linear/angular pairs, and the raw
+# topics the basestation bridge publishes them on.  The device vocabulary
+# lives here so the teleop node and its tests cannot drift apart.
+SPACEMOUSE_AXIS_NAMES = ("x", "y", "z", "rx", "ry", "rz")
+SPACEMOUSE_AXIS_TOPICS = {
+    axis: f"/BASESTATION/spacemouse/{axis}" for axis in SPACEMOUSE_AXIS_NAMES
+}
+
 # Per-axis sign conventions.  +1 = raw HID value used as-is,
 # -1 = raw HID value negated.  Adjust here to match device orientation.
 # Canonical reference: invKin202627/src/constants.py.  The basestation
@@ -339,9 +430,18 @@ AXIS_SIGNS = {
 TRANSLATION_SENS = 0.22575    # SpaceMouse translation scale [in/unit]
 ROTATION_SENS = 0.015         # SpaceMouse rotation scale [rad/unit]
 
+# Gripper jog speed while the operator holds the up/down arrow.  The end
+# effector moves by GRIPPER_JOG_RATE * DT each control cycle and stops if no
+# arrow command arrives for GRIPPER_JOG_TIMEOUT_SEC.
+GRIPPER_JOG_RATE = math.radians(30)    # [rad/s]
+GRIPPER_JOG_TIMEOUT_SEC = 0.25
+
 RAW_MAX = 127              # Normalization max - SpaceMouse useful range
 DEADZONE = 0.05            # Normalized axis deadzone - kills resting-hand drift
 INPUT_EXPONENT = 1.5       # Power curve - mild fine-control bias, not mushy
+# Extra travel needed to leave rest once the deadzone has zeroed an axis.
+# Prevents a stick resting on the boundary from flickering on and off.
+ZERO_HYSTERESIS = 0.02
 
 SPACEMOUSE_VENDOR_ID = 0x256f
 SPACEMOUSE_PRODUCT_ID = 0xc63a
@@ -519,3 +619,15 @@ OCTANT_RULES = {
 PLANAR_BASE = max(abs(PLANAR_LIMITS[0][0]), abs(PLANAR_LIMITS[0][1]))
 PATH_PLANNER_STEP = math.radians(5.0)   # Search-grid step [rad]
 PATH_PLANNER_MAX_EXPANSIONS = 200_000   # A* expansion cap
+
+# Waypoint follower tolerance and stall guard.  The follower compares the
+# measured pose against a waypoint, so encoder noise and tracking lag mean an
+# exact match would never arrive.  Advance once every joint is within the
+# homing threshold, and skip a waypoint that makes no progress for this many
+# control cycles.
+WAYPOINT_TOL = HOMING_THRESHOLD
+WAYPOINT_STALL_LIMIT = 40               # ~2 s at DT
+# Leave headroom for waypoint-following lag: the arm stops within
+# WAYPOINT_TOL of a waypoint, so a plan that hugs the exact planar-band
+# boundary can drift outside it while closing on the next point.
+PATH_PLANAR_BASE = max(0.0, PLANAR_BASE - WAYPOINT_TOL)

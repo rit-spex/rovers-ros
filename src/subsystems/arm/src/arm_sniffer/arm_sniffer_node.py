@@ -17,7 +17,8 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, UInt8, UInt32
 
-from constants import (
+from arm_constants import (
+    ARM_CONTROL_SOURCE_TOPIC,
     ARM_ENABLED_TOPIC,
     ARM_FLAG_NAMES,
     ARM_JOINT_NAMES,
@@ -27,11 +28,11 @@ from constants import (
     ESTOP_TOPIC,
     JOINT_CURRENT_TOPICS,
     JOINT_TARGET_TOPICS,
+    SNIFFER_PERIOD_SEC,
+    control_source_label,
+    parse_control_source,
 )
 from rover_protocol.arm_errors import error_text
-
-# Print rate. Slow enough to read, fast enough to see motion.
-SNIFFER_PERIOD_SEC = 1.0
 
 
 def format_angle(value: float | None) -> str:
@@ -62,6 +63,7 @@ class ArmSnifferNode(Node):
         self.__target = [None] * len(ARM_JOINTS)
         self.__arm_enabled = None
         self.__estop = None
+        self.__control_source = None
         self.__flags = {name: None for name in ARM_FLAG_NAMES}
         self.__locked_joints = None
         self.__homing_joints = None
@@ -92,6 +94,12 @@ class ArmSnifferNode(Node):
             msg_type=Bool,
             topic=ESTOP_TOPIC,
             callback=self.__on_estop_received,
+            qos_profile=10,
+        )
+        self.create_subscription(
+            msg_type=UInt8,
+            topic=ARM_CONTROL_SOURCE_TOPIC,
+            callback=self.__on_control_source_received,
             qos_profile=10,
         )
         for name in ARM_FLAG_NAMES:
@@ -150,6 +158,9 @@ class ArmSnifferNode(Node):
     def __on_estop_received(self, msg: Bool):
         self.__estop = bool(msg.data)
 
+    def __on_control_source_received(self, msg: UInt8):
+        self.__control_source = parse_control_source(msg.data)
+
     def __on_locked_received(self, msg: UInt8):
         self.__locked_joints = int(msg.data)
 
@@ -174,6 +185,7 @@ class ArmSnifferNode(Node):
             "",
             f"  enabled   : {self.__format_bool(self.__arm_enabled)}",
             f"  e-stop    : {self.__format_bool(self.__estop)}",
+            f"  control   : {self.__format_control_source()}",
             f"  mode      : {self.__format_mode()}",
             "",
             f"  flags     : {self.__format_flags()}",
@@ -212,6 +224,11 @@ class ArmSnifferNode(Node):
         if value is None:
             return "waiting"
         return "True" if value else "False"
+
+    def __format_control_source(self) -> str:
+        if self.__control_source is None:
+            return "waiting"
+        return control_source_label(self.__control_source)
 
     def __format_mode(self) -> str:
         if self.__operation_mode is None:

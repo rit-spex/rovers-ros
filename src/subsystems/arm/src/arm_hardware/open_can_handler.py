@@ -10,7 +10,7 @@ from enum import IntEnum
 
 from numpy import int32
 
-from constants import (
+from arm_constants import (
     ARM_MOTOR_IDX,
     ARM_MOTOR_PARAMS,
     JOINT_MESSAGE_IDS,

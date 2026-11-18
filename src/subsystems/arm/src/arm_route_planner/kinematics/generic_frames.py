@@ -7,7 +7,7 @@ import numpy as np
 import math
 import time
 
-from constants import (
+from arm_constants import (
     POS_TOL, ORI_TOL, MAX_STEP,
     FD_EPS, DAMPING_LAMBDA_SQ, LIMIT_TOL,
     MAX_BACKTRACK, BACKTRACK_TOL, MAX_ACTIVE_SET_PASSES,

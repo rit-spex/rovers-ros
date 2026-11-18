@@ -2,7 +2,7 @@ import math
 
 import numpy as np
 
-from constants import (
+from arm_constants import (
     MECHANICAL_LIMITS, FULL_RANGE_LIMITS, PLANAR_LIMITS,
     PICK_AND_PLACE_LIMITS, PICK_AND_PLACE_FLIPPED_LIMITS, HOMING_LIMITS,
     ELBOW_DEADBAND, O3_RELAX_MAX, EXCLUSION_RADIUS,
