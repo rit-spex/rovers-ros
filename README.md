@@ -11,11 +11,11 @@ src/
                        simulated xbee_udp/can_udp links, basestation nodes
   constants/           shared CAN/protocol constants (cross-cutting leaf)
   custom_interfaces/   shared ROS message definitions (cross-cutting leaf)
-  inverse_kinematics/  arm inverse kinematics
   main/                real-rover composition root
   simulation/          Gazebo assets, bridges, GUI plugin, and RViz view
   subsystems/          hardware and capability subsystems:
     arm/               arm control and drivers
+    inverse_kinematics/ arm inverse kinematics
     autonomous/        navigation, SLAM, pathfinding
                        (also hosts the vendored joy_tester and
                        pointcloud_to_laserscan tools)
