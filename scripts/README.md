@@ -18,6 +18,15 @@ Helper scripts for building, sourcing, and running the rover workspace.
 # Shell environment
 source scripts/source.sh
 
+# Source, then build the workspace with colcon
+source scripts/source.sh --build
+
+# Source, then launch the real rover stack
+source scripts/source.sh --run
+
+# Both
+source scripts/source.sh --build --run
+
 # Full simulation: Gazebo + rover stack + basestation
 ./scripts/sim.sh start [drivebase|arm_drivebase|life_drivebase]
 
@@ -35,6 +44,10 @@ source scripts/source.sh
 
 `sim.sh start` requires `gnome-terminal` and a graphical session. Use
 `sim.sh stack` on a headless machine.
+
+`source.sh --build` runs `colcon build --symlink-install` after sourcing and
+refreshes the overlay. `source.sh --run` runs
+`ros2 launch main main_launch.xml`. If the build fails, `--run` is skipped.
 
 `restart_gazebo.sh` is what the in-Gazebo Simulation Control panel calls. It
 rebuilds the sim packages, stops the Gazebo GUI and rover stack, then starts

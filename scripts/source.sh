@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Source the workspace environment.
 #
-#   source scripts/source.sh
+#   source scripts/source.sh              # environment only
+#   source scripts/source.sh --build      # environment, then colcon build
+#   source scripts/source.sh --run        # environment, then launch main
+#   source scripts/source.sh --build --run
 #
 # Works from any directory. Sources ROS 2, the colcon overlay, and the
 # workspace Python virtual environment (created and populated on demand).
@@ -23,6 +26,20 @@ fi
 _shell_kind="sh"
 [ -n "${BASH_VERSION:-}" ] && _shell_kind="bash"
 [ -n "${ZSH_VERSION:-}" ] && _shell_kind="zsh"
+
+# Optional actions. These are read from the arguments supplied to `source`:
+#   source scripts/source.sh --build
+#   source scripts/source.sh --run
+# Unknown arguments are ignored because a sourced file can inherit the
+# caller's positional parameters when no arguments are given.
+_source_build=0
+_source_run=0
+for _source_arg in "$@"; do
+    case "$_source_arg" in
+        --build) _source_build=1 ;;
+        --run) _source_run=1 ;;
+    esac
+done
 
 # Resolve a setup script to the flavour for the shell running this script.
 # ament and colcon generate .bash, .sh and .zsh variants; the .bash flavour
@@ -432,6 +449,52 @@ echo '|  Echo Topic  |  ros2 topic echo <topic>             |'
 echo $'|\033[1;38;5;208m=====================================================\033[0m|'
 echo ''
 
+# ---------------------------------------------------------------------------
+# Optional actions
+# ---------------------------------------------------------------------------
+if [ "$_source_build" = "1" ]; then
+    if ! command -v colcon >/dev/null 2>&1; then
+        echo "[!] colcon not found; cannot build." >&2
+        _source_build_ok=0
+    else
+        echo "[+] Building workspace with colcon..."
+        _source_build_ok=1
+        if ! (cd "$_ws_dir" && colcon build --symlink-install); then
+            echo "[!] colcon build failed." >&2
+            _source_build_ok=0
+        fi
+    fi
+
+    if [ "$_source_build_ok" = "1" ]; then
+        # Refresh the overlay so --run and the current shell see the newly
+        # built executables without requiring a second source.
+        _overlay=""
+        for _cand in \
+            "$_ws_dir/install/setup.bash" \
+            "$_ws_dir/install/local_setup.bash"; do
+            if _resolved="$(_resolve_setup "$_cand")"; then
+                _overlay="$_resolved"
+                break
+            fi
+        done
+        if [ -n "$_overlay" ]; then
+            source "$_overlay" || \
+                echo "[!] Failed to source $_overlay" >&2
+        fi
+    fi
+fi
+
+if [ "$_source_run" = "1" ]; then
+    if [ "${_source_build_ok:-1}" != "1" ]; then
+        echo "[!] Skipping launch because the build failed." >&2
+    elif ! command -v ros2 >/dev/null 2>&1; then
+        echo "[!] ros2 not found; cannot launch main." >&2
+    else
+        echo "[+] Launching main..."
+        ros2 launch main main_launch.xml
+    fi
+fi
+
 unset _ws_src _ws_dir _ros_setup _cand _resolved _overlay _loaded _build_ref _build_epoch _build_time _diff _ago _build_info
 unset _venv _venv_py _venv_real _active_real _py_bin _py_real
 unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
@@ -440,4 +503,5 @@ unset _venv_req _venv_stamp _venv_hash _venv_stamp_hash
 unset _venv_site _venv_plat _venv_lib
 unset _prune_var _prune_value _prune_noglob _prune_old_ifs _prune_result
 unset _prune_entry
+unset _source_arg _source_build _source_run _source_build_ok
 unset -f _short _resolve_setup _prune_prefix_paths 2>/dev/null || true
