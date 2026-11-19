@@ -30,7 +30,7 @@ class xbee_udp(Node):
 
         self.__address = CONSTANTS.COMMUNICATION.UDP_HOST
         self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
-        self.__basestation_port = CONSTANTS.COMMUNICATION.UDP_BASESTATION_PORT
+        self.__telemetry_port = CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
         self.__publisher = self.create_publisher(
@@ -54,12 +54,12 @@ class xbee_udp(Node):
 
     def send_msg(self, msg: UInt8MultiArray) -> None:
         """
-        pack and send the message to the basestation
+        send one telemetry frame to the basestation over UDP
         """
         try:
-            self.__socket.sendto(bytes(msg.data), (self.__address, self.__basestation_port))
+            self.__socket.sendto(bytes(msg.data), (self.__address, self.__telemetry_port))
             self.get_logger().debug(
-                f"sent {len(msg.data)} bytes to {self.__address}:{self.__basestation_port}: "
+                f"sent {len(msg.data)} bytes to {self.__address}:{self.__telemetry_port}: "
                 f"{bytes(msg.data).hex(' ')}"
             )
         except Exception as e:

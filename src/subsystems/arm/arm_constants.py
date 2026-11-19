@@ -308,7 +308,7 @@ ARM_MOTOR_PARAMS = [
         max_speed=100,
     ),  # base
     ArmMotorParams(
-        ticks_per_rad=-262600,
+        ticks_per_rad=262600,
         tick_offset=-202000,
         tick_lower_limit=-202000,
         tick_upper_limit=622000,
