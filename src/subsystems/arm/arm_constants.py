@@ -301,24 +301,24 @@ class ArmMotorParams(NamedTuple):
 # https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
 ARM_MOTOR_PARAMS = [
     ArmMotorParams(
-        ticks_per_rad=-415000,
-        tick_offset=9900000,
-        tick_lower_limit=8596000,
-        tick_upper_limit=10225000,
+        ticks_per_rad=-420000,
+        tick_offset=-43333,
+        tick_lower_limit=-1040833,
+        tick_upper_limit=954000,
         max_speed=100,
     ),  # base
     ArmMotorParams(
-        ticks_per_rad=-262000,
-        tick_offset=625000,
-        tick_lower_limit=-244000,
-        tick_upper_limit=670700,
+        ticks_per_rad=-262600,
+        tick_offset=-202000,
+        tick_lower_limit=-202000,
+        tick_upper_limit=622000,
         max_speed=30,
     ),  # shoulder
     ArmMotorParams(
-        ticks_per_rad=415000,
-        tick_offset=325000 + 268000,
-        tick_lower_limit=-652821 + 268000,
-        tick_upper_limit=1300000 + 268000,
+        ticks_per_rad=-420000,
+        tick_offset=860000,
+        tick_lower_limit=-238000,
+        tick_upper_limit=1959000,
         max_speed=100,
     ),  # elbow
     # NOTE: Following limits exist on teensy side, currently redundant,
@@ -408,8 +408,8 @@ TARGET_ANGLE_TOPICS = {
 # =============================================================================
 
 # Maximum joint speed for the simulated mechanical arm [rad/s].
-# At DT=0.05 this caps each joint at ~9 deg per frame.
-MAX_ANG_VEL = math.radians(36)
+# At DT=0.05 this caps each joint at ~0.6 deg per frame.
+MAX_ANG_VEL = math.radians(12)
 
 # Time to ramp from standstill to MAX_ANG_VEL [s].
 ANGULAR_SPEED_RAMP_TIME = 1.0
@@ -419,7 +419,7 @@ ANGULAR_SPEED_RAMP_TIME = 1.0
 # Homing
 # =============================================================================
 
-HOMING_SPEED = 1 / 100                        # Radians per step during homing
+HOMING_SPEED = 1 / 300                        # Radians per step during homing
 HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 
 
