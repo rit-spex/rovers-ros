@@ -19,6 +19,7 @@ from custom_interfaces.msg import Can
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from std_msgs.msg import Bool, Float32
@@ -426,13 +427,17 @@ class ArmHardwareNode(Node):
 
 def main():
     """Create and run the arm hardware node."""
-    rclpy.init()
-    motors = ArmHardwareNode()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    motors = None
     try:
+        motors = ArmHardwareNode()
         motors.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        motors.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if motors is not None:
+            try:
+                motors.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()

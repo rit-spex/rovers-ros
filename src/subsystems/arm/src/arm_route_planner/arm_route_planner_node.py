@@ -38,6 +38,7 @@ import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from custom_interfaces.msg import (
     ArmCommand,
@@ -650,7 +651,7 @@ class ArmRoutePlannerNode(Node):
 
 
 def main():
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     planner: ArmRoutePlannerNode | None = None
     try:
         planner = ArmRoutePlannerNode()
@@ -659,9 +660,11 @@ def main():
         pass
     finally:
         if planner is not None:
-            planner.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                planner.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

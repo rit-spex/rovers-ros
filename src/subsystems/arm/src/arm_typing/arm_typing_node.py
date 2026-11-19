@@ -45,6 +45,7 @@ import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import (
@@ -551,7 +552,7 @@ class ArmTypingNode(Node):
 
 def main():
     """Run the arm typing node."""
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = ArmTypingNode()
@@ -560,9 +561,11 @@ def main():
         pass
     finally:
         if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

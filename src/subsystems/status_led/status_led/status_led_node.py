@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node, Timer
 from std_msgs.msg import Bool, UInt8, UInt16
 
@@ -202,17 +203,21 @@ class StatusLED(Node):
 
 
 def main():
-    rclpy.init()
-    status_led = StatusLED()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    status_led = None
     try:
+        status_led = StatusLED()
         status_led.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        status_led.destroy_node()
-        if rclpy.ok():
-            status_led.get_logger().info("stopping status LED")
-            rclpy.shutdown()
+        if status_led is not None:
+            try:
+                status_led.get_logger().info("stopping status LED")
+                status_led.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

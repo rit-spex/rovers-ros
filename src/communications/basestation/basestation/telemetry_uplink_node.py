@@ -10,6 +10,7 @@ from typing import Callable, Dict
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from custom_interfaces.msg import Pose
 from std_msgs.msg import (
@@ -320,19 +321,24 @@ class TelemetryUplink(Node):
 
 
 def main():
-    rclpy.init()
-    node = TelemetryUplink()
-    node.get_logger().info(
-        f"protocol trace {'enabled' if node._protocol_trace else 'disabled'}"
-    )
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    node = None
     try:
+        node = TelemetryUplink()
+        node.get_logger().info(
+            f"protocol trace "
+            f"{'enabled' if node._protocol_trace else 'disabled'}"
+        )
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

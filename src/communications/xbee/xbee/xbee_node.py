@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -125,7 +126,7 @@ class Xbee(Node):
 
 
 def main() -> None:
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = Xbee()
@@ -137,10 +138,15 @@ def main() -> None:
         pass
     finally:
         if node is not None:
-            node.shutdown()
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.shutdown()
+            except Exception:
+                pass
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

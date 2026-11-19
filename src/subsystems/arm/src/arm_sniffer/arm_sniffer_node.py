@@ -14,6 +14,7 @@ import math
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, UInt8, UInt32
 
@@ -268,7 +269,7 @@ class ArmSnifferNode(Node):
 
 def main():
     """Run the arm sniffer node."""
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = ArmSnifferNode()
@@ -277,9 +278,11 @@ def main():
         pass
     finally:
         if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

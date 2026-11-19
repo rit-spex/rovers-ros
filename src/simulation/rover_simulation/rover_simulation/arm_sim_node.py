@@ -15,6 +15,7 @@ import random
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float32, Float64MultiArray
@@ -397,7 +398,7 @@ class ArmSimNode(Node):
 
 def main():
     """Create and run the simulated arm hardware node."""
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = ArmSimNode()
@@ -406,9 +407,11 @@ def main():
         pass
     finally:
         if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

@@ -39,6 +39,7 @@ import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import Velocity, SpaceMouseAxes
@@ -297,7 +298,7 @@ class ArmTeleopNode(Node):
 
 def main():
     """Run the arm teleop node."""
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = ArmTeleopNode()
@@ -306,9 +307,11 @@ def main():
         pass
     finally:
         if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

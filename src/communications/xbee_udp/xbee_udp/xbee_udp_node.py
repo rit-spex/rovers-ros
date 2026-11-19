@@ -1,6 +1,7 @@
 # ros imports
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -96,16 +97,20 @@ class xbee_udp(Node):
 
 
 def main():
-    rclpy.init()
-    udp = xbee_udp()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    udp = None
     try:
+        udp = xbee_udp()
         udp.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        udp.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if udp is not None:
+            try:
+                udp.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

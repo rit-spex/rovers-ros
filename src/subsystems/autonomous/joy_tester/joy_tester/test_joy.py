@@ -17,6 +17,7 @@ from tkinter import Canvas, Tk
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 
 from sensor_msgs.msg import Joy
@@ -134,10 +135,10 @@ class JoyTester(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    joy_tester = JoyTester()
-
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.ALL)
+    joy_tester = None
     try:
+        joy_tester = JoyTester()
         rclpy.spin(joy_tester)
     except KeyboardInterrupt:
         print('Received keyboard interrupt!')
@@ -145,5 +146,9 @@ def main(args=None):
         print('Received external shutdown request!')
     finally:
         print('Exiting...')
-        joy_tester.destroy_node()
+        if joy_tester is not None:
+            try:
+                joy_tester.destroy_node()
+            except Exception:
+                pass
         rclpy.try_shutdown()

@@ -6,6 +6,7 @@ from constants.can_encoding import TeensyCommunication
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -118,16 +119,20 @@ class Chassis(Node):
 
 
 def main():
-    rclpy.init()
-    chassis = Chassis()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    chassis = None
     try:
+        chassis = Chassis()
         chassis.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        chassis.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if chassis is not None:
+            try:
+                chassis.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

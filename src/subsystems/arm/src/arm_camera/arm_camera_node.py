@@ -2,6 +2,7 @@
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 
 
@@ -14,16 +15,20 @@ class ArmCameraNode(Node):
 
 def main():
     """Run the arm camera node."""
-    rclpy.init()
-    node = ArmCameraNode()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    node = None
     try:
+        node = ArmCameraNode()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

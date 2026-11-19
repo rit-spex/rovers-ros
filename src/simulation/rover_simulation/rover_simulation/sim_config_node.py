@@ -16,6 +16,7 @@ selected build.
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from std_msgs.msg import Bool
 
@@ -64,16 +65,20 @@ class SimConfig(Node):
 
 
 def main():
-    rclpy.init()
-    node = SimConfig()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    node = None
     try:
+        node = SimConfig()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

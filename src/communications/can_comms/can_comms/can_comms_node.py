@@ -2,6 +2,7 @@ import os
 import can
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from custom_interfaces.msg import Can
 
@@ -276,16 +277,20 @@ class JETSON_LISTENER(can.Listener):
 
 
 def main():
-    rclpy.init()
-    can = CAN()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    can = None
     try:
+        can = CAN()
         can.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        can.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if can is not None:
+            try:
+                can.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

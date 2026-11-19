@@ -15,6 +15,7 @@ import time
 import rclpy
 from rclpy._rclpy_pybind11 import RCLError
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
 
@@ -214,16 +215,20 @@ class SimulatedArmTeensy(Node):
 
 
 def main() -> None:
-    rclpy.init()
-    node = SimulatedArmTeensy()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    node = None
     try:
+        node = SimulatedArmTeensy()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

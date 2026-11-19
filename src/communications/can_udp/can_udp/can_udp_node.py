@@ -2,6 +2,7 @@ import threading
 import select
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 import rclpy.subscription
 import rclpy.publisher
@@ -238,16 +239,20 @@ def udp_receive_thread(node: CAN_UDP, socket: socket, stop: threading.Event):
                 node.get_logger().info(f"failed to receive can udp packet: {e}")
 
 def main():
-    rclpy.init()
-    can_udp = CAN_UDP()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    can_udp = None
     try:
+        can_udp = CAN_UDP()
         can_udp.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        can_udp.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if can_udp is not None:
+            try:
+                can_udp.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import rclpy
 import rclpy.publisher
 import rclpy.subscription
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import (
@@ -285,16 +286,20 @@ class Basestation(Node):
 
 
 def main():
-    rclpy.init()
-    basestation = Basestation()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    basestation = None
     try:
+        basestation = Basestation()
         basestation.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        basestation.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if basestation is not None:
+            try:
+                basestation.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

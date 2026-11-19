@@ -18,6 +18,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
@@ -267,7 +268,7 @@ class DrivebaseSimNode(Node):
 
 def main():
     """Create and run the simulated drivebase hardware node."""
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
         node = DrivebaseSimNode()
@@ -276,9 +277,11 @@ def main():
         pass
     finally:
         if node is not None:
-            node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

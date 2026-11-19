@@ -32,6 +32,7 @@ import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from custom_interfaces.msg import ArmCommand
 from std_msgs.msg import Bool, Float32
@@ -220,7 +221,7 @@ class ArmEndEffectorNode(Node):
 
 
 def main():
-    rclpy.init()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     end_effector = None
     try:
         end_effector = ArmEndEffectorNode()
@@ -229,9 +230,11 @@ def main():
         pass
     finally:
         if end_effector is not None:
-            end_effector.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+            try:
+                end_effector.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

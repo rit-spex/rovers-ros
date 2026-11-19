@@ -6,6 +6,7 @@ from numpy import int32
 import rclpy
 import rclpy.logging
 from rclpy.executors import ExternalShutdownException
+from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 import rclpy.publisher
 import rclpy.subscription
@@ -491,16 +492,20 @@ class Master(Node):
 
 
 def main():
-    rclpy.init()
-    master = Master()
+    rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
+    master = None
     try:
+        master = Master()
         master.run()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        master.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        if master is not None:
+            try:
+                master.destroy_node()
+            except Exception:
+                pass
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
