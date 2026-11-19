@@ -1,6 +1,6 @@
 """Homing action controller."""
 
-from ..generic_frames import wrap2pi, limit_respecting_diff
+from ..linkage_models import wrap2pi, limit_respecting_diff
 
 
 class HomingController:

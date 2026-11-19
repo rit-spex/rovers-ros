@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from ..generic_frames import wrap2pi
+from ..linkage_models import wrap2pi
 
 
 class FlippingManager:

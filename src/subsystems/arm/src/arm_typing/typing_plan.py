@@ -22,6 +22,10 @@ from arm_constants import (
     TYPING_STANDOFF_M,
     TYPING_MIN_SIDE_OFFSET_M,
 )
+from arm_route_planner.kinematics.linkage_models import (
+    rotation_from_rpy,
+    rotation_to_rpy,
+)
 
 
 class PlaneFrame(NamedTuple):
@@ -58,35 +62,6 @@ def clamp(value: float, low: float, high: float) -> float:
 def wrap_angle(angle: float) -> float:
     """Wrap an angle to ``[-pi, pi)``."""
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
-
-
-def rotation_from_rpy(roll: float, pitch: float, yaw: float) -> tuple:
-    """Return ``Rz(yaw) @ Ry(pitch) @ Rx(roll)`` as a row-major tuple."""
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    return (
-        (cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr),
-        (sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr),
-        (-sp, cp * sr, cp * cr),
-    )
-
-
-def rotation_to_rpy(rotation) -> tuple[float, float, float]:
-    """Return ``(roll, pitch, yaw)`` for a ``Rz @ Ry @ Rx`` matrix.
-
-    This matches ``arm_route_planner_node.rotation_to_rpy`` so a target built
-    here is interpreted identically by the planner.
-    """
-    r20 = clamp(rotation[2][0], -1.0, 1.0)
-    pitch = math.asin(-r20)
-    if abs(r20) < 0.999999:
-        roll = math.atan2(rotation[2][1], rotation[2][2])
-        yaw = math.atan2(rotation[1][0], rotation[0][0])
-    else:
-        roll = 0.0
-        yaw = math.atan2(-rotation[0][1], rotation[1][1])
-    return roll, pitch, yaw
 
 
 def build_key_positions(

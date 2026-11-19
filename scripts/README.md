@@ -21,6 +21,10 @@ source scripts/source.sh
 # Source, then build the workspace with colcon
 source scripts/source.sh --build
 
+# Source, then rebuild the arm/hardware packages only
+# (skips Gazebo and pointcloud)
+source scripts/source.sh --arm
+
 # Source, then launch the real rover stack
 source scripts/source.sh --run
 
@@ -46,7 +50,10 @@ source scripts/source.sh --build --run
 `sim.sh stack` on a headless machine.
 
 `source.sh --build` runs `colcon build --symlink-install` after sourcing and
-refreshes the overlay. `source.sh --run` runs
+refreshes the overlay. `source.sh --arm` implies `--build` but skips the
+simulation-heavy packages (`rover_simulation`, `gazebo_sim_control`, and
+`pointcloud_to_laserscan`), so an arm/hardware rebuild does not touch Gazebo or
+pointcloud. `source.sh --run` runs
 `ros2 launch main main_launch.xml`. If the build fails, `--run` is skipped.
 
 `restart_gazebo.sh` is what the in-Gazebo Simulation Control panel calls. It

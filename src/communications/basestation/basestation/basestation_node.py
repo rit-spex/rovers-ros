@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 import os
 from pathlib import Path
-from typing import Any, Dict
 
 import rclpy
 import rclpy.publisher
@@ -44,11 +43,15 @@ from encoding import MessageEncoder
 
 # Arm key actions arrive as per-action press states.  The physical key map
 # lives on the basestation; this bridge only translates the semantic action
-# names into controller commands.
+# names into controller commands.  These dicts are the single source for the
+# signal -> command mapping and the held-action set.
 ARM_STATE_JUST_PRESSED = 1
 ARM_STATE_HELD = 2
+
+# Every operator action: arm_state signal -> rover command.
 ARM_STATE_COMMANDS = {
     "flip": "flip",
+    "zenith": "zenith",
     "home": "home",
     "position_drive": "position_drive",
     "joint_drive": "joint_drive",
@@ -67,17 +70,32 @@ ARM_STATE_COMMANDS = {
     "home_joint_2": "home_joint:2",
     "home_joint_3": "home_joint:3",
     "home_joint_4": "home_joint:4",
-    # Momentary strike, not a state. The basestation adds the matching
-    # arm_state signal; the rover only forwards the pulse.
+    "gripper_up": "gripper_up",
+    "gripper_down": "gripper_down",
     "solenoid_strike": "fire_solenoid",
 }
-# Actions that repeat while the key is held.  The end effector jogs the
-# gripper until the stream stops, so these are forwarded on press and on
-# every held state.
+
+# Actions that repeat while the key is held.  These are forwarded on press
+# and on every held state.
 ARM_STATE_HELD_COMMANDS = {
+    "home": "home",
+    "home_joint_0": "home_joint:0",
+    "home_joint_1": "home_joint:1",
+    "home_joint_2": "home_joint:2",
+    "home_joint_3": "home_joint:3",
+    "home_joint_4": "home_joint:4",
     "gripper_up": "gripper_up",
     "gripper_down": "gripper_down",
 }
+
+
+def _format_arm_command_keys() -> str:
+    """Return the multi-line key readout shown at startup."""
+    lines = ["Arm command keys:"]
+    for signal, command in ARM_STATE_COMMANDS.items():
+        trigger = "held" if signal in ARM_STATE_HELD_COMMANDS else "press"
+        lines.append(f"  {signal:<24} -> {command} ({trigger})")
+    return "\n".join(lines)
 
 
 class Basestation(Node):
@@ -259,6 +277,7 @@ class Basestation(Node):
 
     def run(self):
         self.get_logger().info("starting basestation ...")
+        self.get_logger().info(_format_arm_command_keys())
         self.get_logger().info(
             f"protocol trace {'enabled' if self._protocol_trace else 'disabled'}"
         )

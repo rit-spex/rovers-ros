@@ -21,7 +21,7 @@ Inputs:
 Outputs:
     /ARM/JOINT/TARGET_*     std_msgs/Float32 (5-DOF joints only)
     /ARM/STATE/{HOMING,FLIPPING,FLIPPED,PLANAR,JOINT_DRIVE,
-                POSITION_LOCK,ORIENTATION_LOCK}
+                POSITION_LOCK,ORIENTATION_LOCK,ZENITH}
     /ARM/STATE/{LOCKED_JOINTS,HOMING_JOINTS,OPERATION_MODE}
     /ARM/STATE/POSE         custom_interfaces/Pose
     /ARM/PLANNER/STATUS     custom_interfaces/ArmPlannerStatus
@@ -47,8 +47,10 @@ from custom_interfaces.msg import (
 )
 from std_msgs.msg import Bool, Float32, UInt8
 
-from arm_route_planner.kinematics.generic_frames import wrap2pi
-from arm_route_planner.kinematics.simulated_arm import RoverArmController
+from arm_route_planner.kinematics.linkage_models import (
+    rotation_from_rpy, rotation_to_rpy, wrap2pi,
+)
+from arm_route_planner.kinematics.arm_controller import RoverArmController
 from arm_constants import (
     ARM_FLAG_NAMES,
     ARM_JOINT_NAMES,
@@ -57,6 +59,7 @@ from arm_constants import (
     AUTONOMOUS_POSE_TIMEOUT_SEC,
     DT,
     ESTOP_TOPIC,
+    HOMING_HOLD_TIMEOUT_SEC,
     JOINT_CURRENT_TOPICS,
     JOINT_TARGET_TOPICS,
     METERS_PER_INCH,
@@ -88,57 +91,20 @@ JOINT_INDEX = {
 }
 
 
-def wrap_to_minus_90(angle: float) -> float:
-    """Wrap an angle to [-pi/2, 3pi/2)."""
-    return (angle + math.pi / 2) % (2 * math.pi) - math.pi / 2
-
-
-def rotation_to_rpy(rotation) -> tuple[float, float, float]:
-    """Return fixed-axis (roll, pitch, yaw) for ``Rz @ Ry @ Rx``.
-
-    Matches the convention used by the basestation display.  At gimbal
-    lock (pitch +/-90 deg) roll is pinned to zero and the combined
-    rotation is reported as yaw.
-    """
-    r20 = max(-1.0, min(1.0, float(rotation[2][0])))
-    pitch = math.asin(-r20)
-    if abs(r20) < 0.999999:
-        roll = math.atan2(float(rotation[2][1]), float(rotation[2][2]))
-        yaw = math.atan2(float(rotation[1][0]), float(rotation[0][0]))
-    else:
-        roll = 0.0
-        yaw = math.atan2(-float(rotation[0][1]), float(rotation[1][1]))
-    return roll, pitch, yaw
-
-
-def rotation_from_rpy(roll: float, pitch: float, yaw: float):
-    """Return ``Rz(yaw) @ Ry(pitch) @ Rx(roll)`` as a 3x3 list."""
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    return [
-        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-        [-sp, cp * sr, cp * cr],
-    ]
-
-
 class ArmRoutePlannerNode(Node):
     """Compute and publish the 5-DOF arm joint targets and planner state."""
 
     def __init__(self):
         super().__init__("arm_route_planner_node")
 
-        # The controller is built from measured motor angles once all five
-        # arm joints have reported in.  Angles stay NaN (uninitialized)
-        # until a real motor, or the Gazebo bridge, publishes them.
-        self.__arm = None
+        # The controller is always present; it starts at its nominal pose and
+        # adopts the measured angles once all five joints have reported in.
+        self.__arm: RoverArmController = RoverArmController()
         self.__measured = [float("nan")] * len(ARM_JOINT_NAMES)
-        self.__ready = False
 
         # Latest arbitrated command.  The master only forwards teleop
         # velocity, so this node does not need to know who owns the arm.
-        self.__velocity = None
+        self.__velocity: Velocity | None = None
         self.__velocity_received_at = 0.0
 
         # Error events.  error_seq increments for every new event, including
@@ -148,19 +114,19 @@ class ArmRoutePlannerNode(Node):
 
         self.__estop = False
         self.__log_divider = 0
-        self.__last_status_key = None
-        self.__last_targets = None
+        self.__last_status_key: tuple[object, ...] | None = None
+        self.__last_targets: tuple[float, ...] | None = None
         self.__publish_counter = 0
 
         # Latest absolute Cartesian target.  The master forwards it only
         # while an autonomous source owns the arm, so this node stays
         # source-agnostic.
-        self.__pose = None
+        self.__pose: Pose | None = None
         self.__pose_received_at = 0.0
         self.__pose_active = False
-        # Last published target for each joint.  Locked joints hold this
-        # value instead of echoing noisy measured angles straight back.
-        self.__locked_targets = [None] * len(ARM_JOINT_NAMES)
+        # Last time a maintained homing command arrived.  Homing stops when
+        # this goes stale, so releasing the key stops the arm.
+        self.__homing_command_at: float | None = None
 
         self.__joint_publishers()
         self.__joint_subscribers()
@@ -310,7 +276,7 @@ class ArmRoutePlannerNode(Node):
             )
             return
 
-        if self.__arm is None:
+        if not self.__arm.initialized:
             self.__emit_error(
                 ARM_ERROR_NOT_READY,
                 reason=(f"Arm command '{command}' ignored: "
@@ -339,14 +305,18 @@ class ArmRoutePlannerNode(Node):
         if command in ("sync_target", "sync"):
             self.__arm.sync_angles(
                 list(self.__measured), reset_target=True)
-            self.__locked_targets = [None] * len(ARM_JOINT_NAMES)
             self.get_logger().info(
                 "Arm target synchronized to the measured pose.")
             return True, True
         if command == "flip":
             return True, self.__arm.activate_flip()
+        if command in ("zenith", "zenith_mode", "toggle_zenith"):
+            return True, self.__arm.toggle_zenith()
         if command in ("homing", "home"):
-            return True, self.__arm.toggle_homing()
+            result = self.__arm.start_homing()
+            if result:
+                self.__homing_command_at = time.monotonic()
+            return True, result
         if command == "joint_drive":
             return True, self.__arm.toggle_joint_drive()
         if command == "position_drive":
@@ -378,7 +348,10 @@ class ArmRoutePlannerNode(Node):
             if action == "toggle_joint_lock" and 0 <= index < 5:
                 return True, self.__arm.toggle_joint_lock(index)
             if action == "home_joint" and 0 <= index < 5:
-                return True, self.__arm.home_joint(index)
+                result = self.__arm.home_joint(index)
+                if result:
+                    self.__homing_command_at = time.monotonic()
+                return True, result
 
         return False, False
 
@@ -389,8 +362,7 @@ class ArmRoutePlannerNode(Node):
         self.__pose_active = False
         self.__velocity = None
         self.__velocity_received_at = 0.0
-        if self.__arm is not None:
-            self.__arm.hold()
+        self.__arm.hold()
         self.get_logger().info("Arm target held")
 
     # ------------------------------------------------------------------
@@ -413,7 +385,7 @@ class ArmRoutePlannerNode(Node):
 
     def __apply_pose_target(self):
         """Solve and latch the current absolute Cartesian target."""
-        if self.__arm is None or self.__pose is None:
+        if self.__pose is None:
             return
         msg = self.__pose
         position = (
@@ -463,22 +435,29 @@ class ArmRoutePlannerNode(Node):
             self.__publish_status()
             return
 
-        if self.__arm is None:
+        if not self.__arm.initialized:
             self.__publish_status()
             # Wait until every arm joint has a measured angle.
             if any(math.isnan(a) for a in self.__measured):
                 return
-            self.__arm = RoverArmController(
-                initial_angles=list(self.__measured))
-            # Adopt the side (normal/flipped) that matches the measured
-            # pose so we do not pull the arm across to the wrong limits.
-            self.__arm._settle_side()
+            # Adopt the measured pose and the mode that best fits it.  The
+            # arm may start outside the boot-default normal limits (for
+            # example straight up, flipped, or reaching into the top-back
+            # octant), so infer the real mode before publishing status.
+            self.__arm.sync_angles(
+                list(self.__measured), reset_target=True)
+            mode = self.__arm.infer_initial_mode()
             angle_text = " ".join(
                 f"{math.degrees(a):.1f}" for a in self.__measured)
             self.get_logger().info(
-                f"Route planner ready | measured angles {angle_text} deg")
-            self.__ready = True
+                f"Route planner ready | mode {mode or 'PNP'} | "
+                f"measured angles {angle_text} deg")
             self.__publish_status()
+            # Publish the inferred mode/flags immediately instead of waiting
+            # for the next control cycle, so the basestation display reflects
+            # the starting pose as soon as the arm is ready.
+            self.__publish_arm_status()
+            self.__publish_pose()
 
             limits = self.__arm.effective_limits
             outside = [
@@ -490,11 +469,22 @@ class ArmRoutePlannerNode(Node):
             if outside:
                 self.get_logger().warning(
                     f"Measured pose outside {self.__arm.limit_mode.name} "
-                    f"limits for joints {outside}; clamping")
+                    f"limits for joints {outside}; arm may need homing")
             return
 
         self.__arm.sync_angles(
             list(self.__measured), reset_target=False)
+
+        # Homing is a maintained action: the basestation forwards the key on
+        # every held state.  Release (or a stale command stream) stops the
+        # arm instead of letting it finish the move on its own.
+        if (self.__arm.is_homing
+                and (self.__homing_command_at is None
+                     or time.monotonic() - self.__homing_command_at
+                     > HOMING_HOLD_TIMEOUT_SEC)):
+            self.__homing_command_at = None
+            self.__arm.stop_homing()
+            self.get_logger().info("Homing released; stopped")
 
         pose_active = self.__pose_is_fresh()
         if pose_active:
@@ -506,7 +496,8 @@ class ArmRoutePlannerNode(Node):
         # and the homing/flip actions still finish normally.
         if (not pose_active and deltas is None
                 and not self.__arm.homing.active
-                and not self.__arm.is_flipping):
+                and not self.__arm.is_flipping
+                and not self.__arm.zenith):
             self.__arm.hold()
         consumed = self.__arm.update(deltas)
         self.__publish_counter += 1
@@ -518,21 +509,14 @@ class ArmRoutePlannerNode(Node):
 
     def __publish_targets(self, force=False):
         """Publish the rate-limited 5-DOF joint targets."""
-        angles = [float(a) for a in self.__arm.angles]
-        targets = [
-            wrap_to_minus_90(angles[0]),
-            wrap_to_minus_90(angles[1]),
-            wrap2pi(angles[2]),
-            wrap2pi(angles[3]),
-            wrap2pi(angles[4]),
-        ]
-        # A locked joint must not chase encoder noise.  Hold its last
-        # commanded target instead of republishing the measured angle.
-        for index, locked in enumerate(self.__arm.locked_joints):
-            if locked and self.__locked_targets[index] is not None:
-                targets[index] = self.__locked_targets[index]
-            else:
-                self.__locked_targets[index] = targets[index]
+        commanded = self.__arm.commanded_angles()
+        if commanded is None:
+            return
+        angles = [float(a) for a in commanded]
+        # Wrap every joint around zero.  The base spans -135..135 deg, so a
+        # [-90, 270) wrap would turn a valid -100 deg target into +260 deg,
+        # which arm_hardware_node rejects against the motor limits.
+        targets = [wrap2pi(angle) for angle in angles]
         payload = tuple(targets)
         # Publishing unchanged targets every cycle floods arm_hardware_node's
         # log.  Republish periodically so a late consumer still gets them.
@@ -553,7 +537,9 @@ class ArmRoutePlannerNode(Node):
             if homing_joint:
                 homing |= 1 << index
 
-        if self.__arm.is_homing:
+        if self.__arm.zenith:
+            mode = ARM_OPERATION_MODES["ZENITH"]
+        elif self.__arm.is_homing:
             mode = ARM_OPERATION_MODES["HOMING"]
         elif self.__arm.planar:
             mode = ARM_OPERATION_MODES["PLANAR"]
@@ -570,6 +556,7 @@ class ArmRoutePlannerNode(Node):
             "JOINT_DRIVE": self.__arm.joint_drive,
             "POSITION_LOCK": self.__arm.position_locked,
             "ORIENTATION_LOCK": self.__arm.orientation_locked,
+            "ZENITH": self.__arm.zenith,
         }
 
         self.__locked_publisher.publish(UInt8(data=locked))
@@ -585,9 +572,13 @@ class ArmRoutePlannerNode(Node):
         and radians.  The telemetry uplink converts back to the compact
         protocol's centi-inch/centi-degree fields.
         """
-        x, y, z = (float(value) for value in self.__arm.pos[-1])
+        pos = self.__arm.pos
+        frames = self.__arm.frames
+        if pos is None or frames is None:
+            return
+        x, y, z = (float(value) for value in pos[-1])
         roll, pitch, yaw = rotation_to_rpy(
-            self.__arm.frames[-1].rotation_matrix())
+            frames[-1].rotation_matrix())
         self.__pose_publisher.publish(Pose(
             x=x * METERS_PER_INCH,
             y=y * METERS_PER_INCH,
@@ -600,7 +591,7 @@ class ArmRoutePlannerNode(Node):
     def __publish_status(self):
         """Publish readiness and the latest error event."""
         msg = ArmPlannerStatus()
-        msg.ready = bool(self.__ready)
+        msg.ready = bool(self.__arm.initialized)
         msg.error_seq = int(self.__error_seq)
         msg.error_code = self.__error[0]
         msg.error_arg = self.__error[1]
@@ -615,7 +606,9 @@ class ArmRoutePlannerNode(Node):
             self.__emit_error(code, arg, reason=failure)
 
         drive = "joint" if self.__arm.joint_drive else "position"
-        if self.__arm.is_homing:
+        if self.__arm.zenith:
+            state = "zenith"
+        elif self.__arm.is_homing:
             state = "homing"
         elif self.__arm.is_flipping:
             state = "flipping"
@@ -658,7 +651,7 @@ class ArmRoutePlannerNode(Node):
 
 def main():
     rclpy.init()
-    planner = None
+    planner: ArmRoutePlannerNode | None = None
     try:
         planner = ArmRoutePlannerNode()
         planner.run()

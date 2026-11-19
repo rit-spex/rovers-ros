@@ -23,28 +23,23 @@ from arm_constants import (
     ARM_ENABLED_TOPIC,
     ARM_JOINTS,
     ARM_MOTOR_IDX,
+    ARM_MOTOR_PARAMS,
     CURRENT_ANGLE_TOPICS,
     ESTOP_TOPIC,
     GRIPPER_MAX_ANGLE,
     GRIPPER_MIN_ANGLE,
     HOMING_TARGET,
-    MAX_ANG_VEL,
     MECHANICAL_LIMITS,
     SOLENOID_TARGET_TOPIC,
     TARGET_ANGLE_TOPICS,
 )
 
 # Match the Gazebo controller update rate.  The planner runs at DT = 0.05,
-# but publishing interpolated commands at 30 Hz keeps position control smoother.
-# The planner can land exactly on a limit after IK and floating-point
-# arithmetic, so accept a hair outside before clamping back into range.
+# but publishing interpolated commands at 30 Hz keeps position control
+# smoother.  The simulated hardware works in encoder ticks, using the same
+# calibration, limits, and motor speed limits as arm_hardware_node.
 LIMIT_TOLERANCE_RAD = 1e-4
 TICK_PERIOD_SEC = 1.0 / 30.0
-# Allow the simulated motors a little headroom over the planner's slew rate.
-# The planner already rate-limits its targets, but this keeps the simulated
-# joints from teleporting after a start-up pose, a rejected target, or a mode
-# change without making the arm lag behind a normal move.
-MAX_COMMAND_STEP_RAD = 2.0 * MAX_ANG_VEL * TICK_PERIOD_SEC
 SETTLE_TOLERANCE_RAD = 0.05
 MAX_SETTLE_TICKS = 300
 
@@ -58,13 +53,52 @@ GAZEBO_JOINTS = [
     "arm_gripper_joint",
 ]
 
+
+def angle_to_ticks(index: int, angle: float) -> float:
+    """Convert a joint angle [rad] to encoder ticks."""
+    params = ARM_MOTOR_PARAMS[index]
+    return float(angle) * params.ticks_per_rad + params.tick_offset
+
+
+def ticks_to_angle(index: int, ticks: float) -> float:
+    """Convert encoder ticks to a joint angle [rad]."""
+    params = ARM_MOTOR_PARAMS[index]
+    return (float(ticks) - params.tick_offset) / params.ticks_per_rad
+
+
+def _tick_limits(index: int) -> tuple[float, float]:
+    """Return the hardware tick limits for one joint, ordered."""
+    params = ARM_MOTOR_PARAMS[index]
+    return (
+        min(params.tick_lower_limit, params.tick_upper_limit),
+        max(params.tick_lower_limit, params.tick_upper_limit),
+    )
+
+
+TICK_LIMITS = [_tick_limits(index) for index in range(len(GAZEBO_JOINTS))]
+LIMIT_TOLERANCE_TICKS = [
+    LIMIT_TOLERANCE_RAD * abs(ARM_MOTOR_PARAMS[index].ticks_per_rad)
+    for index in range(len(GAZEBO_JOINTS))
+]
+TICKS_PER_REV = [
+    abs(ARM_MOTOR_PARAMS[index].ticks_per_rad) * 2.0 * math.pi
+    for index in range(len(GAZEBO_JOINTS))
+]
+MAX_COMMAND_STEP_TICKS = [
+    ARM_MOTOR_PARAMS[index].max_ticks_per_s * TICK_PERIOD_SEC
+    for index in range(len(GAZEBO_JOINTS))
+]
+SETTLE_TOLERANCE_TICKS = [
+    SETTLE_TOLERANCE_RAD * abs(ARM_MOTOR_PARAMS[index].ticks_per_rad)
+    for index in range(len(GAZEBO_JOINTS))
+]
+
 # Simulation-only randomized start: base/shoulder/elbow at home +/- 20 deg.
 # Wrist bend, wrist twist, and gripper always start at zero.
 START_JITTER_RAD = math.radians(20.0)
 _HOME = list(HOMING_TARGET) + [0.0]
-# Use the mechanical limits rather than the encoder calibration.  The tick
-# constants describe the real motors and are intentionally not part of the
-# simulated hardware contract.
+# Random start poses stay inside the mechanical limits; the tick limits are
+# used for command validation because they are what the hardware enforces.
 _LIMITS = [
     MECHANICAL_LIMITS[0],
     MECHANICAL_LIMITS[1],
@@ -75,12 +109,25 @@ _LIMITS = [
 ]
 
 
-def joint_distance(index, current: float, target: float) -> float:
-    """Return the shortest angular distance for one joint."""
+def tick_distance(index: int, current: float, target: float) -> float:
+    """Return the shortest tick distance for one joint."""
     diff = float(target) - float(current)
     if index == ARM_MOTOR_IDX.BASE:
-        diff = math.remainder(diff, 2.0 * math.pi)
+        diff = math.remainder(diff, TICKS_PER_REV[index])
     return abs(diff)
+
+
+def random_initial_angles(jitter=START_JITTER_RAD):
+    """Return randomized, mechanically valid 5-DOF start angles.
+
+    Every arm joint jitters around its home pose and is clamped to the
+    mechanical limits.
+    """
+    angles = []
+    for home, (low, high) in zip(_HOME[:5], _LIMITS[:5]):
+        angle = home + random.uniform(-jitter, jitter)
+        angles.append(max(low, min(high, angle)))
+    return angles
 
 
 def random_home_pose():
@@ -89,12 +136,10 @@ def random_home_pose():
     Only the three main joints jitter around home.  The wrists and gripper
     always start at zero.
     """
-    angles = []
-    for home, (low, high) in zip(_HOME[:3], _LIMITS[:3]):
-        angle = home + random.uniform(-START_JITTER_RAD, START_JITTER_RAD)
-        angles.append(max(low, min(high, angle)))
-    angles.extend([0.0, 0.0, 0.0])
-    return angles
+    angles = random_initial_angles()
+    angles[3] = 0.0
+    angles[4] = 0.0
+    return angles + [0.0]
 
 
 class ArmSimNode(Node):
@@ -124,9 +169,9 @@ class ArmSimNode(Node):
         self.__settling = False
         self.__settle_ticks = 0
 
-        self.__targets = [float("nan")] * len(GAZEBO_JOINTS)
-        self.__commands = [float("nan")] * len(GAZEBO_JOINTS)
-        self.__current = [float("nan")] * len(GAZEBO_JOINTS)
+        self.__targets_ticks = [float("nan")] * len(GAZEBO_JOINTS)
+        self.__commands_ticks = [float("nan")] * len(GAZEBO_JOINTS)
+        self.__current_ticks = [float("nan")] * len(GAZEBO_JOINTS)
 
         self.__command_publisher = self.create_publisher(
             Float64MultiArray, command_topic, 10)
@@ -171,24 +216,29 @@ class ArmSimNode(Node):
         return callback
 
     def __set_target(self, index: ARM_MOTOR_IDX, angle: float):
-        """Validate one target against the mechanical joint limits."""
+        """Validate one target against the hardware tick limits."""
         if not math.isfinite(angle):
             self.get_logger().error(
                 f"Target for {ARM_JOINTS[index]} is not finite")
             return
-        # The planner wraps the continuous base with wrap_to_minus_90, so a
-        # valid -100 deg target can arrive as +260 deg.  Normalise it back to
-        # [-pi, pi] before checking the mechanical limits; otherwise every
-        # base target below -90 deg is rejected and the joint stutters.
+        # Normalise the continuous base before checking the limits.  The
+        # planner already wraps every joint around zero, so this is
+        # defensive: an externally published 0..2pi value still lands on the
+        # matching angle instead of being rejected.
         angle = math.remainder(angle, 2.0 * math.pi)
-        low, high = _LIMITS[index]
-        if (angle < low - LIMIT_TOLERANCE_RAD
-                or angle > high + LIMIT_TOLERANCE_RAD):
+        ticks = angle_to_ticks(index, angle)
+        low, high = TICK_LIMITS[index]
+        tolerance = LIMIT_TOLERANCE_TICKS[index]
+        if ticks < low - tolerance or ticks > high + tolerance:
+            low_rad = ticks_to_angle(index, low)
+            high_rad = ticks_to_angle(index, high)
             self.get_logger().error(
-                f"Target {angle:.4f} rad for {ARM_JOINTS[index]} is out of "
-                f"limits [{low:.4f}, {high:.4f}] rad")
+                f"Target {angle:.4f} rad ({ticks:.0f} ticks) for "
+                f"{ARM_JOINTS[index]} is out of limits "
+                f"[{low_rad:.4f}, {high_rad:.4f}] rad "
+                f"([{low:.0f}, {high:.0f}] ticks)")
             return
-        self.__targets[index] = max(low, min(high, angle))
+        self.__targets_ticks[index] = max(low, min(high, ticks))
 
     def __on_arm_enable_received(self, msg: Bool):
         """Enable or disable simulated motion, honouring the E-stop latch."""
@@ -243,7 +293,9 @@ class ArmSimNode(Node):
         """Latch Gazebo joint positions for the current-angle feedback."""
         for name, position in zip(msg.name, msg.position):
             if name in GAZEBO_JOINTS:
-                self.__current[GAZEBO_JOINTS.index(name)] = float(position)
+                index = GAZEBO_JOINTS.index(name)
+                self.__current_ticks[index] = angle_to_ticks(
+                    index, float(position))
 
     # ------------------------------------------------------------------
     # Gazebo outputs
@@ -251,33 +303,37 @@ class ArmSimNode(Node):
 
     def __hold_current(self):
         """Use the measured pose as the new target."""
-        if all(math.isfinite(value) for value in self.__current):
-            self.__targets = list(self.__current)
+        if all(math.isfinite(value) for value in self.__current_ticks):
+            self.__targets_ticks = list(self.__current_ticks)
 
     def __publish_targets(self):
-        """Slew the command toward the target and send it to Gazebo."""
-        if (any(math.isnan(value) for value in self.__targets)
-                or any(math.isnan(value) for value in self.__commands)):
+        """Slew the command ticks toward the target and send radians."""
+        if (any(math.isnan(value) for value in self.__targets_ticks)
+                or any(math.isnan(value) for value in self.__commands_ticks)):
             return
-        commands = list(self.__commands)
-        for index, target in enumerate(self.__targets):
+        commands = list(self.__commands_ticks)
+        for index, target in enumerate(self.__targets_ticks):
             diff = target - commands[index]
             if index == ARM_MOTOR_IDX.BASE:
-                # The base is continuous.  Take the shortest angular path.
-                diff = math.remainder(diff, 2 * math.pi)
-            diff = max(-MAX_COMMAND_STEP_RAD,
-                       min(MAX_COMMAND_STEP_RAD, diff))
-            commands[index] += diff
-        self.__commands = commands
-        self.__command_publisher.publish(
-            Float64MultiArray(data=commands))
+                # The base is continuous.  Take the shortest tick path.
+                diff = math.remainder(diff, TICKS_PER_REV[index])
+            step = MAX_COMMAND_STEP_TICKS[index]
+            diff = max(-step, min(step, diff))
+            low, high = TICK_LIMITS[index]
+            commands[index] = max(low, min(high, commands[index] + diff))
+        self.__commands_ticks = commands
+        self.__command_publisher.publish(Float64MultiArray(
+            data=[
+                ticks_to_angle(index, ticks)
+                for index, ticks in enumerate(commands)
+            ]))
 
     def __publish_current(self):
         """Publish the Gazebo joint positions as arm feedback."""
-        for index, value in enumerate(self.__current):
-            if math.isfinite(value):
+        for index, ticks in enumerate(self.__current_ticks):
+            if math.isfinite(ticks):
                 self.__current_publishers[ARM_MOTOR_IDX(index)].publish(
-                    Float32(data=value))
+                    Float32(data=ticks_to_angle(index, ticks)))
 
     # ------------------------------------------------------------------
     # Control cycle
@@ -285,7 +341,7 @@ class ArmSimNode(Node):
 
     def __tick(self):
         """Publish feedback and refresh the Gazebo joint targets."""
-        if any(math.isnan(value) for value in self.__current):
+        if any(math.isnan(value) for value in self.__current_ticks):
             return
 
         self.__publish_current()
@@ -294,15 +350,19 @@ class ArmSimNode(Node):
             if self.__estop or not self.__arm_enabled:
                 return
             if self.__randomize_start:
-                self.__targets = random_home_pose()
-                self.__commands = list(self.__current)
+                target_angles = random_home_pose()
+                self.__targets_ticks = [
+                    angle_to_ticks(index, angle)
+                    for index, angle in enumerate(target_angles)
+                ]
+                self.__commands_ticks = list(self.__current_ticks)
                 self.__settling = True
                 self.get_logger().info(
                     "Simulated arm starting from randomized angles "
-                    f"{[round(math.degrees(a), 1) for a in self.__targets]}")
+                    f"{[round(math.degrees(a), 1) for a in target_angles]}")
             else:
-                self.__targets = list(self.__current)
-                self.__commands = list(self.__current)
+                self.__targets_ticks = list(self.__current_ticks)
+                self.__commands_ticks = list(self.__current_ticks)
             self.__started = True
 
         if self.__estop or not self.__arm_enabled:
@@ -313,10 +373,10 @@ class ArmSimNode(Node):
         if self.__settling:
             self.__settle_ticks += 1
             reached = all(
-                joint_distance(index, current, target)
-                <= SETTLE_TOLERANCE_RAD
+                tick_distance(index, current, target)
+                <= SETTLE_TOLERANCE_TICKS[index]
                 for index, (current, target)
-                in enumerate(zip(self.__current, self.__targets)))
+                in enumerate(zip(self.__current_ticks, self.__targets_ticks)))
             if not reached and self.__settle_ticks < MAX_SETTLE_TICKS:
                 return
             self.__settling = False

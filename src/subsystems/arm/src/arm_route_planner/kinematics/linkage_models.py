@@ -212,6 +212,35 @@ _residual_to_errors = FrameManager._residual_to_errors
 _residual_norm = FrameManager._residual_norm
 
 
+def rotation_from_rpy(roll: float, pitch: float, yaw: float) -> list:
+    """Return ``Rz(yaw) @ Ry(pitch) @ Rx(roll)`` as a 3x3 row list."""
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+
+
+def rotation_to_rpy(rotation) -> tuple[float, float, float]:
+    """Return fixed-axis (roll, pitch, yaw) for ``Rz @ Ry @ Rx``.
+
+    At gimbal lock (pitch +/-90 deg) roll is pinned to zero and the
+    combined rotation is reported as yaw.
+    """
+    r20 = max(-1.0, min(1.0, float(rotation[2][0])))
+    pitch = math.asin(-r20)
+    if abs(r20) < 0.999999:
+        roll = math.atan2(float(rotation[2][1]), float(rotation[2][2]))
+        yaw = math.atan2(float(rotation[1][0]), float(rotation[0][0]))
+    else:
+        roll = 0.0
+        yaw = math.atan2(-float(rotation[0][1]), float(rotation[1][1]))
+    return roll, pitch, yaw
+
+
 class OrientationMatrix(sp.Matrix):
     def __new__(cls, matrix):
         if isinstance(matrix[0], list):

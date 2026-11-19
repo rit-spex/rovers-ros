@@ -15,7 +15,7 @@ from arm_constants import (
     OCTANT_PLANAR_ALLOWED, OCTANT_PLANAR_FLIPPED_ALLOWED,
     OCTANT_NORMAL_ALLOWED, OCTANT_POSITION_LIMITS, OCTANT_RULES,
 )
-from .generic_frames import OrientationMatrix
+from .linkage_models import OrientationMatrix
 
 
 # =============================================================================
@@ -283,11 +283,28 @@ class HomingMode(BaseLimiter):
     home_target = list(HOMING_TARGET)
 
 
+class ZenithMode(BaseLimiter):
+    """Straight-up test pose with mechanical travel only.
+
+    The elbow is deliberately allowed to pass through zero: the normal
+    singularity deadband would stop the arm a few degrees short of vertical
+    and defeat the point of a depower test.
+    """
+
+    name = "Zenith"
+    limits = FULL_RANGE_LIMITS
+
+    def geometry_constraint(self, angles):
+        """Leave the elbow at zero instead of applying the deadband."""
+        return list(angles)
+
+
 FULL_RANGE_MODE = FullRangeMode()
 PLANAR_MODE = PlanarMode()
 PICK_AND_PLACE_MODE = PickAndPlaceMode()
 PICK_AND_PLACE_FLIPPED_MODE = PickAndPlaceFlippedMode()
 TYPING_MODE = TypingMode()
 HOMING_MODE = HomingMode()
+ZENITH_MODE = ZenithMode()
 
 LIMIT_MODES = [PICK_AND_PLACE_MODE]

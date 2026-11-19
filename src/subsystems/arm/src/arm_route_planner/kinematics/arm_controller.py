@@ -1,413 +1,50 @@
-"""Simulated arm state, kinematic manager, and rover arm controller."""
+"""Arm controller: kinematic state machine for the 5-DOF arm.
 
-import heapq
+Owns drive modes, limit modifiers, joint locks, homing, flips, and target
+generation.  Pure library: no ROS imports.
+"""
+
 import math
-import random
+from typing import cast
 
-import sympy as sp
+import numpy as np
 
 from arm_constants import (
-    A0, A1, A2, A3,
     HOMING_TARGET, HOMING_SPEED, HOMING_THRESHOLD,
-    MAX_TRANSLATION_DELTA, MAX_ANG_VEL, ANGULAR_SPEED_RAMP_TIME,
+    MAX_TRANSLATION_DELTA,
     ELBOW_DEADBAND, MECHANICAL_LIMITS, PLANAR_BASE,
-    KEY_JOINT_IDX,
     ORIENTATION_SNAP_THRESHOLD, ORIENTATION_SNAP_OFF_AXIS,
     END_EFFECTOR_MIN_Z, TRACK_POS_TOL, TRACK_ORI_TOL, DT,
-    PATH_PLANNER_STEP, PATH_PLANNER_MAX_EXPANSIONS,
-    PATH_PLANAR_BASE, WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
+    WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
+    ZENITH_ANGLE_TOL, ZENITH_JOINT_TARGET,
+    FRONT_LOW, BACK_HIGH, BACK_LOW,
 )
-from .generic_frames import (
-    InverseKinematicsSolver, RobotOrientationModel, OrientationMatrix,
-    wrap2pi, limit_respecting_diff, nearest_axis_aligned_rotation,
+from .linkage_models import (
+    OrientationMatrix, wrap2pi, nearest_axis_aligned_rotation,
 )
 from .limiters import (
-    PLANAR_MODE, HOMING_MODE,
+    PLANAR_MODE, HOMING_MODE, ZENITH_MODE,
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, TYPING_MODE,
     OCTANT_DIRECT_FLIP, OCTANT_PLANAR_EXIT_LOCK,
     OCTANT_NORMAL_ALLOWED, OCTANT_PLANAR_ALLOWED,
     OCTANT_PLANAR_FLIPPED_ALLOWED,
-    arm_constraints, _get_octant,
+    _get_octant,
 )
 from .actions.home import HomingController
 from .actions.flip import FlipController
-
-
-class KinematicsManager:
-    """Owns model construction and safe joint-space path planning."""
-
-    @staticmethod
-    def build_arm_solver_object():
-        """Build the 5-DOF arm FK model and IK solver.
-
-        Chain: t0(z) -> A0(z) -> t1(x) -> A1(y) -> t2(x) -> A2(y)
-               -> t3(x) -> t4(y) -> A3(y)
-
-        The solver is constructed with the elbow deadband as its
-        geometry_limiter so the singularity constraint is enforced inside
-        every Newton iteration rather than patched on afterwards.
-
-        Returns:
-            (model, solver) — compiled and ready to use.
-        """
-        t0, t1, t2, t3, t4 = sp.symbols('t0 t1 t2 t3 t4', real=True)
-
-        model = RobotOrientationModel([t0, t1, t2, t3, t4])
-
-        # Base Joint — rotate about z
-        model.add_revolute(t0, "z")
-
-        # Shoulder Joint — translate up, then rotate about x
-        model.add_linkage(A0, "z")
-        model.add_revolute(t1, "x")
-
-        # Elbow Joint — translate along y, then rotate about x
-        model.add_linkage(A1, "y")
-        model.add_revolute(t2, "x")
-
-        # Wrist Bend Joint — translate along y, then rotate about x
-        model.add_linkage(A2, "y")
-        model.add_revolute(t3, "x")
-
-        # Wrist Twist Joint — rotate about y
-        model.add_revolute(t4, "y")
-
-        # End effector — translate along y
-        model.add_linkage(A3, "y")
-
-        model.compile_model()
-
-        solver = InverseKinematicsSolver(
-            model, max_iters=10,
-            joint_limits=[list(pair) for pair in PICK_AND_PLACE_MODE.limits],
-            wrap_angles=True,
-            geometry_limiter=arm_constraints,
-        )
-        return model, solver
-
-
-    @staticmethod
-    def extract_key_joints(positions, frames):
-        """Select the 4 key joints (indices 1, 3, 5, 8) from the full joint data.
-
-        These correspond to the shoulder, elbow, wrist, and end-effector
-        frames — after each linkage translation in the kinematic chain.
-        """
-        pos = [positions[i] for i in KEY_JOINT_IDX]
-        frm = [frames[i] for i in KEY_JOINT_IDX]
-        return pos, frm
-
-    @staticmethod
-    def _position(model, q, wrists):
-        flat = model._fk_numpy([q[0], q[1], q[2], wrists[0], wrists[1]])
-        return [flat[3], flat[7], flat[11]]
-
-
-    @staticmethod
-    def path_safe(model, angles, planar_base=PLANAR_BASE):
-        """True unless the pose sits in a restricted octant outside planar."""
-        if angles[0] is None:
-            return True
-        probe = list(angles)
-        octant = _get_octant(_position(model, probe[:3], probe[3:5]))
-        if octant not in OCTANT_PLANAR_EXIT_LOCK:
-            return True
-        return abs(wrap2pi(probe[0])) <= planar_base + 1e-9
-
-
-    @staticmethod
-    def _segment_safe(model, q0, q1, wrists, allow_unsafe_start=False,
-                      planar_base=PLANAR_BASE):
-        span = max(abs(q1[i] - q0[i]) for i in range(3))
-        n = max(1, int(math.ceil(span / PATH_PLANNER_STEP)))
-        first = 1 if allow_unsafe_start else 0
-        for i in range(first, n + 1):
-            t = i / n
-            q = [q0[j] + t * (q1[j] - q0[j]) for j in range(3)]
-            if not path_safe(model, q + list(wrists),
-                             planar_base=planar_base):
-                return False
-        return True
-
-
-    @staticmethod
-    def _key(q, step):
-        return tuple(int(round(v / step)) for v in q)
-
-
-    @staticmethod
-    def _compress(path):
-        """Collapse consecutive collinear steps without cutting corners."""
-        if len(path) <= 2:
-            return path
-        out = [list(path[0])]
-        for point in path[1:]:
-            if len(out) >= 2:
-                a, b = out[-2], out[-1]
-                d1 = [b[i] - a[i] for i in range(3)]
-                d2 = [point[i] - b[i] for i in range(3)]
-                same = all(
-                    (abs(d1[i]) < 1e-12 and abs(d2[i]) < 1e-12)
-                    or (abs(d1[i]) > 1e-12 and abs(d2[i]) > 1e-12
-                        and d1[i] * d2[i] > 0)
-                    for i in range(3))
-                if same:
-                    out[-1] = list(point)
-                    continue
-            out.append(list(point))
-        return out
-
-
-    @staticmethod
-    def plan_safe_path(model, start, goal, step=PATH_PLANNER_STEP,
-                       max_expansions=PATH_PLANNER_MAX_EXPANSIONS):
-        """Plan a joint path that keeps restricted octants in the planar band.
-
-        Only base, shoulder, and elbow are searched; wrist angles are held at
-        their start values until the spatial goal is reached.  Returns a list
-        of full 5-angle waypoints (start included), or None if no safe path
-        was found.
-        """
-        start = list(start)
-        goal = list(goal)
-        wrists = list(start[3:5])
-        limits = [MECHANICAL_LIMITS[i] for i in range(3)]
-
-        def clip(q):
-            return [max(lo, min(hi, v))
-                    for v, (lo, hi) in zip(q, limits)]
-
-        start3 = clip(start[:3])
-        goal3 = clip(goal[:3])
-        if not path_safe(model, goal3 + wrists):
-            return None
-
-        if max(abs(a - b) for a, b in zip(start3, goal3)) < 1e-9:
-            return [start3 + wrists]
-
-        def safe(q):
-            # Intermediate waypoints keep extra distance from the band edge
-            # so waypoint-following lag cannot push the arm outside it.
-            return path_safe(model, q + wrists,
-                             planar_base=PATH_PLANAR_BASE)
-
-        def heuristic(q):
-            return sum(abs(q[i] - goal3[i]) for i in range(3))
-
-        start_key = _key(start3, step)
-        nodes = {start_key: list(start3)}
-        gscore = {start_key: 0.0}
-        came = {start_key: None}
-        heap = [(heuristic(start3), 0.0, start_key)]
-        start_unsafe = not safe(start3)
-        expansions = 0
-
-        def reconstruct(last_key, last_q):
-            points = [list(last_q)]
-            cur = last_key
-            while cur is not None:
-                points.append(nodes[cur])
-                cur = came[cur]
-            points.reverse()
-            return points
-
-        while heap:
-            _, g, key = heapq.heappop(heap)
-            if g > gscore.get(key, float("inf")) + 1e-12:
-                continue
-            q = nodes[key]
-            expansions += 1
-            if expansions > max_expansions:
-                return None
-
-            dist = max(abs(q[i] - goal3[i]) for i in range(3))
-            if dist <= step * 1.01:
-                # The final approach may use the full planar band.  It only
-                # moves inward toward the goal, so it cannot overshoot the
-                # boundary the way an intermediate waypoint can.
-                if _segment_safe(model, q, goal3, wrists,
-                                 allow_unsafe_start=start_unsafe and
-                                 key == start_key,
-                                 planar_base=PLANAR_BASE):
-                    path = reconstruct(key, goal3)
-                    path = _compress(path)
-                    out = [point + wrists for point in path]
-                    if any(abs(a - b) > 1e-9
-                           for a, b in zip(goal[3:5], wrists)):
-                        if _segment_safe(model, goal3, goal3, wrists,
-                                         planar_base=PLANAR_BASE):
-                            out.append(list(goal3) + list(goal[3:5]))
-                    return out
-
-            for axis in range(3):
-                for sign in (-1.0, 1.0):
-                    nq = list(q)
-                    nq[axis] = max(limits[axis][0],
-                                   min(limits[axis][1],
-                                       nq[axis] + sign * step))
-                    if abs(nq[axis] - q[axis]) < 1e-12:
-                        continue
-                    if not safe(nq):
-                        continue
-                    if not _segment_safe(
-                            model, q, nq, wrists,
-                            allow_unsafe_start=start_unsafe and key == start_key,
-                            planar_base=(PLANAR_BASE
-                                         if start_unsafe and key == start_key
-                                         else PATH_PLANAR_BASE)):
-                        continue
-                    nkey = _key(nq, step)
-                    ng = g + abs(nq[axis] - q[axis])
-                    if ng >= gscore.get(nkey, float("inf")) - 1e-12:
-                        continue
-                    gscore[nkey] = ng
-                    came[nkey] = key
-                    nodes[nkey] = nq
-                    heapq.heappush(heap, (ng + heuristic(nq), ng, nkey))
-
-        return None
-
-# Compatibility aliases for callers and tests.
-build_arm_solver_object = KinematicsManager.build_arm_solver_object
-extract_key_joints = KinematicsManager.extract_key_joints
-path_safe = KinematicsManager.path_safe
-plan_safe_path = KinematicsManager.plan_safe_path
-_position = KinematicsManager._position
-_segment_safe = KinematicsManager._segment_safe
-_key = KinematicsManager._key
-_compress = KinematicsManager._compress
-
-
-class SimulatedMechanicalArm:
-    """Source-of-truth joint state for the simulated arm.
-
-    The controller never writes joint angles directly.  Instead it
-    commands a target each cycle and this class moves every joint toward
-    it by at most ``max_ang_vel * dt``.  Joint speed ramps up from zero
-    over ``ramp_time`` seconds.  Both the commanded target and the
-    resulting angles are clamped to the caller-supplied joint limits, so
-    an invalid target can never produce an out-of-range pose.
-
-    Joints travel along the shortest angular path.  If that path would
-    leave the joint's limits, the opposite (limit-respecting) direction
-    is used, matching the homing controller's behaviour.
-    """
-
-    def __init__(self, angles, max_ang_vel=MAX_ANG_VEL,
-                 ramp_time=ANGULAR_SPEED_RAMP_TIME):
-        """Create the mechanical arm from an initial angle list.
-
-        Args:
-            angles: Initial joint angles [rad].
-            max_ang_vel: Maximum joint speed [rad/s].
-            ramp_time: Time to reach full speed from standstill [s].
-        """
-        self.angles = [float(a) for a in angles]
-        self.max_ang_vel = max_ang_vel
-        self.ramp_time = max(0.0, float(ramp_time))
-        self.joint_speeds = [0.0] * len(self.angles)
-
-    def step(self, target_angles, joint_limits, dt=DT, max_step=None):
-        """Advance one control cycle toward ``target_angles``.
-
-        Args:
-            target_angles: Desired joint angles [rad].
-            joint_limits: Per-joint (min, max) pairs, or None.
-            dt: Control period [s].
-            max_step: Optional per-joint or scalar maximum angular step
-                for this cycle [rad].  Defaults to ``max_ang_vel * dt``.
-
-        Returns:
-            list[float]: The new (clamped, velocity-limited) angles.
-
-        Raises:
-            ValueError: If the target has a different number of joints.
-        """
-        if len(target_angles) != len(self.angles):
-            raise ValueError(
-                f"Expected {len(self.angles)} target angles, "
-                f"got {len(target_angles)}")
-
-        default_step = self.max_ang_vel * dt
-        if max_step is None:
-            step_limits = [default_step] * len(self.angles)
-        elif isinstance(max_step, (int, float)):
-            step_limits = [float(max_step)] * len(self.angles)
-        else:
-            step_limits = [float(v) for v in max_step]
-
-        result = list(self.angles)
-
-        for i, target in enumerate(target_angles):
-            lo, hi = self._limits_for(joint_limits, i)
-            target = max(lo, min(hi, float(target)))
-
-            diff = wrap2pi(target - result[i])
-            if abs(diff) <= 1e-12:
-                result[i] = target
-                self.joint_speeds[i] = 0.0
-                continue
-
-            # Commit to the direction whose whole path stays inside the
-            # limits.  Re-picking the shortest direction every cycle makes
-            # a joint that cannot take the short way oscillate forever on
-            # the bound (the original flip-jitter bug).
-            diff = limit_respecting_diff(result[i], diff, lo, hi)
-            step_dir = 1.0 if diff > 0 else -1.0
-            limit_step = (step_limits[i] if i < len(step_limits)
-                          else default_step)
-            limit_speed = limit_step / dt if dt > 1e-12 else 0.0
-            target_speed = min(self.max_ang_vel, limit_speed)
-            if self.ramp_time <= 1e-9:
-                speed = target_speed
-            else:
-                accel = self.max_ang_vel / self.ramp_time
-                speed = min(target_speed,
-                            self.joint_speeds[i] + accel * dt)
-            self.joint_speeds[i] = speed
-            step_mag = min(speed * dt, limit_step, abs(diff))
-            next_angle = result[i] + step_dir * step_mag
-            if math.isinf(lo) and math.isinf(hi):
-                result[i] = wrap2pi(next_angle)
-            else:
-                result[i] = max(lo, min(hi, next_angle))
-
-        self.angles = result
-        return result
-
-    @staticmethod
-    def _limits_for(joint_limits, index):
-        """Return (lo, hi) for one joint, defaulting to unbounded."""
-        if joint_limits is None or index >= len(joint_limits):
-            return -float("inf"), float("inf")
-        pair = joint_limits[index]
-        if pair is None:
-            return -float("inf"), float("inf")
-        lo, hi = pair
-        return float(lo), float(hi)
-
-
-def random_initial_angles(jitter=0.2):
-    """Return randomized, valid starting angles for *simulation only*.
-
-    The production controller must always be built from measured motor
-    angles.  Simulated inputs (the standalone simulator and its tests)
-    use this helper to start near the home pose with a small random
-    perturbation so runs begin valid and away from a singularity.
-    """
-    angles = []
-    for i, (lo, hi) in enumerate(PICK_AND_PLACE_MODE.limits):
-        angle = HOMING_TARGET[i] + random.uniform(-jitter, jitter)
-        angles.append(max(lo, min(hi, angle)))
-    return angles
+from .path_planner import (
+    build_arm_solver_object, extract_key_joints, plan_safe_path,
+)
+from .slew import SimulatedMechanicalArm
 
 
 class RoverArmController:
     """Central kinematic state container for the 5-DOF rover arm.
 
     State variables:
-        angles: list[float] — latest achieved joint angles [rad]
-        target_angles: list[float] — desired joint angles [rad]
+        angles: list[float] | None — latest achieved joint angles [rad],
+            or None before the first measured sync
+        target_angles: list[float] | None — desired joint angles [rad]
             (updated by IK in position drive; equals angles in
             direct-drive modes)
         target_frame: OrientationMatrix — FK of target_angles.
@@ -424,21 +61,14 @@ class RoverArmController:
         home_joint_idx: int | None — single joint being homed, or None
     """
 
-    def __init__(self, initial_angles):
+    def __init__(self):
         """Build the FK model, IK solver, and initialize all controllers.
 
-        Args:
-            initial_angles: Starting joint angles [rad], one per joint.
-                Production code passes the measured motor angles here
-                (or calls ``sync_angles()`` immediately afterwards).
-                Simulated inputs should pass ``random_initial_angles()``.
+        The controller starts with no joint state.  Callers provide measured
+        angles with :meth:`from_measured` or ``sync_angles()`` before issuing
+        any motion command; until then the controller reports itself as
+        uninitialized and refuses commands that need a pose.
         """
-        angles = [float(a) for a in initial_angles]
-        if len(angles) != len(PICK_AND_PLACE_MODE.limits):
-            raise ValueError(
-                f"Expected {len(PICK_AND_PLACE_MODE.limits)} initial "
-                f"angles, got {len(angles)}")
-
         # Core robotics
         self.model, self.solver = build_arm_solver_object()
 
@@ -451,54 +81,121 @@ class RoverArmController:
         self.locked_joints = [False, False, False, True, True]
         self.position_locked = False   # True = target translation disabled
         self.orientation_locked = False  # True = target rotation disabled
-        self._orientation_lock_rotation = None
-        self.home_joint_idx = None     # None=full homing, int=single joint
+        self._orientation_lock_rotation: np.ndarray | None = None
+        self.home_joint_idx: int | None = None  # None=full homing, int=single
         self._homing_flipped = False   # side whose home pose is targeted
         self._homing_cross_dir = 0     # elbow deadband crossing direction
         self.limit_mode = PICK_AND_PLACE_MODE
         self.flipped = False           # Pick-and-Place side modifier
         self.planar = False            # base-locked vertical modifier
         self.typing = False            # keyboard-typing limits/modifier
-        self._typing_saved_locks = None  # wrist locks restored when typing ends
+        self.zenith = False            # straight-up depower/test pose
+        self._zenith_side = False      # side to restore when leaving zenith
+        self._zenith_exit_target: list[float] | None = None
+        self._zenith_saved_locks: list[bool] | None = None
+        self._typing_saved_locks: list[bool] | None = None
         self.solver_history = []       # debug: last IK iteration results
-        self.last_failure = None       # last user-facing rejection message
+        self.last_failure: str | None = None
 
-        # Joint state — the caller supplies the starting pose.  Production
-        # uses measured motor angles; simulation uses random_initial_angles().
-        self.mechanical = SimulatedMechanicalArm(angles)
-        self.target_angles = list(self.angles)
+        # Late-initialized state.  These are None at runtime until the first
+        # measured sync; the casts stop static checkers from treating every
+        # later access as optional.  Check ``initialized`` before relying on
+        # them outside this class.
+        self._initialized = False
+        self.mechanical: SimulatedMechanicalArm = cast(
+            SimulatedMechanicalArm, None)
+        self.target_angles: list[float] = cast(list[float], None)
+        # Last angle sent to the hardware bridge, per joint.  Locked joints
+        # keep this value so encoder noise cannot make a motor chase itself.
+        self._last_commanded: list[float] = cast(list[float], None)
 
         # Safe homing path and flip waypoint follow state
-        self._homing_path = None
+        self._homing_path: list[list[float]] | None = None
         self._homing_path_idx = 0
-        self._homing_seg_steps = None
-        self._follow_target = None
-        self._follow_path = None
+        self._homing_seg_steps: list[float] | None = None
+        self._follow_target: list[float] | None = None
+        self._follow_path: list[list[float]] | None = None
         self._follow_path_idx = 0
-        self._follow_limits = None
+        self._follow_limits: list[tuple[float, float]] | None = None
         self._follow_switch_mode = False
-        self._follow_max_step = None
+        self._follow_max_step: list[float] | None = None
         self._follow_stall = 0
         self._homing_stall = 0
 
-        # Target frame is always FK(target_angles) — a reachable pose
-        self.target_frame = self.model.solve_forward_kinematics(self.target_angles)
-        self.target_pos = list(self.target_frame.position())
+        # Target frame is FK(target_angles) once a measured pose arrives.
+        self.target_frame: OrientationMatrix = cast(OrientationMatrix, None)
+        self.target_pos: list[float] = cast(list[float], None)
 
         # Achieved state — computed by refresh_fk()
-        self.pos = None
-        self.frames = None
-        self.l0 = self.l1 = self.l2 = self.l3 = None
+        self.pos: list[list[float]] | None = None
+        self.frames: list[OrientationMatrix] | None = None
+        self.l0: list[float] | None = None
+        self.l1: list[float] | None = None
+        self.l2: list[float] | None = None
+        self.l3: list[float] | None = None
         self.refresh_fk()
+
+    @classmethod
+    def from_measured(cls, angles):
+        """Build a controller initialized from measured joint angles.
+
+        The resulting controller has its target frame snapped to the
+        measured pose and adopts the mode that fits that pose.
+        """
+        controller = cls()
+        controller.sync_angles(angles, reset_target=True)
+        controller.infer_initial_mode()
+        return controller
 
     # ------------------------------------------------------------------
     # Joint state / mechanical arm
     # ------------------------------------------------------------------
 
     @property
-    def angles(self):
-        """Actual joint angles owned by the simulated mechanical arm."""
+    def angles(self) -> list[float]:
+        """Latest joint angles.
+
+        The value is ``None`` at runtime until the first measured sync; call
+        ``initialized`` first if you need to distinguish that case.  The
+        return type is non-optional so callers that have already checked
+        ``initialized`` do not need a redundant guard.
+        """
+        if not self._initialized:
+            return cast(list[float], None)
         return self.mechanical.angles
+
+    @property
+    def _angles(self) -> list[float]:
+        """Non-optional joint angles for internal use after initialization."""
+        return self.mechanical.angles
+
+    @property
+    def initialized(self) -> bool:
+        """True once measured joint angles have been adopted."""
+        return self._initialized
+
+    def _require_initialized(self) -> bool:
+        """Record a rejection and return False when no pose is known."""
+        if self.initialized:
+            return True
+        return self._fail("Arm not initialized")
+
+    def commanded_angles(self) -> list[float] | None:
+        """Return the joint angles to send to the hardware bridge.
+
+        Unlocked joints follow the achieved angles.  Locked joints keep the
+        last commanded target, so encoder noise and tracking lag cannot make
+        a motor chase its own feedback.  Returns None before the first sync.
+        """
+        if not self.initialized:
+            return None
+        result = list(self._angles)
+        for index, locked in enumerate(self.locked_joints):
+            if locked:
+                result[index] = self._last_commanded[index]
+            else:
+                self._last_commanded[index] = result[index]
+        return result
 
     def sync_angles(self, angles, reset_target=False):
         """Adopt measured joint angles from real hardware.
@@ -516,13 +213,21 @@ class RoverArmController:
                 targets would be thrown away every cycle.
         """
         angles = [float(a) for a in angles]
-        if len(angles) != len(self.angles):
+        expected = len(PICK_AND_PLACE_MODE.limits)
+        if len(angles) != expected:
             raise ValueError(
-                f"Expected {len(self.angles)} angles, got {len(angles)}")
-        self.mechanical.angles = angles
-        if reset_target:
+                f"Expected {expected} angles, got {len(angles)}")
+        first_sync = not self._initialized
+        if first_sync:
+            self.mechanical = SimulatedMechanicalArm(angles)
+            self.last_failure = None
+        else:
+            self.mechanical.angles = angles
+        self._initialized = True
+        if reset_target or first_sync:
             self.mechanical.joint_speeds = [0.0] * len(angles)
             self.target_angles = list(angles)
+            self._last_commanded = list(angles)
             frame = self.model.solve_forward_kinematics(self.target_angles)
             self.target_frame = self._frame_with_orientation_lock(frame)
             self.target_pos = list(self.target_frame.position())
@@ -535,13 +240,13 @@ class RoverArmController:
     def _locked_limits(self, joint_limits):
         """Pin locked joints to their actual angles in a limit list."""
         if joint_limits is None:
-            result = [None] * len(self.angles)
+            result = [None] * len(self._angles)
         else:
             result = [tuple(pair) if pair is not None else None
                       for pair in joint_limits]
         for i, locked in enumerate(self.locked_joints):
             if locked and i < len(result):
-                a = self.angles[i]
+                a = self._angles[i]
                 result[i] = (a, a)
         return result
 
@@ -550,7 +255,7 @@ class RoverArmController:
         for i, tgt in enumerate(target):
             if mask is not None and i < len(mask) and not mask[i]:
                 continue
-            if abs(wrap2pi(tgt - self.angles[i])) > tol:
+            if abs(wrap2pi(tgt - self._angles[i])) > tol:
                 return False
         return True
 
@@ -560,7 +265,7 @@ class RoverArmController:
         for i, tgt in enumerate(target):
             if mask is not None and i < len(mask) and not mask[i]:
                 continue
-            error = max(error, abs(wrap2pi(tgt - self.angles[i])))
+            error = max(error, abs(wrap2pi(tgt - self._angles[i])))
         return error
 
     def _drive_mechanical(self, target_angles, joint_limits, mask=None,
@@ -575,15 +280,19 @@ class RoverArmController:
     def _synchronized_steps(self, start, target):
         """Per-joint step limits so every moving joint finishes together.
 
-        The largest move runs at the mechanical arm's normal max speed;
-        the other joints are scaled by their travel distance.
+        The largest remaining joint move sets the duration at that joint's
+        hardware speed; every other joint gets the step that matches the
+        same completion time, capped by its own speed.
         """
         deltas = [abs(wrap2pi(t - s)) for s, t in zip(start, target)]
-        max_delta = max(deltas) if deltas else 0.0
-        if max_delta < 1e-12:
+        speeds = self.mechanical.max_ang_vel
+        duration = max(
+            (d / v for d, v in zip(deltas, speeds) if v > 1e-12),
+            default=0.0,
+        )
+        if duration < 1e-12:
             return [0.0] * len(deltas)
-        max_step = self.mechanical.max_ang_vel * DT
-        return [max_step * (d / max_delta) for d in deltas]
+        return [d * DT / duration for d in deltas]
 
     # ------------------------------------------------------------------
     # FK refresh
@@ -596,10 +305,16 @@ class RoverArmController:
         angles and extracts the 4 key joint positions (after each
         linkage translation: shoulder, elbow, wrist, end-effector)
         and their corresponding 4x4 frames.  Does not touch the
-        desired target frame.
+        desired target frame.  Clears the cached pose before the first
+        measured sync.
         """
-        positions = self.model.joint_positions(self.angles, frame=False)
-        frames = self.model.joint_positions(self.angles, frame=True)
+        if not self.initialized:
+            self.pos = None
+            self.frames = None
+            self.l0 = self.l1 = self.l2 = self.l3 = None
+            return
+        positions = self.model.joint_positions(self._angles, frame=False)
+        frames = self.model.joint_positions(self._angles, frame=True)
         self.pos, self.frames = extract_key_joints(positions, frames)
         self.l0, self.l1, self.l2, self.l3 = self.pos
 
@@ -610,7 +325,7 @@ class RoverArmController:
         drive) so the target marker tracks the arm instead of leaving
         a stale desired pose behind.
         """
-        self.target_angles = list(self.angles)
+        self.target_angles = list(self._angles)
         frame = self.model.solve_forward_kinematics(self.target_angles)
         self.target_frame = self._frame_with_orientation_lock(frame)
         self.target_pos = list(self.target_frame.position())
@@ -621,14 +336,16 @@ class RoverArmController:
 
     planar_exit_lock_octants = OCTANT_PLANAR_EXIT_LOCK
 
-    def _ee_octant(self):
+    def _ee_octant(self) -> int | None:
         """Octant containing the current end-effector position."""
-        pos = self.model.solve_forward_kinematics(self.angles).position()
+        if not self.initialized:
+            return None
+        pos = self.model.solve_forward_kinematics(self._angles).position()
         return _get_octant(pos)
 
     def _workspace_blocked(self, angles):
         """True when a candidate pose violates the height or octant gates."""
-        if self.is_homing or self.is_flipping:
+        if self.is_homing or self.is_flipping or self.zenith:
             return False
         pos = self.model.solve_forward_kinematics(angles).position()
         if pos[2] < END_EFFECTOR_MIN_Z - 1e-9:
@@ -640,7 +357,7 @@ class RoverArmController:
 
     def _octant_blocked(self, angles, pos=None):
         """True when a candidate pose is outside this mode's octant set."""
-        if self.is_homing or self.is_flipping:
+        if self.is_homing or self.is_flipping or self.zenith:
             return False
         if pos is None:
             pos = self.model.solve_forward_kinematics(angles).position()
@@ -673,7 +390,9 @@ class RoverArmController:
 
     def _active_limits(self, angles=None):
         """Limits for Pick and Place with its planar/flipped/typing modifiers."""
-        if self.typing:
+        if self.zenith:
+            source = ZENITH_MODE.limits
+        elif self.typing:
             source = TYPING_MODE.limits
         elif self.planar:
             source = PLANAR_MODE.limits
@@ -698,14 +417,219 @@ class RoverArmController:
         """Home pose for the currently selected side."""
         return self._flipped_home() if self.flipped else list(HOMING_TARGET)
 
-    def _settle_side(self):
+    def settle_side(self):
         """Update the flipped flag from the achieved pose, if possible."""
-        if self.planar or self.typing:
+        if not self.initialized or self.planar or self.typing or self.zenith:
             return
-        if PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
+        if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
             self.flipped = True
-        elif PICK_AND_PLACE_MODE.can_set(self.angles):
+        elif PICK_AND_PLACE_MODE.can_set(self._angles):
             self.flipped = False
+
+    @staticmethod
+    def _limit_excursion(angles, limits):
+        """Squared distance from *angles* to the nearest point inside limits."""
+        return sum(
+            max(lo - angle, 0.0, angle - hi) ** 2
+            for angle, (lo, hi) in zip(angles, limits)
+        )
+
+    def _is_zenith_pose(self, tol=ZENITH_ANGLE_TOL):
+        """True when the measured joints are already the straight-up pose."""
+        if not self.initialized:
+            return False
+        angles = self._angles
+        if abs(wrap2pi(angles[1] - ZENITH_JOINT_TARGET[0])) > tol:
+            return False
+        if abs(wrap2pi(angles[2])) > max(tol, ELBOW_DEADBAND):
+            return False
+        if abs(wrap2pi(angles[3])) > tol:
+            return False
+        if abs(wrap2pi(angles[4])) > tol:
+            return False
+        return True
+
+    def infer_initial_mode(self):
+        """Adopt the mode that best describes the measured starting pose.
+
+        Startup can happen with the arm already outside the boot-default
+        Pick-and-Place normal limits.  This runs once, before any operator
+        command, so the operation mode and flags published to the
+        basestation describe the pose the arm is actually in rather than
+        the compile-time default.
+
+        The straight-up pose selects Zenith.  The restricted octants
+        (notably top-back) select Planar when the base is inside the planar
+        band.  Otherwise the Pick-and-Place side whose limits fit wins; if
+        neither fits, the side needing the smaller correction is kept so
+        the first motion pulls the arm back into bounds.
+
+        Returns:
+            str | None: Selected mode name, or None before initialization.
+        """
+        if not self.initialized:
+            return None
+
+        if self._is_zenith_pose():
+            self.enter_zenith()
+            return "ZENITH"
+
+        octant = self._ee_octant()
+        normal_fits = PICK_AND_PLACE_MODE.can_set(self._angles)
+        flipped_fits = PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles)
+        planar_possible = PLANAR_MODE.can_set(self._angles)
+
+        if planar_possible and octant in OCTANT_PLANAR_EXIT_LOCK:
+            self.set_typing_mode(False)
+            self.planar = True
+            self.flipped = octant in OCTANT_PLANAR_FLIPPED_ALLOWED
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PLANAR"
+
+        # Without planar, use the side that matches the octant region when
+        # its joint limits fit: front-low is a normal-side reach, top/back is
+        # the flipped side.
+        if octant == FRONT_LOW and normal_fits:
+            self.set_typing_mode(False)
+            self.planar = False
+            self.flipped = False
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PNP"
+
+        if octant in (BACK_HIGH, BACK_LOW) and flipped_fits:
+            self.set_typing_mode(False)
+            self.planar = False
+            self.flipped = True
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PNP_FLIPPED"
+
+        if normal_fits:
+            self.set_typing_mode(False)
+            self.planar = False
+            self.flipped = False
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PNP"
+
+        if flipped_fits:
+            self.set_typing_mode(False)
+            self.planar = False
+            self.flipped = True
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PNP_FLIPPED"
+
+        if planar_possible and (octant in OCTANT_PLANAR_ALLOWED
+                                or octant in OCTANT_PLANAR_FLIPPED_ALLOWED):
+            self.set_typing_mode(False)
+            self.planar = True
+            self.flipped = octant in OCTANT_PLANAR_FLIPPED_ALLOWED
+            self.limit_mode = PICK_AND_PLACE_MODE
+            return "PLANAR"
+
+        normal_error = self._limit_excursion(
+            self._angles, PICK_AND_PLACE_MODE.limits)
+        flipped_error = self._limit_excursion(
+            self._angles, PICK_AND_PLACE_FLIPPED_MODE.limits)
+        self.set_typing_mode(False)
+        self.planar = False
+        self.flipped = flipped_error < normal_error
+        self.limit_mode = PICK_AND_PLACE_MODE
+        return "PNP_FLIPPED" if self.flipped else "PNP"
+
+    def _zenith_target_angles(self):
+        """Full joint target for the straight-up pose, base included."""
+        return [self._angles[0], *[float(a) for a in ZENITH_JOINT_TARGET]]
+
+    def enter_zenith(self):
+        """Drive to the straight-up test pose and select Zenith mode.
+
+        The base stays where it is.  Joint locks are released while the
+        mode is active so every joint can reach its target, then restored
+        when the arm leaves zenith.  The Pick-and-Place side selected before
+        entry is remembered for :meth:`exit_zenith`.
+        """
+        if not self._require_initialized():
+            return False
+        if self.homing.active or self.is_flipping:
+            return self._fail("Zenith blocked: an action is running")
+        if self.zenith:
+            return True
+
+        self.set_typing_mode(False)
+        self._zenith_side = self.flipped
+        self._zenith_saved_locks = list(self.locked_joints)
+        self.locked_joints = [False] * len(self.locked_joints)
+        self.planar = False
+        self.flipped = False
+        self.joint_drive = False
+        self.zenith = True
+        self._zenith_exit_target = None
+        self.limit_mode = ZENITH_MODE
+        return True
+
+    def exit_zenith(self):
+        """Move to the nearest valid pose on the last Pick-and-Place side.
+
+        Zenith sits on the boundary between the normal and flipped sides.
+        Leaving it nudges the shoulder/elbow just inside the remembered
+        side's limits instead of guessing which side to flip to.
+        """
+        if not self.zenith:
+            return True
+        if self._zenith_exit_target is not None:
+            return True
+
+        angles = list(self._angles)
+        if self._zenith_side:
+            shoulder_lo, shoulder_hi = (
+                PICK_AND_PLACE_FLIPPED_MODE.limits[1])
+            elbow = max(angles[2], ELBOW_DEADBAND)
+        else:
+            shoulder_lo, shoulder_hi = PICK_AND_PLACE_MODE.limits[1]
+            elbow = min(angles[2], -ELBOW_DEADBAND)
+
+        wrist_lo, wrist_hi = MECHANICAL_LIMITS[3]
+        twist_lo, twist_hi = MECHANICAL_LIMITS[4]
+        self._zenith_exit_target = [
+            angles[0],
+            max(shoulder_lo, min(shoulder_hi, angles[1])),
+            elbow,
+            max(wrist_lo, min(wrist_hi, angles[3])),
+            max(twist_lo, min(twist_hi, angles[4])),
+        ]
+        return True
+
+    def toggle_zenith(self):
+        """Enter Zenith, or leave it for the nearest valid side pose."""
+        if self.zenith:
+            return self.exit_zenith()
+        return self.enter_zenith()
+
+    def _update_zenith(self):
+        """Slew to the straight-up target or to the pending exit pose."""
+        target = (
+            list(self._zenith_exit_target)
+            if self._zenith_exit_target is not None
+            else self._zenith_target_angles()
+        )
+        limits = [tuple(pair) for pair in ZENITH_MODE.limits]
+        arrived = self._drive_mechanical(target, limits, tol=1e-3)
+        self.target_angles = list(self._angles)
+        self._sync_target_to_fk()
+        if arrived and self._zenith_exit_target is not None:
+            self._finish_zenith_exit()
+
+    def _finish_zenith_exit(self):
+        """Restore the remembered side and locks after leaving zenith."""
+        self.zenith = False
+        self._zenith_exit_target = None
+        self.planar = False
+        self.typing = False
+        self.flipped = self._zenith_side
+        if self._zenith_saved_locks is not None:
+            self.locked_joints = list(self._zenith_saved_locks)
+            self._zenith_saved_locks = None
+        self.limit_mode = PICK_AND_PLACE_MODE
+        self._sync_target_to_fk()
 
     def _fail(self, message):
         """Record a user-facing rejection and return False."""
@@ -721,7 +645,7 @@ class RoverArmController:
     @property
     def base_in_range(self):
         """True when the base lies inside the planar modifier's band."""
-        return PLANAR_MODE.can_set(self.angles)
+        return self.initialized and PLANAR_MODE.can_set(self._angles)
 
     @property
     def effective_limits(self):
@@ -732,9 +656,11 @@ class RoverArmController:
         """
         if self.is_flipping or self.is_homing:
             return [tuple(pair) for pair in MECHANICAL_LIMITS]
+        if self.zenith:
+            return [tuple(pair) for pair in ZENITH_MODE.limits]
         if self.typing:
             return [tuple(pair) for pair in TYPING_MODE.limits]
-        return self._active_limits(self.angles)
+        return self._active_limits(self._angles)
 
     @property
     def is_flipping(self):
@@ -764,6 +690,10 @@ class RoverArmController:
         releases the wrist locks, because a key press needs a level tool
         orientation.  The previous wrist lock state is restored on exit.
         """
+        if not self._require_initialized():
+            return False
+        if enabled and self.zenith:
+            return self._fail("Typing blocked: exit zenith mode first")
         if enabled:
             if not self.typing:
                 self._typing_saved_locks = list(self.locked_joints)
@@ -783,15 +713,19 @@ class RoverArmController:
         if self._typing_saved_locks is not None:
             self.locked_joints = list(self._typing_saved_locks)
             self._typing_saved_locks = None
-        self._settle_side()
+        self.settle_side()
         return True
 
     def set_pnp_normal(self):
         """Select normal Pick-and-Place limits when the arm fits them."""
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Normal unavailable: exit zenith mode first")
         if self.planar and not self._planar_exit_allowed():
             return self._fail(
                 "Normal unavailable: restricted octant requires planar")
-        if not PICK_AND_PLACE_MODE.can_set(self.angles):
+        if not PICK_AND_PLACE_MODE.can_set(self._angles):
             return self._fail(
                 "Normal unavailable: pose is outside normal limits")
         self.set_typing_mode(False)
@@ -805,18 +739,22 @@ class RoverArmController:
         This only changes the limit modifier; it never moves the arm.
         Use activate_flip() to physically change sides.
         """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Flipped unavailable: exit zenith mode first")
         if self.planar and not self._planar_exit_allowed():
             return self._fail(
                 "Flipped unavailable: restricted octant requires planar")
         if self.flipped:
-            if not PICK_AND_PLACE_MODE.can_set(self.angles):
+            if not PICK_AND_PLACE_MODE.can_set(self._angles):
                 return self._fail(
                     "Normal unavailable: pose is outside normal limits")
             self.set_typing_mode(False)
             self.flipped = False
             return True
 
-        if not PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
+        if not PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
             return self._fail(
                 "Flipped unavailable: pose is outside flipped limits")
         self.set_typing_mode(False)
@@ -830,16 +768,20 @@ class RoverArmController:
         Planar cannot be exited while the end effector is in octants
         3, 5, or 7; those regions require the base lock.
         """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Planar unavailable: exit zenith mode first")
         if self.planar:
             if not self._planar_exit_allowed():
                 return self._fail(
                     "Planar locked: restricted octant requires planar")
-            if PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
+            if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
                 self.set_typing_mode(False)
                 self.planar = False
                 self.flipped = True
                 return True
-            if PICK_AND_PLACE_MODE.can_set(self.angles):
+            if PICK_AND_PLACE_MODE.can_set(self._angles):
                 self.set_typing_mode(False)
                 self.planar = False
                 self.flipped = False
@@ -847,38 +789,68 @@ class RoverArmController:
             return self._fail(
                 "Planar cannot be exited at this pose")
 
-        if not PLANAR_MODE.can_set(self.angles):
+        if not PLANAR_MODE.can_set(self._angles):
             return self._fail("Planar needs base within +/-5 deg")
         self.set_typing_mode(False)
         self.planar = True
         return True
 
-    def toggle_homing(self):
-        """Toggle full-arm homing on/off."""
+    def start_homing(self):
+        """Start full-arm homing, or keep an active full-home request alive.
+
+        Repeated calls while full homing is already active are idempotent, so
+        a held homing key can refresh the planner's release watchdog without
+        restarting or cancelling the action.
+        """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Homing blocked: exit zenith mode first")
+        if self.homing.active and self.home_joint_idx is None:
+            return True
         if self.homing.active:
-            self.homing.deactivate()
-            self.home_joint_idx = None
-            self._homing_path = None
-            self._homing_stall = 0
-            self._settle_side()
-        else:
-            self.home_joint_idx = None
-            self.homing.target = self._home_target()
-            self._homing_flipped = self.flipped
-            self.homing.activate()
-            self._homing_path = None
-            self._homing_stall = 0
-            if not any(self.locked_joints[:3]):
-                effective = self._hold_joints(
-                    self.homing.target, self.angles)
-                path = plan_safe_path(
-                    self.model, self.angles, effective)
-                if path and len(path) > 1:
-                    self._homing_path = path[1:]
-                    self._homing_path_idx = 0
-                    self._homing_seg_steps = self._synchronized_steps(
-                        self.angles, self._homing_path[0])
+            self.stop_homing(settle=False)
+        self.home_joint_idx = None
+        self.homing.target = self._home_target()
+        self._homing_flipped = self.flipped
+        self.homing.activate()
+        self._homing_path = None
+        self._homing_seg_steps = None
+        self._homing_stall = 0
+        if not any(self.locked_joints[:3]):
+            effective = self._hold_joints(
+                self.homing.target, self._angles)
+            path = plan_safe_path(
+                self.model, self._angles, effective)
+            if path and len(path) > 1:
+                self._homing_path = path[1:]
+                self._homing_path_idx = 0
+                self._homing_seg_steps = self._synchronized_steps(
+                    self._angles, self._homing_path[0])
         self._homing_cross_dir = 0
+        return True
+
+    def stop_homing(self, settle=True):
+        """Stop an active homing action and discard its planned path."""
+        self.homing.deactivate()
+        self.home_joint_idx = None
+        self._homing_path = None
+        self._homing_seg_steps = None
+        self._homing_stall = 0
+        self._homing_cross_dir = 0
+        if settle:
+            self.settle_side()
+        return True
+
+    def toggle_homing(self):
+        """Toggle full-arm homing on/off.
+
+        Kept for direct callers and tests.  The ROS command path uses
+        start_homing()/stop_homing() so a held key can keep the action alive.
+        """
+        if self.homing.active:
+            return self.stop_homing()
+        return self.start_homing()
 
     def toggle_joint_lock(self, idx):
         """Toggle the motor lockout for one joint.
@@ -903,6 +875,8 @@ class RoverArmController:
 
     def toggle_orientation_lock(self):
         """Toggle locking the target's rotation."""
+        if not self._require_initialized():
+            return False
         self.orientation_locked = not self.orientation_locked
         if self.orientation_locked:
             self._orientation_lock_rotation = (
@@ -938,11 +912,17 @@ class RoverArmController:
         Returns:
             bool: True if single-joint homing started.
         """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Joint home blocked: exit zenith mode first")
         if not (0 <= idx < len(self.locked_joints)):
             return False
-        self.locked_joints[idx] = False
+        if self.homing.active and self.home_joint_idx == idx:
+            return True
         if self.homing.active:
-            self.homing.deactivate()
+            self.stop_homing(settle=False)
+        self.locked_joints[idx] = False
         self.homing.target = self._home_target()
         self._homing_flipped = self.flipped
         self.homing.activate()
@@ -993,12 +973,14 @@ class RoverArmController:
         The command is clamped to the active limits, respects locked
         joints, and drives the mechanical arm at its normal velocity.
         """
-        if self.homing.active or self.is_flipping:
+        if not self._require_initialized():
+            return False
+        if self.homing.active or self.is_flipping or self.zenith:
             return self._fail("Command blocked: action is running")
-        if not 0 <= index < min(len(self.angles), len(self.target_angles)):
+        if not 0 <= index < min(len(self._angles), len(self.target_angles)):
             return self._fail("Command blocked: invalid joint")
 
-        held = list(self.angles)
+        held = list(self._angles)
         target = list(self.target_angles)
         limits = self._active_limits(target)
         lo, hi = limits[index]
@@ -1018,7 +1000,9 @@ class RoverArmController:
 
     def command_target_axis(self, axis, value):
         """Command the target position on one world axis."""
-        if self.homing.active or self.is_flipping:
+        if not self._require_initialized():
+            return False
+        if self.homing.active or self.is_flipping or self.zenith:
             return self._fail("Command blocked: action is running")
         if axis not in (0, 1, 2):
             return self._fail("Command blocked: invalid axis")
@@ -1031,7 +1015,7 @@ class RoverArmController:
         if locked_rotation is not None:
             desired = desired.with_rotation(locked_rotation)
         desired = self.limit_mode.clamp_target_position(
-            desired, self.angles)
+            desired, self._angles)
         return self._solve_desired_frame(desired)
 
     def command_pose(self, position, rotation, drive=True):
@@ -1047,7 +1031,9 @@ class RoverArmController:
         Returns:
             bool: True when the target was accepted.
         """
-        if self.homing.active or self.is_flipping:
+        if not self._require_initialized():
+            return False
+        if self.homing.active or self.is_flipping or self.zenith:
             return self._fail("Command blocked: action is running")
         if len(position) != 3:
             return self._fail("Command blocked: invalid position")
@@ -1064,6 +1050,11 @@ class RoverArmController:
 
     def hold(self):
         """Drop the current target and hold the measured pose."""
+        if not self.initialized:
+            return False
+        if self.zenith:
+            # Zenith is a mode, not a target; a handover hold leaves it be.
+            return True
         if self.homing.active or self.is_flipping:
             return self._fail("Hold blocked: action is running")
         self._sync_target_to_fk()
@@ -1084,19 +1075,26 @@ class RoverArmController:
         Returns:
             bool: True if a flip started, False if refused or already running.
         """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Flip blocked: exit zenith mode first")
         octant = self._ee_octant()
         if octant not in OCTANT_DIRECT_FLIP and not self.planar:
             return self._fail(
                 f"Flip blocked: octant {octant} requires planar")
 
         limits = self.flip_side_limits()
+        assert self.l0 is not None
+        assert self.l1 is not None
+        assert self.l2 is not None
         started = self.flipper.activate(
-            self.angles, self.l0, self.l1, self.l2,
+            self._angles, self.l0, self.l1, self.l2,
             joint_limits=limits, side=True)
         if not started:
             return self._fail("Flip blocked: another flip is running")
         if started:
-            held = list(self.angles)
+            held = list(self._angles)
             target = self._hold_joints(self.flipper.target_angles, held)
             if any(self.locked_joints[:3]):
                 path = [held, target]
@@ -1154,9 +1152,11 @@ class RoverArmController:
         Returns:
             bool: True if input was consumed (state was updated).
         """
+        if not self.initialized:
+            return False
         # Flip motion overrides everything until the target is reached
         if self._follow_target is not None:
-            held = list(self.angles)
+            held = list(self._angles)
             target = self._hold_joints(self._follow_target, held)
             limits = self._locked_limits(self._follow_limits)
             before = self._target_error(target)
@@ -1176,7 +1176,7 @@ class RoverArmController:
                 if (self._follow_path
                         and self._follow_path_idx + 1 < len(self._follow_path)):
                     self._follow_path_idx += 1
-                    held = list(self.angles)
+                    held = list(self._angles)
                     self._follow_target = self._hold_joints(
                         self._follow_path[self._follow_path_idx], held)
                     self._follow_max_step = self._synchronized_steps(
@@ -1191,9 +1191,15 @@ class RoverArmController:
                     self._follow_switch_mode = False
                     self._follow_max_step = None
 
-            self.target_angles = list(self.angles)
+            self.target_angles = list(self._angles)
             self.refresh_fk()
             self._sync_target_to_fk()
+            return True
+
+        # Zenith is a static test pose; teleop input is ignored until exit.
+        if self.zenith:
+            self._update_zenith()
+            self.refresh_fk()
             return True
 
         # Homing runs even without new input
@@ -1230,9 +1236,9 @@ class RoverArmController:
         if self.planar:
             self.flipped = self._ee_octant() in OCTANT_PLANAR_FLIPPED_ALLOWED
             return
-        if PICK_AND_PLACE_FLIPPED_MODE.can_set(self.angles):
+        if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
             self.flipped = True
-        elif PICK_AND_PLACE_MODE.can_set(self.angles):
+        elif PICK_AND_PLACE_MODE.can_set(self._angles):
             self.flipped = False
 
     def _update_homing(self):
@@ -1248,7 +1254,7 @@ class RoverArmController:
         of the deadband, the commanded elbow is held on the target-side
         boundary until the mechanical arm actually crosses it.
         """
-        held = list(self.angles)
+        held = list(self._angles)
         was_single = self.home_joint_idx is not None
         mask = self._homing_mask()
 
@@ -1292,16 +1298,16 @@ class RoverArmController:
                     return
                 nxt = self._hold_joints(
                     self._homing_path[self._homing_path_idx],
-                    self.angles, mask)
+                    self._angles, mask)
                 self._homing_seg_steps = self._synchronized_steps(
-                    self.angles, nxt)
+                    self._angles, nxt)
 
             if self._homing_path is not None:
                 self._sync_target_to_fk()
                 return
 
         commanded, done = self.homing.step(
-            self.angles, limits=HOMING_MODE.limits, mask=mask)
+            self._angles, limits=HOMING_MODE.limits, mask=mask)
         commanded = HOMING_MODE.geometry_constraint(commanded)
         commanded = self._hold_joints(commanded, held, mask)
 
@@ -1353,8 +1359,8 @@ class RoverArmController:
         constraint is applied.  Locked angles are then restored.  The
         target frame tracks the arm.
         """
-        held = list(self.angles)
-        commanded = list(self.angles)
+        held = list(self._angles)
+        commanded = list(self._angles)
         if not self.locked_joints[2]:
             commanded[2] += deltas.get("drx", 0.0)  # elbow
         if not self.locked_joints[1]:
@@ -1382,7 +1388,7 @@ class RoverArmController:
         where the arm is heading; the mechanical arm catches up at its
         velocity limit.
         """
-        held = list(self.angles)
+        held = list(self._angles)
         target = self._hold_joints(self.target_angles, held)
 
         if any(self.locked_joints):
@@ -1399,7 +1405,7 @@ class RoverArmController:
         """Run IK toward a desired frame and command the mechanical arm."""
         # Locked joints are pinned to a zero-width limit so the solver
         # distributes the motion across the remaining motors.
-        locked_angles = [wrap2pi(a) for a in self.angles]
+        locked_angles = [wrap2pi(a) for a in self._angles]
         limits = self._active_limits(self.target_angles)
         for i, locked in enumerate(self.locked_joints):
             if locked and i < len(limits):
@@ -1438,6 +1444,8 @@ class RoverArmController:
         Returns:
             bool: True if the orientation was snapped.
         """
+        if not self._require_initialized():
+            return False
         if self.orientation_locked:
             return self._fail("Guide blocked: orientation is locked")
 

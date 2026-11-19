@@ -3,6 +3,9 @@
 #
 #   source scripts/source.sh              # environment only
 #   source scripts/source.sh --build      # environment, then colcon build
+#   source scripts/source.sh --arm        # environment, then rebuild the
+#                                         #   arm/hardware packages only
+#                                         #   (skips Gazebo and pointcloud)
 #   source scripts/source.sh --run        # environment, then launch main
 #   source scripts/source.sh --build --run
 #
@@ -29,14 +32,19 @@ _shell_kind="sh"
 
 # Optional actions. These are read from the arguments supplied to `source`:
 #   source scripts/source.sh --build
+#   source scripts/source.sh --arm
 #   source scripts/source.sh --run
 # Unknown arguments are ignored because a sourced file can inherit the
 # caller's positional parameters when no arguments are given.
 _source_build=0
 _source_run=0
+_source_arm=0
 for _source_arg in "$@"; do
     case "$_source_arg" in
         --build) _source_build=1 ;;
+        # --arm is a scoped build: arm and hardware packages, no Gazebo or
+        # pointcloud. It implies --build so the flag is useful on its own.
+        --arm) _source_arm=1; _source_build=1 ;;
         --run) _source_run=1 ;;
     esac
 done
@@ -457,11 +465,24 @@ if [ "$_source_build" = "1" ]; then
         echo "[!] colcon not found; cannot build." >&2
         _source_build_ok=0
     else
-        echo "[+] Building workspace with colcon..."
         _source_build_ok=1
-        if ! (cd "$_ws_dir" && colcon build --symlink-install); then
-            echo "[!] colcon build failed." >&2
-            _source_build_ok=0
+        if [ "$_source_arm" = "1" ]; then
+            # Scoped build: everything except the simulation-heavy packages.
+            # --packages-skip keeps the rest of the workspace (including any
+            # future arm dependencies) building without a maintained list.
+            echo "[+] Building workspace (Gazebo and pointcloud skipped)..."
+            if ! (cd "$_ws_dir" && colcon build --symlink-install \
+                    --packages-skip rover_simulation gazebo_sim_control \
+                    pointcloud_to_laserscan); then
+                echo "[!] colcon build failed." >&2
+                _source_build_ok=0
+            fi
+        else
+            echo "[+] Building workspace with colcon..."
+            if ! (cd "$_ws_dir" && colcon build --symlink-install); then
+                echo "[!] colcon build failed." >&2
+                _source_build_ok=0
+            fi
         fi
     fi
 
@@ -503,5 +524,5 @@ unset _venv_req _venv_stamp _venv_hash _venv_stamp_hash
 unset _venv_site _venv_plat _venv_lib
 unset _prune_var _prune_value _prune_noglob _prune_old_ifs _prune_result
 unset _prune_entry
-unset _source_arg _source_build _source_run _source_build_ok
+unset _source_arg _source_build _source_run _source_arm _source_build_ok
 unset -f _short _resolve_setup _prune_prefix_paths 2>/dev/null || true

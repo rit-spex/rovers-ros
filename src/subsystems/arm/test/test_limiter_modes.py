@@ -18,11 +18,12 @@ from arm_route_planner.kinematics.actions.home import HomingController
 from arm_route_planner.kinematics.actions.flip import (
     FlipController, FlipSideController, _get_flipped_angles,
 )
-from arm_route_planner.kinematics.simulated_arm import (
-    RoverArmController, SimulatedMechanicalArm,
+from arm_route_planner.kinematics.arm_controller import RoverArmController
+from arm_route_planner.kinematics.path_planner import (
     build_arm_solver_object, extract_key_joints,
 )
-from arm_route_planner.kinematics.generic_frames import (
+from arm_route_planner.kinematics.slew import SimulatedMechanicalArm
+from arm_route_planner.kinematics.linkage_models import (
     OrientationMatrix, limit_respecting_diff, wrap2pi,
 )
 from arm_constants import (

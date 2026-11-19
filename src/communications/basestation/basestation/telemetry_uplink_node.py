@@ -38,6 +38,7 @@ ARM_FLAG_BITS = {
     "JOINT_DRIVE": 1 << 4,
     "POSITION_LOCK": 1 << 5,
     "ORIENTATION_LOCK": 1 << 6,
+    "ZENITH": 1 << 7,
 }
 
 # Pose carries metres; the compact protocol uses centi-inches.
@@ -111,7 +112,10 @@ class TelemetryUplink(Node):
         }
         self._control_mode = {"control_mode": 0}
         # Last arm command rejection.  Sent even before the arm is
-        # initialized so "waiting for joint angles" is visible.
+        # initialized so "waiting for joint angles" is visible.  The mode,
+        # locks, and flags are mirrored from _arm_encoders at send time so
+        # the basestation can update its stored arm state before every joint
+        # angle has arrived.
         self._arm_status = {
             "arm_error_code": 0,
             "arm_error_arg": 0,
@@ -267,7 +271,10 @@ class TelemetryUplink(Node):
     def _publish_uplink_packets(self) -> None:
         try:
             self._send(self._life_detection, CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID)
-            self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID)
+            self._send(
+                self._arm_state_payload(),
+                CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID,
+            )
             if all(self._arm_angles_seen.values()):
                 self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
             if self._arm_pose_seen:
@@ -279,6 +286,18 @@ class TelemetryUplink(Node):
         except Exception as exc:
             if rclpy.ok():
                 self.get_logger().error(f"Failed to publish telemetry uplink packets: {exc}")
+
+    def _arm_state_payload(self) -> Dict:
+        """Arm error plus the current mode/flags for the basestation state."""
+        payload = dict(self._arm_status)
+        for key in (
+            "arm_operation_mode",
+            "locked_joints",
+            "homing_joints",
+            "arm_flags",
+        ):
+            payload[key] = self._arm_encoders[key]
+        return payload
 
     def _send(self, payload: Dict, message_id: int) -> None:
         encoded = self._encoder.encode_data(payload, message_id)

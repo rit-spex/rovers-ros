@@ -10,17 +10,24 @@ import sys
 
 
 from arm_constants import HOMING_TARGET, MECHANICAL_LIMITS
-from arm_route_planner.kinematics.simulated_arm import (
-    RoverArmController, random_initial_angles,
-)
+from arm_route_planner.kinematics.arm_controller import RoverArmController
 from arm_route_planner.kinematics.limiters import (
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, PLANAR_MODE,
     _get_octant,
 )
-from arm_route_planner.kinematics.generic_frames import wrap2pi
+from arm_route_planner.kinematics.linkage_models import wrap2pi
 
 PASS = 0
 FAIL = 0
+
+
+def random_initial_angles(jitter=0.2):
+    """Return randomized, valid starting angles for these tests."""
+    angles = []
+    for i, (lo, hi) in enumerate(PICK_AND_PLACE_MODE.limits):
+        angle = HOMING_TARGET[i] + random.uniform(-jitter, jitter)
+        angles.append(max(lo, min(hi, angle)))
+    return angles
 
 
 def check(label, condition):
@@ -101,7 +108,7 @@ PLANAR_BAND = math.radians(5)
 
 
 def octant_start(octant, flipped=False, planar=False):
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     set_angles(arm, [math.radians(v)
                      for v in SAFE_OCTANT_POSES[octant]])
     arm.flipped = flipped
@@ -183,7 +190,7 @@ def check_trace(label, trace):
 
 def test_defaults():
     print("\n--- Default configuration ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
 
     check("starts in normal P&P", not arm.flipped and not arm.planar)
     check("only mode is Pick & Place",
@@ -205,7 +212,7 @@ def test_defaults():
 
 def test_normal_home():
     print("\n--- Normal home ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     unlock_wrists(arm)
     arm.toggle_homing()
 
@@ -226,7 +233,7 @@ def test_normal_home():
 
 def test_flip_to_flipped():
     print("\n--- Flip to flipped side ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     unlock_wrists(arm)
     set_angles(arm, normal_even_pose())
 
@@ -257,7 +264,7 @@ def test_flip_to_flipped():
 
 def test_flip_back_to_normal():
     print("\n--- Flip back to normal ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     unlock_wrists(arm)
     set_angles(arm, normal_even_pose())
     arm.activate_flip()
@@ -281,7 +288,7 @@ def test_flip_back_to_normal():
 
 def test_planar_gating_and_limits():
     print("\n--- Planar gating and limits ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     set_angles(arm, [math.radians(10), math.radians(45),
                      math.radians(-45), 0, 0])
 
@@ -318,7 +325,7 @@ def test_planar_gating_and_limits():
 
 def test_planar_flipped_home():
     print("\n--- Planar on flipped side ---")
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     unlock_wrists(arm)
     set_angles(arm, [math.radians(3), math.radians(120),
                      math.radians(45), 0, 0])
@@ -353,7 +360,7 @@ def test_planar_octant_exit_lock():
     }
 
     for octant, degrees in poses.items():
-        arm = RoverArmController(random_initial_angles())
+        arm = RoverArmController.from_measured(random_initial_angles())
         set_angles(arm, [math.radians(v) for v in degrees])
         actual = _get_octant(
             arm.model.solve_forward_kinematics(arm.angles).position())
@@ -389,14 +396,14 @@ def test_flip_octant_restraints():
     }
 
     for octant, degrees in even_poses.items():
-        arm = RoverArmController(random_initial_angles())
+        arm = RoverArmController.from_measured(random_initial_angles())
         set_angles(arm, [math.radians(v) for v in degrees])
         check(f"pose lands in octant {octant}", arm.ee_octant == octant)
         check(f"octant {octant} flips without planar",
               arm.activate_flip())
 
     for octant, degrees in odd_poses.items():
-        arm = RoverArmController(random_initial_angles())
+        arm = RoverArmController.from_measured(random_initial_angles())
         set_angles(arm, [math.radians(v) for v in degrees])
         check(f"pose lands in octant {octant}", arm.ee_octant == octant)
         check(f"octant {octant} refuses flip without planar",
@@ -478,7 +485,7 @@ def test_planar_flip_at_band_edge():
     print("\n--- Planar flip at the base band edge ---")
 
     for base_deg in (5.0, -5.0):
-        arm = RoverArmController(random_initial_angles())
+        arm = RoverArmController.from_measured(random_initial_angles())
         set_angles(arm, [math.radians(base_deg), 0, math.radians(-10), 0, 0])
         arm.planar = True
         arm.flipped = False
@@ -499,7 +506,7 @@ def test_planar_flip_from_limit_pose():
     # The elbow starts at its +135 deg stop.  The side-flip target is
     # around -130 deg, whose shortest path is blocked by the stop, so the
     # old follower alternated up/down on the boundary and never finished.
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     set_angles(arm, [math.radians(v) for v in (-5, 10, 135, 0, 0)])
     arm.planar = True
     arm.flipped = True
@@ -561,7 +568,7 @@ def test_mode_octant_gates():
                 check(f"{side} octant {octant} explains allowed set",
                       expected_text in message)
 
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     set_angles(arm, [0, 0, math.radians(-10), 0, 0])
     check("normal can start in octant 1", arm.ee_octant == 1)
     check("normal refuses octant 5 command",
@@ -569,7 +576,7 @@ def test_mode_octant_gates():
     check("normal refusal names octant 5",
           "octant 5" in (arm.take_failure() or "").lower())
 
-    arm = RoverArmController(random_initial_angles())
+    arm = RoverArmController.from_measured(random_initial_angles())
     set_angles(arm, [0, 0, math.radians(-10), 0, 0])
     arm.planar = True
     check("planar accepts octant 5 command",
@@ -605,7 +612,7 @@ def test_configuration_limits():
     ]
 
     for name, flipped, planar, limits in configs:
-        arm = RoverArmController(random_initial_angles())
+        arm = RoverArmController.from_measured(random_initial_angles())
         unlock_wrists(arm)
         if planar:
             set_angles(arm, [0, math.radians(45), math.radians(-45), 0, 0])

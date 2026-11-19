@@ -114,6 +114,7 @@ ARM_FLAG_NAMES = (
     "JOINT_DRIVE",
     "POSITION_LOCK",
     "ORIENTATION_LOCK",
+    "ZENITH",
 )
 
 ARM_STATE_TOPICS = {
@@ -177,6 +178,7 @@ _ARM_OPERATION_MODES = {
     "PNP_FLIPPED": (1, "PICK_AND_PLACE_FLIPPED"),
     "PLANAR": (2, "PLANAR"),
     "HOMING": (3, "HOMING"),
+    "ZENITH": (4, "ZENITH"),
 }
 ARM_OPERATION_MODES = {
     name: code for name, (code, _) in _ARM_OPERATION_MODES.items()
@@ -236,6 +238,10 @@ TELEOP_PUBLISH_RATE_HZ = 50.0
 # readable.
 JOG_REJECT_INTERVAL_SEC = 1.0
 
+# Homing is a maintained action: the basestation forwards the home key on
+# every held state, and the planner stops homing when that stream goes quiet.
+HOMING_HOLD_TIMEOUT_SEC = 0.25
+
 # A shaped teleop axis is exactly zero at rest, so a tight epsilon rejects
 # noise without demanding bit-exact zeros when re-arming manual motion.
 VELOCITY_NEUTRAL_EPSILON = 1e-6
@@ -250,6 +256,14 @@ SNIFFER_PERIOD_SEC = 1.0
 # =============================================================================
 
 HOMING_TARGET = [0, math.pi / 4, -math.pi / 4, 0, 0]   # Home: straight ahead
+
+# Zenith test pose: the shoulder is vertical and the arm is fully extended, so
+# the motors can be depowered without the arm falling.  The base is left where
+# it is ("any"); the remaining joints are shoulder, elbow, wrist bend, wrist
+# twist.  The elbow tolerance includes the singularity deadband because a
+# straight-up pose may settle just outside zero.
+ZENITH_JOINT_TARGET = [math.pi / 2, 0.0, 0.0, 0.0]
+ZENITH_ANGLE_TOL = math.radians(5.0)
 
 # Physical gripper travel: 0 = open, 90 deg = closed.
 GRIPPER_MIN_ANGLE = 0.0
@@ -293,33 +307,67 @@ class ArmMotorParams(NamedTuple):
     tick_offset: int
     tick_lower_limit: float
     tick_upper_limit: float
-    max_speed: int
+    max_speed: int  # drive profile velocity on the motor shaft [RPM]
+
+    @property
+    def max_output_rad_s(self) -> float:
+        """Joint speed at the profile-velocity limit [rad/s]."""
+        return motor_rpm_to_joint_rad_s(self.max_speed)
+
+    @property
+    def max_ticks_per_s(self) -> float:
+        """Absolute encoder ticks per second at that joint speed."""
+        return abs(self.max_output_rad_s * self.ticks_per_rad)
 
 
-# NOTE: IMPORTANT COMMENT: THE CURRENT MOTOR PARAMETERS AND LIMITS ARE INCORRECT, DO NOT USE THEM AS A REFERENCE FOR DEBUGGING
+# Every arm drive's profile velocity is a motor-shaft RPM.  The output joint
+# turns at 1/80 of that because of the gearbox.
+ARM_MOTOR_GEAR_RATIO = 80
+
+
+def motor_rpm_to_joint_rad_s(rpm: float) -> float:
+    """Convert motor-shaft RPM to output-joint angular speed [rad/s]."""
+    return float(rpm) * 2.0 * math.pi / 60.0 / ARM_MOTOR_GEAR_RATIO
+
+
+# The base and elbow joints use Tinsmith M4230-series integrated robotic
+# joint actuators.  Each has a 32768-count encoder per motor revolution and
+# an 80:1 gearbox, giving 32768 * 80 / (2 * pi) ~= 417215 ticks per output
+# radian.  The sign below is the joint's tick direction; the magnitude is
+# shared by both actuators.
+TINSMITH_M4230_COUNTS_PER_REV = 32768
+TINSMITH_M4230_GEAR_RATIO = ARM_MOTOR_GEAR_RATIO
+TINSMITH_M4230_TICKS_PER_RAD = (
+    TINSMITH_M4230_COUNTS_PER_REV * TINSMITH_M4230_GEAR_RATIO
+    / (2 * math.pi)
+)
+
+# NOTE: The actuators above explain the tick scale, but the per-joint offsets,
+# tick limits, and the shoulder calibration are still measured values that
+# need hardware verification.  Do not use them as a debugging reference.
 
 # https://docs.google.com/spreadsheets/d/1k4CHPq7_ftuCsQyz7srGTpdhJiTCs1ho/edit?gid=788058726#gid=788058726
 ARM_MOTOR_PARAMS = [
     ArmMotorParams(
-        ticks_per_rad=-420000,
+        ticks_per_rad=-TINSMITH_M4230_TICKS_PER_RAD,
         tick_offset=-43333,
         tick_lower_limit=-1040833,
         tick_upper_limit=954000,
-        max_speed=100,
+        max_speed=500,
     ),  # base
     ArmMotorParams(
-        ticks_per_rad=262600,
+        ticks_per_rad=262144,
         tick_offset=-202000,
         tick_lower_limit=-202000,
         tick_upper_limit=622000,
-        max_speed=30,
+        max_speed=150,
     ),  # shoulder
     ArmMotorParams(
-        ticks_per_rad=-420000,
+        ticks_per_rad=-TINSMITH_M4230_TICKS_PER_RAD,
         tick_offset=860000,
         tick_lower_limit=-238000,
         tick_upper_limit=1959000,
-        max_speed=100,
+        max_speed=500,
     ),  # elbow
     # NOTE: Following limits exist on teensy side, currently redundant,
     # also the teensy expects floats in radians soooo yeah
@@ -344,6 +392,12 @@ ARM_MOTOR_PARAMS = [
         tick_upper_limit=GRIPPER_MAX_ANGLE,
         max_speed=100,
     ),  # gripper
+]
+
+# Per-joint speed cap implied by the drive profile velocities.  The planner's
+# target slew and the simulated hardware both use this list.
+ARM_MOTOR_MAX_ANG_VEL = [
+    params.max_output_rad_s for params in ARM_MOTOR_PARAMS
 ]
 
 
@@ -407,9 +461,10 @@ TARGET_ANGLE_TOPICS = {
 # Motion tuning
 # =============================================================================
 
-# Maximum joint speed for the simulated mechanical arm [rad/s].
-# At DT=0.05 this caps each joint at ~0.6 deg per frame.
-MAX_ANG_VEL = math.radians(12)
+# Conservative scalar speed cap: the slowest joint implied by the drive
+# profile velocities.  Per-joint hardware speeds are in ARM_MOTOR_MAX_ANG_VEL
+# and are what the planner's slew model uses.
+MAX_ANG_VEL = min(ARM_MOTOR_MAX_ANG_VEL)
 
 # Time to ramp from standstill to MAX_ANG_VEL [s].
 ANGULAR_SPEED_RAMP_TIME = 1.0

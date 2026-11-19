@@ -33,9 +33,11 @@ src/subsystems/arm/
 │   ├── arm_route_planner/
 │   │   ├── arm_route_planner_node.py # IK, actions, 5-DOF target writer
 │   │   └── kinematics/            # shared kinematic core (pure library)
-│   │       ├── generic_frames.py  # symbolic FK + damped-least-squares IK
+│   │       ├── linkage_models.py  # symbolic FK, IK, frames, RPY helpers
 │   │       ├── limiters.py        # workspace limiters and octant gating
-│   │       ├── simulated_arm.py   # RoverArmController + slew model
+│   │       ├── path_planner.py    # safe joint-space path search
+│   │       ├── slew.py            # joint slew / velocity-limit model
+│   │       ├── arm_controller.py  # RoverArmController state machine
 │   │       └── actions/           # homing and flip controllers
 │   ├── arm_hardware/
 │   │   ├── arm_hardware_node.py   # ROS ↔ CAN boundary, transport, standard CAN
@@ -253,11 +255,11 @@ and the Gazebo bridge drop targets while the arm is disabled.
 
 ### `arm_route_planner_node`
 
-The 5-DOF state machine and the main consumer of joint feedback. It starts
-uninitialized and stays that way until all five measured joint angles have
-arrived, then builds `RoverArmController` from the measured pose and adopts
-the matching normal/flipped side. It then runs one cycle every `DT` (0.05 s,
-20 Hz):
+The 5-DOF state machine and the main consumer of joint feedback. It owns a
+`RoverArmController` for its whole lifetime and stays uninitialized until all
+five measured joint angles have arrived; it then syncs the controller to the
+measured pose and adopts the matching normal/flipped side. It then runs one
+cycle every `DT` (0.05 s, 20 Hz):
 
 1. Sync the controller to the measured angles.
 2. Read the latest `/ARM/CMD_VELOCITY` and convert it to per-cycle deltas,
@@ -409,39 +411,28 @@ manual surfaces.
 ## Debugging
 
 `arm_sniffer_node` is a read-only diagnostic printer. It subscribes to the
-current/target joint topics plus the arm state topics and prints one
-multi-line snapshot per second. It is deliberately excluded from every
+current/target joint topics plus the arm state topics and prints one compact
+snapshot per second. It is deliberately excluded from every
 launch file, so it only runs when started by hand:
 
 ```sh
 ros2 run arm arm_sniffer_node
 ```
 
-Output is spread over multiple lines with blank separators, for example:
+Output is an aligned status/flags block and a joint table, for example:
 
 ```text
-=================== ARM SNIFFER ===================
-
-  enabled   : True
-  e-stop    : False
-  mode      : PICK_AND_PLACE (0)
-
-  flags     : PLANAR
-  locked    : none
-  homing    : none
-
-  joint            current [deg]   target [deg]   delta [deg]
-  --------------   -------------   ------------   -----------
-  base                   12.34          12.50         0.16
-  shoulder              -45.00         -45.00         0.00
-  elbow                  90.00          90.00         0.00
-  wrist_bend              0.00           0.00         0.00
-  wrist_twist             0.00           0.00         0.00
-  gripper                 0.10           0.10         0.00
-
-  error     : none
-
-===================================================
+ARM   enabled : True                flags  : PLANAR
+      e-stop  : False               locked : none
+      control : MANUAL              homing : none
+      mode    : PICK_AND_PLACE (0)  error  : none
+      joint        cur(deg) trt(deg) dlt(deg)
+      base            12.34    12.50     0.16
+      shoulder       -45.00   -45.00     0.00
+      elbow           90.00    90.00     0.00
+      wrist_bend       0.00     0.00     0.00
+      wrist_twist      0.00     0.00     0.00
+      gripper          0.10     0.10     0.00
 ```
 
 ## Topics
@@ -503,7 +494,8 @@ Inputs:
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness and the latest command/runtime rejection. |
 
 `/ARM/COMMAND` accepts:
-`flip`, `planar` / `toggle_planar`, `pnp_normal`, `toggle_flipped`,
+`flip`, `zenith` / `toggle_zenith`, `planar` / `toggle_planar`,
+`pnp_normal`, `toggle_flipped`,
 `homing` / `home`, `joint_drive`, `position_drive`, `sync` / `sync_target`,
 `toggle_position_lock`, `toggle_orientation_lock`, `guide_orientation`,
 `toggle_joint_lock:<0-4>`, `home_joint:<0-4>`, `gripper_up`,
@@ -515,10 +507,16 @@ routing rules.
 
 `/ARM/COMMAND` also carries keyboard actions. `basestation_node` decodes the
 basestation's per-action press states (0 idle, 1 just pressed, 2 held, 3
-just released). Edge-triggered actions publish on the just-pressed state; the
-held gripper arrows publish on press and on every held state so the end
-effector can jog until the stream stops. The key map and edge detection live
-on the basestation.
+just released). Edge-triggered actions publish on just-pressed; the held
+gripper arrows and homing keys (`home`, `home_joint:<0-4>`) publish on press
+and on every held state so the end effector can jog and the route planner
+keeps homing until the stream stops. The basestation's `ARM_STATE_COMMANDS`
+dict is the single source for the signal-to-command mapping, with
+`ARM_STATE_HELD_COMMANDS` marking the actions that repeat while held.
+The physical key map (including the `Z` key for zenith) lives in the
+basestation firmware. Zenith arrives on the appended `arm_state.zenith`
+signal, after `solenoid_strike`, so existing signal offsets do not move; the
+firmware must map `Z` to that signal.
 
 Outputs:
 
@@ -579,10 +577,10 @@ Outputs:
 | Topic | Type | Notes |
 | --- | --- | --- |
 | `/ARM/JOINT/TARGET_*` | `std_msgs/Float32` | Rate-limited 5-DOF joint targets [rad]. Unchanged targets are skipped, with a forced refresh every 20 cycles. |
-| `/ARM/STATE/HOMING` … `/ARM/STATE/ORIENTATION_LOCK` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`. |
+| `/ARM/STATE/HOMING` … `/ARM/STATE/ZENITH` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`, `ZENITH`. |
 | `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is motor-locked. |
 | `/ARM/STATE/HOMING_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is being homed. |
-| `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing. |
+| `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing, `4` zenith. |
 | `/ARM/STATE/POSE` | `custom_interfaces/Pose` | Measured end-effector pose (metres/radians). |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Readiness plus the latest command/runtime rejection code. |
 
@@ -635,10 +633,13 @@ No topics yet; it only constructs and spins.
 `rover_simulation/arm_sim_node` replaces `arm_hardware_node`: it subscribes
 to the same `/ARM/JOINT/TARGET_*`, `/ARM/JOINT/TARGET_SOLENOID`,
 `/ARM/STATE/ENABLED`, and `/ESTOP` topics and publishes
-`/ARM/JOINT/CURRENT_*`. Internally it sends the six-joint position command to
-the Gazebo `arm_cont` controller and republishes the Gazebo joint states as
-arm feedback. The master, planner, teleop, and basestation topics are
-identical between simulation and hardware.
+`/ARM/JOINT/CURRENT_*`. Internally it works in encoder ticks using the same
+`ARM_MOTOR_PARAMS` calibration, tick limits, and per-motor speed limits as
+`arm_hardware_node`, converts to radians only at the Gazebo/ROS boundary,
+and sends the six-joint position command to the Gazebo `arm_cont`
+controller. It republishes the Gazebo joint states as arm feedback. The
+master, planner, teleop, and basestation topics are identical between
+simulation and hardware.
 
 ## Controller behaviour
 
@@ -653,25 +654,48 @@ identical between simulation and hardware.
   same IK/limit path. It takes priority over teleop while the target stream
   is fresh; the master's stale-target hold stops the chase.
 - **Limit modes:** Pick-and-Place normal and flipped, Planar (base lock),
-  Typing (base limited to +/-90 deg, wrist locks released), and Homing.
-  Restricted octants (3, 5, 7) require Planar.
-- **Actions:** `flip`, `planar`, `pnp_normal`, `typing_mode` /
+  Typing (base limited to +/-90 deg, wrist locks released), Zenith
+  (straight-up test pose), and Homing. Restricted octants (3, 5, 7) require
+  Planar.
+- **Zenith mode:** the `Z` key commands `[any base, 90, 0, 0, 0]` degrees, a
+  straight-up pose suitable for depowering the motors. It releases joint
+  locks while active, ignores teleop, and on the next `Z` press moves to the
+  nearest valid pose on the last Pick-and-Place side before restoring that
+  side and its locks. Other mode commands, homing, and flips are refused
+  until zenith is exited.
+- **Startup mode inference:** on the first measured sync the planner selects
+  the mode that matches the pose instead of assuming normal Pick-and-Place.
+  The straight-up pose selects Zenith; restricted octants (notably top-back)
+  select Planar when the base is inside the planar band; otherwise the
+  Pick-and-Place side whose limits fit is adopted, falling back to the side
+  with the smaller excursion. The inferred mode is published on
+  `/ARM/STATE/OPERATION_MODE` and `/ARM/STATE/ZENITH` so the basestation
+  display matches the arm; `telemetry_uplink_node` mirrors the mode, locks,
+  and flags into `arm_status` as well as `arm_encoders`, so the basestation
+  stored state updates even before every joint angle has arrived.
+- **Actions:** `flip`, `zenith`, `planar`, `pnp_normal`, `typing_mode` /
   `typing_off`, `homing`, `joint_drive`, `guide_orientation`, and joint
-  locks run in the route planner. `typing_mode` is normally sent by
+  locks run in the route planner. `homing` and `home_joint:<n>` are
+  maintained actions: keep the key held, and the planner stops the move when
+  the command stream goes quiet. `typing_mode` is normally sent by
   `arm_typing_node` on the autonomous command surface, not by the operator.
   `gripper_up`, `gripper_down`, and `fire_solenoid` stay in the end effector
   node. The full command list and syntax are documented in the module
   docstrings of `arm_master_node.py` and `arm_route_planner_node.py`.
 - **Slew model:** `SimulatedMechanicalArm` is used on hardware too, so a
-  target never jumps by more than `MAX_ANG_VEL * DT`. The planner owns it
-  because it is the sole writer of the five arm targets.
+  target never jumps by more than each joint's hardware speed times `DT`.
+  Those speeds come from `max_speed` (motor-shaft RPM) divided by the 80:1
+  gearbox, then converted to rad/s and ticks/s with the joint calibration.
+  The planner owns the model because it is the sole writer of the five arm
+  targets.
 - **Watchdogs:** teleop motion stops after `VELOCITY_TIMEOUT_SEC` (0.5 s)
   applied to `/ARM/CMD_VELOCITY` in the planner, and the teleop node zeroes
   an axis whose raw input stopped refreshing for `TELEOP_INPUT_TIMEOUT_SEC`
   (0.5 s). A gripper jog stops after `GRIPPER_JOG_TIMEOUT_SEC` (0.25 s)
-  without a new arrow command. The master treats the planner as
-  unavailable after `PLANNER_TIMEOUT_SEC` (5 s) without status and reports
-  `ARM_ERROR_REJECTED`. The planner runs path searches inside its command
+  without a new arrow command, and homing stops after
+  `HOMING_HOLD_TIMEOUT_SEC` (0.25 s) without a fresh home command. The master
+  treats the planner as unavailable after `PLANNER_TIMEOUT_SEC` (5 s) without
+  status and reports `ARM_ERROR_REJECTED`. The planner runs path searches inside its command
   callback, so a long homing or flip plan can delay status; the 5 s watchdog
   covers that gap. An autonomous pose target stops after
   `AUTONOMOUS_POSE_TIMEOUT_SEC` (0.5 s) without a refresh, and
@@ -708,12 +732,35 @@ submodule on `sys.path` for `rover_protocol.arm_errors`.
 
 `arm_constants.py` holds `ARM_MOTOR_IDX` (base, shoulder, elbow, bend
 wrist, twist wrist, gripper) and `ARM_MOTOR_PARAMS`, the per-motor
-`ticks_per_rad`, `tick_offset`, tick limits, and `max_speed`.
+`ticks_per_rad`, `tick_offset`, tick limits, and `max_speed`.  `max_speed`
+is the drive profile velocity on the motor shaft in RPM; `max_output_rad_s`
+and `max_ticks_per_s` divide by the 80:1 gearbox and convert through the
+joint calibration.  `ARM_MOTOR_MAX_ANG_VEL` is the resulting per-joint speed
+list used by the planner and simulation.
+
+The base and elbow joints use Tinsmith M4230-series integrated robotic joint
+actuators: 32768 encoder counts per motor revolution through an 80:1 gearbox.
+`TINSMITH_M4230_TICKS_PER_RAD` derives the resulting scale of about 417215
+ticks per output radian, and both joints use it with the sign of their tick
+direction. The shoulder uses a different actuator and keeps its own measured
+calibration. Offsets and tick limits stay per-joint measurements and still
+need hardware verification.
 
 `open_can_handler.py` is joint agnostic and handles only the three
-OpenCAN motors (base, shoulder, elbow): it packs and decodes
-`ENABLE` / `SET_SPEED` / `SEND` / `READ` frames, converts ticks using the
-calibration entry it is given, and has no wrist or gripper knowledge.
+OpenCAN motors (base, shoulder, elbow): it packs and decodes single-frame
+CANopen SDO transfers. The standard CiA 402 objects are controlword
+`0x6040`, target position `0x607A`, profile velocity `0x6081`, target
+velocity `0x60FF`, position `0x6064`, velocity `0x606C`, torque `0x6077`,
+current `0x6078`, DC-link voltage `0x6079`, statusword `0x6041`, and error
+code `0x603F`. It converts ticks using the calibration entry it is given,
+can request diagnostic values (velocity, torque, voltage, status) and can
+read vendor-specific objects through `request_object()` / `decode_raw()`.
+Position writes reject non-finite targets and anything at or beyond one full
+revolution. The named read helpers default to all three OpenCAN motors and
+accept an optional `motor_idx` to poll just one. The public API is split into
+named commands, `request()` / `request_all()` for reads, and matching
+`decode()` / typed decoders; the low-level SDO frame packing stays private.
+It has no wrist or gripper knowledge.
 
 `arm_hardware_node.py` is the CAN transport and owns the standard-CAN
 joints directly: it creates the outgoing publishers, exposes

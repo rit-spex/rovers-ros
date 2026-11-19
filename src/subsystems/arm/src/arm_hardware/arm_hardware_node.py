@@ -263,6 +263,16 @@ class ArmHardwareNode(Node):
             self.publish_can(can_message)
         self.get_logger().debug("Solenoid strike frame sent")
 
+    def __forget_targets(self):
+        """Drop cached targets so a re-enable cannot resume stale motion.
+
+        The cache exists only to suppress duplicate frames.  After an
+        E-stop or a disable there is no current target any more, so the next
+        target the planner publishes must be sent even when it matches the
+        value that was in flight before the stop.
+        """
+        self.__motors_target_angles = [float("nan")] * len(ARM_MOTOR_IDX)
+
     def __send_motor_command(
         self, motor_idx: ARM_MOTOR_IDX, target_angle: float
     ):
@@ -315,6 +325,9 @@ class ArmHardwareNode(Node):
         self.__estop = True
         self.get_logger().info("E-STOP latched: disabling arm motors")
         self.arm_enabled = False
+        # Forget the in-flight targets: a re-enable must not inherit motion
+        # that was interrupted by the stop.
+        self.__forget_targets()
 
         # Turn off the arm immediately by sending disable messages to all the
         # OpenCAN motors.
@@ -335,6 +348,7 @@ class ArmHardwareNode(Node):
             if not self.arm_enabled:
                 return
             self.arm_enabled = False
+            self.__forget_targets()
             self.get_logger().info("Arm disabled")
             self.__open_can.set_enabled(False)
             return

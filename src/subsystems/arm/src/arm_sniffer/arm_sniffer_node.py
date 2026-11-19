@@ -6,8 +6,8 @@ Run it explicitly with::
 
     ros2 run arm arm_sniffer_node
 
-Every second it prints the measured and commanded joint angles plus the
-controller state, spread over multiple lines with blank separators.
+Every second it prints one compact snapshot: an aligned status/flags block
+and a joint table.
 """
 
 import math
@@ -48,7 +48,8 @@ def format_mask(mask: int | None, names: tuple[str, ...]) -> str:
     """Expand a joint bitmask into a comma-separated list of names."""
     if mask is None:
         return "waiting"
-    selected = [name for index, name in enumerate(names) if mask & (1 << index)]
+    selected = [
+        name for index, name in enumerate(names) if mask & (1 << index)]
     return ", ".join(selected) if selected else "none"
 
 
@@ -178,23 +179,35 @@ class ArmSnifferNode(Node):
     # ------------------------------------------------------------------
 
     def __print_report(self):
-        """Print one multi-line snapshot of the arm debug state."""
-        lines = [
-            "",
-            "=================== ARM SNIFFER ===================",
-            "",
-            f"  enabled   : {self.__format_bool(self.__arm_enabled)}",
-            f"  e-stop    : {self.__format_bool(self.__estop)}",
-            f"  control   : {self.__format_control_source()}",
-            f"  mode      : {self.__format_mode()}",
-            "",
-            f"  flags     : {self.__format_flags()}",
-            f"  locked    : {format_mask(self.__locked_joints, ARM_JOINT_NAMES)}",
-            f"  homing    : {format_mask(self.__homing_joints, ARM_JOINT_NAMES)}",
-            "",
-            "  joint            current [deg]   target [deg]   delta [deg]",
-            "  --------------   -------------   ------------   -----------",
+        """Print one column-aligned snapshot of the arm debug state."""
+        left_rows = [
+            ("enabled", self.__format_bool(self.__arm_enabled)),
+            ("e-stop", self.__format_bool(self.__estop)),
+            ("control", self.__format_control_source()),
+            ("mode", self.__format_mode()),
         ]
+        right_rows = [
+            ("flags", self.__format_flags()),
+            ("locked", format_mask(self.__locked_joints, ARM_JOINT_NAMES)),
+            ("homing", format_mask(self.__homing_joints, ARM_JOINT_NAMES)),
+            ("error", self.__format_error()),
+        ]
+
+        left_cells = [
+            f"{label:<8}: {value}" for label, value in left_rows]
+        left_width = max(len(cell) for cell in left_cells) + 2
+
+        lines = []
+        for index, (left_cell, (right_label, right_value)) in enumerate(
+                zip(left_cells, right_rows)):
+            prefix = "ARM   " if index == 0 else "      "
+            lines.append(
+                f"{prefix}{left_cell:<{left_width}}"
+                f"{right_label:<7}: {right_value}")
+
+        lines.append(
+            f"      {'joint':<12} {'cur(deg)':>8} "
+            f"{'tgt(deg)':>8} {'dlt(deg)':>8}")
 
         for index, joint in enumerate(ARM_JOINTS):
             current = self.__current[index]
@@ -205,17 +218,9 @@ class ArmSnifferNode(Node):
                 else None
             )
             lines.append(
-                f"  {joint:<14}   {format_angle(current):>13}   "
-                f"{format_angle(target):>12}   {format_angle(delta):>11}"
+                f"      {joint:<12} {format_angle(current):>8} "
+                f"{format_angle(target):>8} {format_angle(delta):>8}"
             )
-
-        lines.extend([
-            "",
-            f"  error     : {self.__format_error()}",
-            "",
-            "===================================================",
-            "",
-        ])
 
         self.get_logger().info("\n".join(lines))
 
