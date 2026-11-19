@@ -77,12 +77,16 @@ class Xbee(Node):
 
         try:
             message_bytes = bytes(msg.data)
-            self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
+            # Prefer the non-blocking send path. Telemetry shares the radio
+            # with control input, and blocking send_data() waits for the
+            # transmit status, which starves the node and delays commands.
+            send_async = getattr(self.__xbee_device, "send_data_async", None)
+            if send_async is not None:
+                send_async(self.__remote_xbee, message_bytes)
+            else:
+                self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
             self.get_logger().debug(f"sent data, {msg.data}")
 
-        except ValueError as e:
-            self.get_logger().error(f"value error {e}")
-            raise
         except Exception as e:
             self.get_logger().error(f"failed to send data: {e}")
             return

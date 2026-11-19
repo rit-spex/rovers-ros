@@ -64,6 +64,11 @@ class TelemetryUplink(Node):
         self._transmitter = self.create_publisher(
             UInt8MultiArray, "/XBEE/MESSAGES/TX", 10
         )
+        # Only send packets whose payload changed, plus a full refresh once
+        # per second. Telemetry shares a half-duplex XBee link with control
+        # input, so the timer runs at 20 Hz but unchanged packets are skipped.
+        self._last_sent: Dict[int, bytes] = {}
+        self._uplink_tick = 0
 
         # Latest value snapshots for each protocol packet
         self._life_detection = {
@@ -130,7 +135,7 @@ class TelemetryUplink(Node):
         self._arm_pose_seen = False
 
         self._register_subscriptions()
-        self.create_timer(0.1, self._publish_uplink_packets)
+        self.create_timer(0.05, self._publish_uplink_packets)
 
     # ------------------------------------------------------------------
     # Subscriptions
@@ -265,23 +270,37 @@ class TelemetryUplink(Node):
     # ------------------------------------------------------------------
 
     def _publish_uplink_packets(self) -> None:
+        self._uplink_tick += 1
+        refresh = self._uplink_tick % 20 == 0
+        # The measured drive/IMU sample keeps the link fresh at 20 Hz.
+        # The larger arm packets are capped at 10 Hz and sent only when
+        # changed; all other state packets are change-driven with a 1 Hz
+        # full refresh.
+        arm_tick = self._uplink_tick % 2 == 0
         try:
-            self._send(self._life_detection, CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID)
-            self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID)
-            if all(self._arm_angles_seen.values()):
-                self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
-            if self._arm_pose_seen:
-                self._send(self._arm_pose, CONSTANTS.COMPACT_MESSAGES.ARM_POSE_ID)
-            self._send(self._drive_imu, CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID)
-            self._send(self._rover_estop, CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID)
-            self._send(self._subsystem_enabled, CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID)
-            self._send(self._control_mode, CONSTANTS.COMPACT_MESSAGES.CONTROL_MODE_ID)
+            self._send(self._life_detection, CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID, refresh)
+            self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID, refresh)
+            if arm_tick and all(self._arm_angles_seen.values()):
+                self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID, refresh)
+            if arm_tick and self._arm_pose_seen:
+                self._send(self._arm_pose, CONSTANTS.COMPACT_MESSAGES.ARM_POSE_ID, refresh)
+            self._send(self._drive_imu, CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID, True)
+            self._send(self._rover_estop, CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID, refresh)
+            self._send(
+                self._subsystem_enabled,
+                CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID,
+                refresh,
+            )
+            self._send(self._control_mode, CONSTANTS.COMPACT_MESSAGES.CONTROL_MODE_ID, refresh)
         except Exception as exc:
             if rclpy.ok():
                 self.get_logger().error(f"Failed to publish telemetry uplink packets: {exc}")
 
-    def _send(self, payload: Dict, message_id: int) -> None:
+    def _send(self, payload: Dict, message_id: int, force: bool = False) -> None:
         encoded = self._encoder.encode_data(payload, message_id)
+        if not force and self._last_sent.get(message_id) == encoded:
+            return
+        self._last_sent[message_id] = encoded
         if self._protocol_trace:
             message_name = self._encoder.get_message_name(message_id)
             self.get_logger().info(
@@ -294,7 +313,6 @@ class TelemetryUplink(Node):
 
     def destroy_node(self) -> bool:
         return super().destroy_node()
-
 
 
 def main():
