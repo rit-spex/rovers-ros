@@ -29,14 +29,15 @@ class Xbee(Node):
         self.__port = "/dev/ttyUSB0"
         self.__baud_rate = 230400
         self.__xbee_device = XBeeDevice(self.__port, self.__baud_rate)
-        self.__remote_xbee = None
-        self.__shutting_down = False
-        # Keep this interface identical to xbee_udp: /XBEE/MESSAGES/RX is
-        # the transport contract shared by the real and simulated links.
         self.__publisher = self.create_publisher(
-            UInt8MultiArray, "/XBEE/MESSAGES/RX",
+            UInt8MultiArray, "/XBEE/MESSAGES",
             QoSProfile(depth=10,
                        reliability=ReliabilityPolicy.BEST_EFFORT))
+        self.__remote_xbee = None
+        self.__shutting_down = False
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES/RX", 10
+        )
         self.create_subscription(
             UInt8MultiArray, "/XBEE/MESSAGES/TX", self.send_msg, 10
         )
@@ -77,16 +78,12 @@ class Xbee(Node):
 
         try:
             message_bytes = bytes(msg.data)
-            # Prefer the non-blocking send path. Telemetry shares the radio
-            # with control input, and blocking send_data() waits for the
-            # transmit status, which starves the node and delays commands.
-            send_async = getattr(self.__xbee_device, "send_data_async", None)
-            if send_async is not None:
-                send_async(self.__remote_xbee, message_bytes)
-            else:
-                self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
+            self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
             self.get_logger().debug(f"sent data, {msg.data}")
 
+        except ValueError as e:
+            self.get_logger().error(f"value error {e}")
+            raise
         except Exception as e:
             self.get_logger().error(f"failed to send data: {e}")
             return

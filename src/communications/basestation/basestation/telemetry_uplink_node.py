@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import socket
 import sys
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from custom_interfaces.msg import Pose
-from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt8MultiArray, UInt16, UInt32
+from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
 
 
 def _ensure_local_package_path() -> None:
@@ -58,17 +59,11 @@ class TelemetryUplink(Node):
         )
 
         self._encoder = MessageEncoder()
-        # Telemetry goes through the same XBee transport abstraction as the
-        # incoming path: the real transport sends it over the radio, and
-        # xbee_udp forwards it to the simulation basestation.
-        self._transmitter = self.create_publisher(
-            UInt8MultiArray, "/XBEE/MESSAGES/TX", 10
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._target = (
+            CONSTANTS.COMMUNICATION.UDP_HOST,
+            CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT,
         )
-        # Only send packets whose payload changed, plus a full refresh once
-        # per second. Telemetry shares a half-duplex XBee link with control
-        # input, so the timer runs at 20 Hz but unchanged packets are skipped.
-        self._last_sent: Dict[int, bytes] = {}
-        self._uplink_tick = 0
 
         # Latest value snapshots for each protocol packet
         self._life_detection = {
@@ -135,7 +130,7 @@ class TelemetryUplink(Node):
         self._arm_pose_seen = False
 
         self._register_subscriptions()
-        self.create_timer(0.05, self._publish_uplink_packets)
+        self.create_timer(0.1, self._publish_uplink_packets)
 
     # ------------------------------------------------------------------
     # Subscriptions
@@ -270,87 +265,38 @@ class TelemetryUplink(Node):
     # ------------------------------------------------------------------
 
     def _publish_uplink_packets(self) -> None:
-        self._uplink_tick += 1
-        refresh = self._uplink_tick % 20 == 0
-        arm_tick = self._uplink_tick % 2 == 0
-
-        # Send at most one frame per tick. The XBee is half-duplex and the
-        # basestation's control packets share the link, so a burst of
-        # telemetry is what delays drive commands. Drive/IMU is the
-        # fallback every tick, which keeps the link at 20 Hz; changed arm
-        # or status frames take that tick instead.
         try:
-            candidates = [
-                (self._rover_estop,
-                 CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID, refresh),
-                (self._life_detection,
-                 CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID, refresh),
-                (self._arm_status,
-                 CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID, refresh),
-                (self._subsystem_enabled,
-                 CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID, refresh),
-                (self._control_mode,
-                 CONSTANTS.COMPACT_MESSAGES.CONTROL_MODE_ID, refresh),
-            ]
-            if arm_tick:
-                arm_frames = []
-                if all(self._arm_angles_seen.values()):
-                    arm_frames.append((
-                        self._arm_encoders,
-                        CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID,
-                        refresh,
-                    ))
-                if self._arm_pose_seen:
-                    arm_frames.append((
-                        self._arm_pose,
-                        CONSTANTS.COMPACT_MESSAGES.ARM_POSE_ID,
-                        refresh,
-                    ))
-                # Rotate the arm frames so a continuously changing
-                # encoders packet cannot starve the pose packet.
-                if arm_frames:
-                    offset = (self._uplink_tick // 2) % len(arm_frames)
-                    candidates.extend(
-                        arm_frames[offset:] + arm_frames[:offset])
-
-            for payload, message_id, force in candidates:
-                if self._publish_if_due(payload, message_id, force):
-                    return
-
-            # Nothing else changed: keep the link fresh for the basestation.
-            self._publish_if_due(
-                self._drive_imu,
-                CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID,
-                True,
-            )
+            self._send(self._life_detection, CONSTANTS.COMPACT_MESSAGES.LIFE_DETECTION_ID)
+            self._send(self._arm_status, CONSTANTS.COMPACT_MESSAGES.ARM_STATUS_ID)
+            if all(self._arm_angles_seen.values()):
+                self._send(self._arm_encoders, CONSTANTS.COMPACT_MESSAGES.ARM_ENCODERS_ID)
+            if self._arm_pose_seen:
+                self._send(self._arm_pose, CONSTANTS.COMPACT_MESSAGES.ARM_POSE_ID)
+            self._send(self._drive_imu, CONSTANTS.COMPACT_MESSAGES.DRIVE_IMU_ID)
+            self._send(self._rover_estop, CONSTANTS.COMPACT_MESSAGES.ROVER_ESTOP_ID)
+            self._send(self._subsystem_enabled, CONSTANTS.COMPACT_MESSAGES.SUBSYSTEM_ENABLED_ID)
+            self._send(self._control_mode, CONSTANTS.COMPACT_MESSAGES.CONTROL_MODE_ID)
         except Exception as exc:
             if rclpy.ok():
                 self.get_logger().error(f"Failed to publish telemetry uplink packets: {exc}")
 
-    def _publish_if_due(
-        self,
-        payload: Dict,
-        message_id: int,
-        force: bool = False,
-    ) -> bool:
-        """Publish one frame if it changed or a refresh is due."""
+    def _send(self, payload: Dict, message_id: int) -> None:
         encoded = self._encoder.encode_data(payload, message_id)
-        if not force and self._last_sent.get(message_id) == encoded:
-            return False
-        self._last_sent[message_id] = encoded
         if self._protocol_trace:
             message_name = self._encoder.get_message_name(message_id)
             self.get_logger().info(
                 "[protocol tx] id=0x%02X name=%s payload=%s bytes=%s"
                 % (message_id, message_name, payload, encoded.hex(" "))
             )
-        message = UInt8MultiArray()
-        message.data = list(encoded)
-        self._transmitter.publish(message)
-        return True
+        self._socket.sendto(encoded, self._target)
 
     def destroy_node(self) -> bool:
+        try:
+            self._socket.close()
+        except OSError:
+            pass
         return super().destroy_node()
+
 
 
 def main():

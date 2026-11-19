@@ -197,14 +197,14 @@ Bool(data=True)
 ```
 
 Custom messages live in `src/custom_interfaces/msg/`. For example,
-`ArmCommand` is used for operator actions and `Velocity` for teleop
+`ArmCommand` is used for operator actions and `ArmVelocity` for teleop
 velocity. Import them like any other message:
 
 ```python
-from custom_interfaces.msg import ArmCommand, Velocity
+from custom_interfaces.msg import ArmCommand, ArmVelocity
 
 command = ArmCommand(command="home")
-velocity = Velocity()
+velocity = ArmVelocity()
 velocity.linear_x = 0.1
 ```
 
