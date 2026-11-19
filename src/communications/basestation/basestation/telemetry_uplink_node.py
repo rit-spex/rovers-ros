@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import socket
 import sys
 import os
 from pathlib import Path
@@ -13,7 +12,15 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from custom_interfaces.msg import Pose
-from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
+from std_msgs.msg import (
+    Bool,
+    Float32,
+    Int16,
+    UInt8,
+    UInt16,
+    UInt32,
+    UInt8MultiArray,
+)
 
 
 def _ensure_local_package_path() -> None:
@@ -46,7 +53,12 @@ METERS_PER_INCH = 0.0254
 
 
 class TelemetryUplink(Node):
-    """Collect rover-side telemetry topics and uplink compact protocol packets."""
+    """Collect rover telemetry and publish encoded packets for the XBee link.
+
+    Packets go out on ``/XBEE/MESSAGES/TX``.  ``xbee_node`` (real rover) and
+    ``xbee_udp_node`` (simulation) own the actual radio/socket transport, so
+    the telemetry path stays the same in both deployments.
+    """
 
     def __init__(self):
         super().__init__("telemetry_uplink")
@@ -60,11 +72,8 @@ class TelemetryUplink(Node):
         )
 
         self._encoder = MessageEncoder()
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._target = (
-            CONSTANTS.COMMUNICATION.UDP_HOST,
-            CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT,
-        )
+        self.__publisher = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES/TX", 10)
 
         # Latest value snapshots for each protocol packet
         self._life_detection = {
@@ -307,15 +316,7 @@ class TelemetryUplink(Node):
                 "[protocol tx] id=0x%02X name=%s payload=%s bytes=%s"
                 % (message_id, message_name, payload, encoded.hex(" "))
             )
-        self._socket.sendto(encoded, self._target)
-
-    def destroy_node(self) -> bool:
-        try:
-            self._socket.close()
-        except OSError:
-            pass
-        return super().destroy_node()
-
+        self.__publisher.publish(UInt8MultiArray(data=list(encoded)))
 
 
 def main():

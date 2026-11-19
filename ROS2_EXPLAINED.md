@@ -26,6 +26,7 @@ A robot stack is therefore a graph:
 
   chassis_node ──CAN/TX/CHASSIS/Drive_Power──► can_comms_node ──CAN──► Teensy
   Teensy ──CAN──► can_comms_node ──CAN/RX/*──► master / telemetry ──► telemetry_uplink
+  telemetry_uplink ──/XBEE/MESSAGES/TX──► xbee_node / xbee_udp ──► basestation
 ```
 
 - **Transports** move bytes: `xbee_node` handles the radio, `can_comms_node`

@@ -71,15 +71,16 @@ The basestation sends controller data over XBee radio as compact bit-packed
 bytes. The `basestation_node` decodes them using `MessageEncoder` from the
 shared protocol and publishes the values as ROS topics. The
 `telemetry_uplink_node` collects rover telemetry from ROS topics, encodes
-them using the same protocol, and sends them back to the basestation over
-UDP.
+them using the same protocol, and publishes the packets on
+`/XBEE/MESSAGES/TX`; `xbee_node` (real rover) or `xbee_udp_node`
+(simulation) owns the radio or socket transport and sends them.
 
 ```
                         XBee Radio
   ┌───────────────┐   ───────────────> ┌─────────────────┐
   │ BASESTATION   │   controller data  │  ROVER (ROS 2)  │
   │ (Raspberry Pi)│  <───────────────  │  (this repo)    │
-  │               │   telemetry (UDP)  │                 │
+  │               │  telemetry (XBee)  │                 │
   └───────────────┘                    └─────────────────┘
 ```
 
@@ -88,7 +89,7 @@ UDP.
 | Node | File | Purpose |
 |------|------|---------|
 | `basestation_node` | `src/communications/basestation/basestation/basestation_node.py` | Decodes XBee messages → ROS topics |
-| `telemetry_uplink_node` | `src/communications/basestation/basestation/telemetry_uplink_node.py` | Encodes rover telemetry and sends it to the basestation via UDP |
+| `telemetry_uplink_node` | `src/communications/basestation/basestation/telemetry_uplink_node.py` | Encodes rover telemetry and publishes it on `/XBEE/MESSAGES/TX` for the XBee transport |
 
 
 
