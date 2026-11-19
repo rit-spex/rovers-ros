@@ -30,7 +30,7 @@ class xbee_udp(Node):
 
         self.__address = CONSTANTS.COMMUNICATION.UDP_HOST
         self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
-        self.__basestation_port = CONSTANTS.COMMUNICATION.UDP_BASESTATION_PORT
+        self.__basestation_port = CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
         self.__publisher = self.create_publisher(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import socket
 import sys
 import os
 from pathlib import Path
@@ -13,7 +12,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from custom_interfaces.msg import Pose
-from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt16, UInt32
+from std_msgs.msg import Bool, Float32, Int16, UInt8, UInt8MultiArray, UInt16, UInt32
 
 
 def _ensure_local_package_path() -> None:
@@ -59,10 +58,8 @@ class TelemetryUplink(Node):
         )
 
         self._encoder = MessageEncoder()
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._target = (
-            CONSTANTS.COMMUNICATION.UDP_HOST,
-            CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT,
+        self._transmitter = self.create_publisher(
+            UInt8MultiArray, "/XBEE/MESSAGES/TX", 10
         )
 
         # Latest value snapshots for each protocol packet
@@ -288,13 +285,11 @@ class TelemetryUplink(Node):
                 "[protocol tx] id=0x%02X name=%s payload=%s bytes=%s"
                 % (message_id, message_name, payload, encoded.hex(" "))
             )
-        self._socket.sendto(encoded, self._target)
+        message = UInt8MultiArray()
+        message.data = list(encoded)
+        self._transmitter.publish(message)
 
     def destroy_node(self) -> bool:
-        try:
-            self._socket.close()
-        except OSError:
-            pass
         return super().destroy_node()
 
 
