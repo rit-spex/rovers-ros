@@ -359,8 +359,14 @@ class RoverArmController:
 
     def settle_side(self):
         """Update the flipped flag from the achieved pose, if possible."""
-        if (not self.initialized or self.planar or self.typing
+        if (not self.initialized or self.typing
                 or self.zenith or self.resting):
+            return
+        if self.planar:
+            # Planar's valid octants are disjoint per side, so use the
+            # octant rather than the P&P joint limits, which can both
+            # reject a planar flip destination.
+            self.flipped = self._ee_octant() in OCTANT_PLANAR_FLIPPED_ALLOWED
             return
         if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
             self.flipped = True

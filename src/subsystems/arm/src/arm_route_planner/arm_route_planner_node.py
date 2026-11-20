@@ -103,6 +103,12 @@ from rover_protocol.arm_errors import (
 # Every arm flag topic is planner state now that GRIPPER_DRIVE is gone.
 PLANNER_FLAG_NAMES = ARM_FLAG_NAMES
 
+# Startup inference handoff: the action driver may still be starting when the
+# planner infers a zenith/resting boot pose, so re-send the adopt command
+# until it takes ownership.
+INFER_RETRY_SEC = 0.5
+INFER_RETRY_WINDOW_SEC = 8.0
+
 JOINT_INDEX = {
     "base": 0,
     "shoulder": 1,
@@ -152,6 +158,8 @@ class ArmRoutePlannerNode(Node):
         self.__current_active = ACTION_ACTIVE_IDLE
         self.__action_pending = ACTION_ACTIVE_IDLE
         self.__action_pending_at = 0.0
+        self.__action_pending_until = 0.0
+        self.__action_pending_command: str | None = None
         self.__action_saved_locks: list[bool] | None = None
         self.__driver_status: ArmActionStatus | None = None
 
@@ -278,6 +286,7 @@ class ArmRoutePlannerNode(Node):
             # The driver has taken ownership; the boot-inference request is
             # no longer pending.
             self.__action_pending = ACTION_ACTIVE_IDLE
+            self.__action_pending_command = None
 
     def __on_action_status_received(self, msg: ArmActionStatus):
         """Latch the latest action-driver status (homing mask, diagnostics)."""
@@ -438,9 +447,12 @@ class ArmRoutePlannerNode(Node):
             value = self.__action_active
         if value == ACTION_ACTIVE_IDLE \
                 and self.__action_pending != ACTION_ACTIVE_IDLE:
-            if now - self.__action_pending_at <= 2.0:
+            if now <= self.__action_pending_until:
                 return self.__action_pending
+            self.get_logger().warning(
+                "Action driver did not adopt the inferred startup pose")
             self.__action_pending = ACTION_ACTIVE_IDLE
+            self.__action_pending_command = None
         return value
 
     def __mirror_action_state(self, active):
@@ -491,7 +503,13 @@ class ArmRoutePlannerNode(Node):
                 False] * len(self.__arm.locked_joints)
 
     def __request_inferred_action(self, mode):
-        """Ask the action driver to adopt the startup pose."""
+        """Ask the action driver to adopt the startup pose.
+
+        The command is a single-shot topic publish, so it can be dropped
+        when the driver is still starting up and has not matched yet.
+        ``__retry_inferred_action`` re-sends it until the driver reports
+        ownership (or the retry window expires).
+        """
         if mode == "ZENITH":
             self.__action_pending = ACTION_ACTIVE_ZENITH
             command = "adopt:zenith"
@@ -500,9 +518,29 @@ class ArmRoutePlannerNode(Node):
             command = "adopt:resting"
         else:
             return
-        self.__action_pending_at = time.monotonic()
+        now = time.monotonic()
+        self.__action_pending_at = now
+        self.__action_pending_until = now + INFER_RETRY_WINDOW_SEC
+        self.__action_pending_command = command
         self.__action_command_publisher.publish(
             ArmCommand(command=command))
+
+    def __retry_inferred_action(self):
+        """Re-send the startup inference command until the driver takes it."""
+        if self.__action_pending == ACTION_ACTIVE_IDLE \
+                or self.__action_pending_command is None:
+            return
+        now = time.monotonic()
+        if now > self.__action_pending_until:
+            return
+        if now - self.__action_pending_at < INFER_RETRY_SEC:
+            return
+        self.__action_pending_at = now
+        self.__action_command_publisher.publish(
+            ArmCommand(command=self.__action_pending_command))
+        self.get_logger().debug(
+            f"Re-sent startup inference command "
+            f"{self.__action_pending_command}")
 
     # ------------------------------------------------------------------
     # Control cycle
@@ -644,6 +682,7 @@ class ArmRoutePlannerNode(Node):
         # Action-driver ownership.  While the driver reports an action the
         # planner neither steps the controller nor publishes targets; it
         # only mirrors the mode flags and keeps telemetry flowing.
+        self.__retry_inferred_action()
         active = self.__action_value()
         self.__current_active = active
         self.__regions.update(self.__measured)
@@ -655,10 +694,14 @@ class ArmRoutePlannerNode(Node):
             self.__publish_status()
             return
         if self.__action_prev != ACTION_ACTIVE_IDLE:
-            # Falling edge: adopt the measured pose before resuming so the
-            # arm never jumps back to its pre-action targets.
-            self.__arm.hold()
+            # Falling edge: adopt the achieved pose before resuming so the
+            # arm never jumps back to its pre-action targets.  Sync first:
+            # settle_side()/hold() read the controller's angles, which are
+            # only refreshed here (the planner does not step the controller
+            # while an action owns the arm).
+            self.__arm.sync_angles(list(self.__measured), reset_target=False)
             self.__arm.settle_side()
+            self.__arm.hold()
             self.__last_targets = None
         self.__action_prev = ACTION_ACTIVE_IDLE
 

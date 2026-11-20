@@ -6,6 +6,22 @@ resting collapse/restore sequence.  It consumes the measured joint angles and
 publishes the five joint targets only while an action is active; the planner
 suppresses its own targets while ``/ARM/ACTION/ACTIVE`` is nonzero.
 
+All motion behaviour lives here.  Each action is an ``ActionConfiguration``
+parameter block (``arm_action_driver/actions/*.py``) that tells the node how
+to move: target pose, cruise speed, limits, tolerances, and the
+hold/pause/resume/toggle/adopt flags.  Two engines turn those parameters
+into motion:
+
+- the generic waypoint engine (``_begin_move`` / ``_step_move``) drives
+  homing, flips, and the zenith hold/exit through the shared ramp;
+- the resting engine (``_step_resting``) drives the collapse/restore
+  state machine (``RestingController``) with its torque events and the
+  homing handoff.
+
+Adding an action means adding a parameter block and appending it to the
+registry (``arm_action_driver/actions/__init__.py``); this file is not
+touched.
+
 Design details and the behaviour rules live in
 ``planz/ACTION_DRIVER_PLAN.md``.  The planner keeps modes, joint locks, and
 limit selection; this node owns motion, the action state machine, and the
@@ -39,19 +55,13 @@ from std_msgs.msg import Bool, Float32, Int8, UInt8
 
 from arm_constants import (
     ACTION_ACCEL_RAD_S2,
-    ACTION_ACTIVE_FLIPPING,
-    ACTION_ACTIVE_HOMING,
     ACTION_ACTIVE_IDLE,
     ACTION_ACTIVE_RESTING,
     ACTION_ACTIVE_TOPIC,
     ACTION_ACTIVE_ZENITH,
     ACTION_COMMAND_TOPIC,
     ACTION_DECEL_RAD_S2,
-    ACTION_FLIP_CRUISE_RAD_S,
-    ACTION_HOMING_CRUISE_RAD_S,
     ACTION_STATUS_TOPIC,
-    ACTION_ZENITH_CRUISE_RAD_S,
-    ACTION_ZENITH_EXIT_CRUISE_RAD_S,
     ARM_ENABLED_TOPIC,
     ARM_JOINT_NAMES,
     ARM_RESTING_TOPIC,
@@ -61,27 +71,22 @@ from arm_constants import (
     DT,
     ELBOW_DEADBAND,
     ESTOP_TOPIC,
-    HOMING_HOLD_TIMEOUT_SEC,
-    HOMING_TARGET,
-    HOMING_THRESHOLD,
     JOINT_CURRENT_TOPICS,
     JOINT_TARGET_TOPICS,
-    MECHANICAL_LIMITS,
     OCTANT_DIRECT_FLIP,
     PHASE_FLIP_PAUSING,
     PHASE_FLIP_RUNNING,
     PHASE_ZENITH_EXITING,
-    PHASE_ZENITH_HOLDING,
-    PICK_AND_PLACE_FLIPPED_LIMITS,
-    PICK_AND_PLACE_LIMITS,
-    RESTING_CROUCH_TARGET,
     RESTING_FEEDBACK_TIMEOUT_SEC,
     RESTING_LATCH_REFRESH_SEC,
-    RESTING_MOVE_ANG_VEL,
-    WAYPOINT_TOL,
 )
-from arm_action_driver.actions.resting import RestingController
-from arm_route_planner.kinematics.limiters import RESTING_MODE, _get_octant
+from arm_action_driver.actions import ACTION_CONFIG_CLASSES
+from arm_action_driver.actions.base import JOINT_INDEX, _clamp
+from arm_action_driver.actions.homing import HomingConfiguration
+from arm_action_driver.actions.resting import RestingConfiguration
+from arm_action_driver.actions.zenith import ZenithConfiguration
+from arm_action_driver.stepping import JointRamp
+from arm_route_planner.kinematics.limiters import _get_octant
 from arm_route_planner.kinematics.linkage_models import (
     limit_respecting_diff, wrap2pi,
 )
@@ -91,146 +96,171 @@ from arm_route_planner.kinematics.path_planner import (
 from arm_route_planner.kinematics.regions import (
     is_resting_pose, is_zenith_pose,
 )
-from arm_action_driver.stepping import JointRamp
 from rover_protocol.arm_errors import (
     ARM_ERROR_ESTOP,
     ARM_ERROR_NONE,
     classify_failure,
 )
 
-JOINT_INDEX = {
-    "base": 0,
-    "shoulder": 1,
-    "elbow": 2,
-    "wrist_bend": 3,
-    "wrist_twist": 4,
-}
-
-BASE = 0
-SHOULDER = 1
-ELBOW = 2
-WRIST_BEND = 3
-WRIST_TWIST = 4
-
 MANUAL_MOTION_EPS = 1e-3
-ARRIVE_TOL = 1e-3
+
+# Single cruise speed shared by every action (homing, flip, zenith, resting).
+# The node owns motion, so action parameter blocks do not carry speeds.
+MOVE_SPEED_RAD_S = math.radians(25.0)
+
+# Sentinel returned by the single-joint command parser for invalid input.
+_BAD_INDEX = -1
+
+
+class _MoveState:
+    """Shared waypoint-move state for the generic action engine."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.goal = None        # remembered final goal (flip pause/resume)
+        self.target = None      # final target (deadband + progress)
+        self.path = None        # remaining waypoints
+        self.idx = 0
+        self.mask = None
+        self.total = None       # remaining distance at start (progress)
+        self.command_at = 0.0   # hold-key refresh stamp
+        self.single_index = None  # single-joint index, or None for all
+        self.pausing = False    # release paused the move in place
+        self.exiting = False    # toggle-exit sub-mode (zenith)
+        self.exiting_target = None
 
 
 class ArmActionDriverNode(Node):
-    """Drive the arm's discrete actions and publish their joint targets."""
+    """Drive the arm's discrete actions and publish their joint targets.
+
+    The attributes and methods without a leading underscore form the action
+    API used by the ``ActionConfiguration`` target helpers (see
+    ``arm_action_driver/actions/base.py`` for the contract).
+    """
 
     def __init__(self):
         super().__init__("arm_action_driver_node")
 
         # FK model for octant gates and safe joint-space paths.  No IK
         # solving happens here.
-        self.__model, _ = build_arm_solver_object()
+        self.model, _ = build_arm_solver_object()
 
-        self.__measured = [float("nan")] * len(ARM_JOINT_NAMES)
-        self.__measured_at = [0.0] * len(ARM_JOINT_NAMES)
+        # Measured joint angles and the wall time of each sample.
+        self.measured = [float("nan")] * len(ARM_JOINT_NAMES)
+        self.measured_at = [0.0] * len(ARM_JOINT_NAMES)
 
-        self.__estop = False
-        self.__enabled = False
-        self.__planar = False
-        self.__flipped = False
-        self.__adopted = False
-        self.__pending_adopt = None
-        self.__locked = [False] * len(ARM_JOINT_NAMES)
-        self.__torque_state = False
+        # Mirrored arm state.
+        self.estop = False
+        self.enabled = False
+        self.planar = False
+        self.flipped = False
+        self.locked = [False] * len(ARM_JOINT_NAMES)
+        self.torque_state = False
 
         # Action state.  ``active`` is the published enum; ``phase`` is the
         # per-action substate carried in ArmActionStatus.
-        self.__active = ACTION_ACTIVE_IDLE
-        self.__phase = PHASE_FLIP_RUNNING
+        self.active = ACTION_ACTIVE_IDLE
+        self.phase = PHASE_FLIP_RUNNING
 
-        # Shared stepping profile.
-        self.__ramp = JointRamp(
+        # Shared stepping profile and waypoint-move state.
+        self.ramp = JointRamp(
             len(ARM_JOINT_NAMES), ACTION_ACCEL_RAD_S2,
             ACTION_DECEL_RAD_S2, DT)
+        self._move = _MoveState()
 
-        # Flip state.  A paused flip is IDLE with a remembered goal.
-        self.__flip_goal = None
-        self.__flip_path = None
-        self.__flip_idx = 0
-        self.__flip_move_total = None
-
-        # Homing state.
-        self.__homing_target = None
-        self.__homing_mask = None
-        self.__homing_path = None
-        self.__homing_idx = 0
-        self.__homing_command_at = 0.0
-        self.__restore_after_homing = False
-
-        # Zenith state.
-        self.__zenith_target = None
-        self.__zenith_exit_target = None
-        self.__zenith_side = False
-
-        # Resting state.
-        self.__resting = RestingController()
-        self.__resting_path_phase = None
-        self.__torque_intent = True
-        self.__resting_hold = False
+        # Resting-owned torque intent (the hardware latch level).
+        self.torque_intent = True
+        # Homing handoff from a resting restore.
+        self.restore_after_homing = False
 
         # Manual (SpaceMouse) motion cancels a remembered flip goal.
-        self.__manual_motion = False
+        self._manual_motion = False
+
+        # Startup adoption state.
+        self._adopted = False
+        self._pending_adopt = None
 
         # Error event bookkeeping for ArmActionStatus.
-        self.__error = (ARM_ERROR_NONE, 0)
-        self.__error_seq = 0
+        self._error = (ARM_ERROR_NONE, 0)
+        self._error_seq = 0
 
-        self.__last_targets = None
-        self.__latch_at = 0.0
+        self._last_targets = None
+        self._latch_at = 0.0
 
-        self.__create_interfaces()
-        self.create_timer(DT, self.__update)
+        # Action registry: one parameter block per action.  The node does
+        # not know what any action does beyond these parameters.
+        self._actions = [cls() for cls in ACTION_CONFIG_CLASSES]
+        self._by_active = {
+            config.active_value: config for config in self._actions
+        }
+        self.homing = self._find(HomingConfiguration)
+        self.resting = self._find(RestingConfiguration)
+        self._zenith = self._find(ZenithConfiguration)
+
+        # Resting engine state.
+        self._resting_controller = self.resting.controller_class(
+            crouch=self.resting.crouch_target,
+            move_speed=MOVE_SPEED_RAD_S,
+            push_speed=MOVE_SPEED_RAD_S)
+        self._resting_path_phase = None
+
+        self._create_interfaces()
+        self.create_timer(DT, self._update)
         self.get_logger().info("Arm action driver started")
+
+    def _find(self, cls):
+        for config in self._actions:
+            if isinstance(config, cls):
+                return config
+        raise RuntimeError(f"Action configuration {cls.__name__} "
+                           "is not registered")
 
     # ------------------------------------------------------------------
     # ROS interfaces
     # ------------------------------------------------------------------
 
-    def __create_interfaces(self):
-        self.__target_publishers = {
+    def _create_interfaces(self):
+        self._target_publishers = {
             joint: self.create_publisher(
                 Float32, JOINT_TARGET_TOPICS[joint], 10)
             for joint in ARM_JOINT_NAMES
         }
-        self.__active_publisher = self.create_publisher(
+        self._active_publisher = self.create_publisher(
             Int8, ACTION_ACTIVE_TOPIC, 10)
-        self.__status_publisher = self.create_publisher(
+        self._status_publisher = self.create_publisher(
             ArmActionStatus, ACTION_STATUS_TOPIC, 10)
-        self.__resting_publisher = self.create_publisher(
+        self._resting_publisher = self.create_publisher(
             Bool, ARM_RESTING_TOPIC, 10)
-        self.__torque_publisher = self.create_publisher(
+        self._torque_publisher = self.create_publisher(
             Bool, ARM_TORQUE_ENABLED_TOPIC, 10)
 
         self.create_subscription(
-            ArmCommand, ACTION_COMMAND_TOPIC, self.__on_command, 10)
+            ArmCommand, ACTION_COMMAND_TOPIC, self._on_command, 10)
         self.create_subscription(
             Velocity, "/ARM/MANUAL/CMD_VELOCITY",
-            self.__on_manual_velocity, 10)
+            self._on_manual_velocity, 10)
         self.create_subscription(
-            Bool, ESTOP_TOPIC, self.__on_estop, 10)
+            Bool, ESTOP_TOPIC, self._on_estop, 10)
         self.create_subscription(
-            Bool, ARM_ENABLED_TOPIC, self.__on_enabled, 10)
+            Bool, ARM_ENABLED_TOPIC, self._on_enabled, 10)
         self.create_subscription(
             Bool, ARM_STATE_TOPICS["flags"]["PLANAR"],
-            self.__on_planar, 10)
+            self._on_planar, 10)
         self.create_subscription(
             Bool, ARM_STATE_TOPICS["flags"]["FLIPPED"],
-            self.__on_flipped, 10)
+            self._on_flipped, 10)
         self.create_subscription(
             UInt8, ARM_STATE_TOPICS["locked_joints"],
-            self.__on_locked, 10)
+            self._on_locked, 10)
         self.create_subscription(
-            Bool, ARM_TORQUE_STATE_TOPIC, self.__on_torque_state, 10)
+            Bool, ARM_TORQUE_STATE_TOPIC, self._on_torque_state, 10)
         for joint in ARM_JOINT_NAMES:
             self.create_subscription(
                 Float32,
                 JOINT_CURRENT_TOPICS[joint],
-                self.__on_measured(joint),
+                self._on_measured(joint),
                 10,
             )
 
@@ -238,571 +268,536 @@ class ArmActionDriverNode(Node):
     # Input callbacks
     # ------------------------------------------------------------------
 
-    def __on_measured(self, joint: str):
+    def _on_measured(self, joint: str):
         index = JOINT_INDEX[joint]
 
         def callback(msg: Float32):
-            self.__measured[index] = wrap2pi(msg.data)
-            self.__measured_at[index] = time.monotonic()
+            self.measured[index] = wrap2pi(msg.data)
+            self.measured_at[index] = time.monotonic()
         return callback
 
-    def __on_estop(self, msg: Bool):
-        self.__estop = bool(msg.data)
-        if not self.__estop:
+    def _on_estop(self, msg: Bool):
+        self.estop = bool(msg.data)
+        if not self.estop:
             # Resume from rest instead of jumping back into the old speed.
-            self.__ramp.reset()
+            self.ramp.reset()
 
-    def __on_enabled(self, msg: Bool):
-        self.__enabled = bool(msg.data)
+    def _on_enabled(self, msg: Bool):
+        self.enabled = bool(msg.data)
 
-    def __on_planar(self, msg: Bool):
-        self.__planar = bool(msg.data)
+    def _on_planar(self, msg: Bool):
+        self.planar = bool(msg.data)
 
-    def __on_flipped(self, msg: Bool):
-        self.__flipped = bool(msg.data)
+    def _on_flipped(self, msg: Bool):
+        self.flipped = bool(msg.data)
 
-    def __on_locked(self, msg: UInt8):
-        self.__locked = [bool(msg.data & (1 << i))
-                         for i in range(len(ARM_JOINT_NAMES))]
+    def _on_locked(self, msg: UInt8):
+        self.locked = [bool(msg.data & (1 << i))
+                       for i in range(len(ARM_JOINT_NAMES))]
 
-    def __on_torque_state(self, msg: Bool):
-        self.__torque_state = bool(msg.data)
+    def _on_torque_state(self, msg: Bool):
+        self.torque_state = bool(msg.data)
 
-    def __on_manual_velocity(self, msg: Velocity):
+    def _on_manual_velocity(self, msg: Velocity):
         values = (
             msg.linear_x, msg.linear_y, msg.linear_z,
             msg.angular_x, msg.angular_y, msg.angular_z,
         )
         if any(abs(float(v)) > MANUAL_MOTION_EPS for v in values):
-            self.__manual_motion = True
+            self._manual_motion = True
 
-    def __on_command(self, msg: ArmCommand):
+    def _on_command(self, msg: ArmCommand):
         command = msg.command.strip()
         if not command:
             return
-        self.__handle_command(command)
+        self._handle_command(command)
 
     # ------------------------------------------------------------------
     # Command handling
     # ------------------------------------------------------------------
 
-    def __handle_command(self, command: str):
+    def _handle_command(self, command: str):
         if command == "adopt" or command.startswith("adopt:"):
             mode = command.partition(":")[2] or None
-            if not self.__initialized():
+            if not self._initialized():
                 # The driver may still be compiling its model; apply the
                 # planner's inference as soon as feedback is complete.
-                self.__pending_adopt = mode or "auto"
+                self._pending_adopt = mode or "auto"
                 return
-            self.__adopt_startup_pose(mode)
+            self._adopt_startup_pose(mode)
             return
-        if not self.__initialized():
-            self.__reject(f"Action command '{command}' ignored: "
-                          "arm not initialized")
+        if not self._initialized():
+            self.reject(f"Action command '{command}' ignored: "
+                        "arm not initialized")
             return
-        if self.__estop:
-            self.__emit_error(
+        if self.estop:
+            self.emit_error(
                 ARM_ERROR_ESTOP,
                 reason=f"Action command '{command}' ignored: e-stop active")
             return
 
         if command in ("hold", "stop"):
-            self.__abort_action("Action held by command")
-            return
-        if command == "flip":
-            self.__start_flip()
-            return
-        if command == "flip_release":
-            self.__release_flip()
-            return
-        if command in ("homing", "home"):
-            self.__start_homing()
-            return
-        if command in ("zenith", "zenith_mode", "toggle_zenith"):
-            self.__toggle_zenith()
-            return
-        if command in ("toggle_resting", "rest", "resting"):
-            self.__toggle_resting()
-            return
-        if command.startswith("home_joint:"):
-            try:
-                index = int(command.partition(":")[2])
-            except ValueError:
-                self.__reject(f"Unknown action command '{command}'")
-                return
-            if not 0 <= index < len(ARM_JOINT_NAMES):
-                self.__reject(f"Unknown action command '{command}'")
-                return
-            self.__start_homing(index=index)
+            self._abort_action("Action held by command")
             return
 
-        self.__reject(f"Unknown action command '{command}'")
+        config = self._match_command(command)
+        if config is None:
+            self.reject(f"Unknown action command '{command}'")
+            return
+        if config.is_release(command):
+            self._handle_release(config)
+            return
+        self.trigger_action(config, command)
+
+    def _match_command(self, command: str):
+        for config in self._actions:
+            if config.matches(command):
+                return config
+        return None
+
+    def trigger_action(self, config, command=None):
+        """Start (or re-trigger) one action via the normal gating path."""
+        if config.is_active(self):
+            self._repeat(config, command)
+            return
+        ok, reason = self._can_trigger(config)
+        if not ok:
+            self.reject(reason)
+            return
+        self._begin(config, command)
+
+    def _can_trigger(self, config):
+        if self.active == ACTION_ACTIVE_IDLE:
+            return True, ""
+        if self.active in config.preempts:
+            return True, ""
+        reason = config.blocked_reasons.get(self.active)
+        if reason is not None:
+            return False, reason
+        return False, f"{config.name} blocked: another action is running"
+
+    def _handle_release(self, config):
+        if self.active != config.active_value:
+            # Releasing while idle keeps any remembered goal for the next
+            # press.
+            return
+        if config.stop_on_release:
+            # A resting restore drives homing without a held key; a stray
+            # key-up must not abandon the restore halfway through.
+            if not self.restore_after_homing:
+                self._stop_move(config)
+            return
+        if config.pause_on_release \
+                and not self._move.pausing and not self._move.exiting:
+            self._move.pausing = True
+            self.phase = PHASE_FLIP_PAUSING
+
+    def _repeat(self, config, command=None):
+        """Handle a trigger command while this action is already active."""
+        if config.engine == "resting":
+            self._repeat_resting(config)
+            return
+        if config.toggle_on_repeat:
+            self._begin_exit(config)
+            return
+        if config.restart_on_repeat:
+            self._refresh_move(config, command)
+
+    def _refresh_move(self, config, command=None):
+        """Handle a held-key repeat without restarting the motion.
+
+        The basestation forwards hold-to-run commands on every held state
+        (tens of Hz).  Re-planning and resetting the ramp on each heartbeat
+        would restart the acceleration profile continuously, so homing
+        would crawl.  An identical repeat only refreshes the hold timer;
+        a different joint or lock set still restarts the move.
+        """
+        if not self._move.pausing and not self._move.exiting \
+                and self._move.target is not None:
+            index = self._single_joint_index(config, command)
+            # Latch the target chosen when the move began: a held-key
+            # repeat must not re-evaluate side- or pose-dependent targets
+            # (homing from zenith always returns to the non-flipped home).
+            unchanged = (
+                index == self._move.single_index
+                and (index is not None
+                     or self.unlocked_mask() == self._move.mask))
+            if unchanged:
+                self._move.command_at = time.monotonic()
+                return
+        self._begin(config, command)
 
     # ------------------------------------------------------------------
     # Startup adoption
     # ------------------------------------------------------------------
 
-    def __adopt_startup_pose(self, mode=None):
+    def _adopt_startup_pose(self, mode=None):
         """Adopt an inferred zenith/resting pose.  Runs at most once.
 
         ``mode`` is the planner's inferred mode from ``adopt:<mode>``.  With
         no mode it falls back to classifying the measured pose, but only
         when the planner has not already chosen a normal/planar start.
         """
-        if self.__adopted:
+        if self._adopted:
             return
-        if self.__active != ACTION_ACTIVE_IDLE:
-            self.__adopted = True
+        if self.active != ACTION_ACTIVE_IDLE:
+            self._adopted = True
             return
-        self.__adopted = True
+        self._adopted = True
         if mode == "resting" or (mode is None and is_resting_pose(
-                self.__measured)):
-            self.__resting.begin_collapse()
-            self.__resting.abort("Resting mode inferred from startup pose")
-            self.__torque_intent = False
-            self.__publish_torque(False)
-            self.__resting_hold = True
-            self.__resting_path_phase = None
-            self.__active = ACTION_ACTIVE_RESTING
-            self.__ramp.reset()
-            self.get_logger().info(
-                "Resting inferred from startup pose; torque stays off")
+                self.measured)):
+            self._adopt_resting()
             return
-        if mode == "zenith" or (mode is None and self.__zenith_pose()):
-            self.__zenith_side = self.__flipped
-            self.__zenith_target = [
-                self.__measured[BASE],
-                math.pi / 2,
-                0.0,
-                0.0,
-                self.__measured[WRIST_TWIST],
-            ]
-            self.__zenith_exit_target = None
-            self.__active = ACTION_ACTIVE_ZENITH
-            self.__phase = PHASE_ZENITH_HOLDING
-            self.__ramp.reset()
-            self.get_logger().info("Zenith inferred from startup pose")
-
-    def __zenith_pose(self):
-        return is_zenith_pose(self.__measured)
+        if mode == "zenith" or (mode is None and is_zenith_pose(
+                self.measured)):
+            self._begin(self._zenith, adopted=True)
 
     # ------------------------------------------------------------------
-    # Flip
+    # Generic waypoint engine (homing, flip, zenith)
     # ------------------------------------------------------------------
 
-    def __start_flip(self):
-        if self.__active == ACTION_ACTIVE_FLIPPING:
+    def _begin(self, config, command=None, adopted=False):
+        if config.engine == "resting":
+            self._begin_resting(config)
             return
-        if self.__active != ACTION_ACTIVE_IDLE:
-            self.__reject("Flip blocked: another action is running")
-            return
+        self._begin_move(config, command=command, adopted=adopted)
 
-        start = list(self.__measured)
-        mask = [not locked for locked in self.__locked]
-        resumed = self.__flip_goal is not None
-
-        if not resumed:
-            if not self.__flip_allowed():
-                return
-            goal = self.__side_flip_target(start)
-        else:
-            # Resume keeps the original goal; the path is re-planned from
-            # wherever the arm is now.
-            goal = list(self.__flip_goal)
-
-        goal = [goal[i] if mask[i] else start[i]
-                for i in range(len(goal))]
-
-        if any(self.__locked[:3]):
-            path = [start, goal]
-        else:
-            path = plan_safe_path(self.__model, start, goal)
-        if path is None:
-            self.__reject(
-                "Flip blocked: no safe path through restricted space")
+    def _begin_move(self, config, command=None, adopted=False):
+        index = self._single_joint_index(config, command)
+        if index == _BAD_INDEX:
+            self.reject(f"Unknown action command '{command}'")
             return
 
-        self.__flip_goal = goal
-        self.__flip_path = [list(p) for p in path[1:]] or [goal]
-        self.__flip_idx = 0
-        self.__flip_move_total = self.__max_remaining(self.__flip_path[0])
-        self.__active = ACTION_ACTIVE_FLIPPING
-        self.__phase = PHASE_FLIP_RUNNING
-        self.__ramp.reset()
-        self.get_logger().info(
-            "Flip resumed" if resumed else "Flip started")
-
-    def __flip_allowed(self):
-        octant = self.__octant()
-        if octant is not None and octant not in OCTANT_DIRECT_FLIP:
-            if not self.__planar:
-                self.__reject(
-                    f"Flip blocked: octant {octant} requires planar")
-                return False
-        return True
-
-    def __side_flip_target(self, angles):
-        target = [
-            angles[BASE],
-            math.pi - angles[SHOULDER],
-            -angles[ELBOW],
-            angles[WRIST_BEND],
-            angles[WRIST_TWIST],
-        ]
-        return [max(lo, min(hi, wrap2pi(a)))
-                for a, (lo, hi) in zip(target, MECHANICAL_LIMITS)]
-
-    def __release_flip(self):
-        if self.__active == ACTION_ACTIVE_FLIPPING \
-                and self.__phase == PHASE_FLIP_RUNNING:
-            self.__phase = PHASE_FLIP_PAUSING
-        # Releasing while idle keeps any remembered goal for the next press.
-
-    def __step_flip(self):
-        if self.__phase == PHASE_FLIP_PAUSING:
-            target = self.__flip_path[self.__flip_idx] \
-                if self.__flip_path else self.__measured
-            cmd = self.__ramp_command(
-                target, [0.0] * len(ARM_JOINT_NAMES), MECHANICAL_LIMITS,
-                mask=self.__unlocked_mask())
-            self.__publish_targets(cmd)
-            if self.__ramp.is_stopped():
-                self.__publish_targets(self.__measured)
-                self.__active = ACTION_ACTIVE_IDLE
-                self.__phase = PHASE_FLIP_RUNNING
-                if self.__flip_goal is None:
-                    self.__flip_path = None
-                self.get_logger().info("Flip paused")
-            return
-
-        if not self.__flip_path:
-            self.__finish_flip()
-            return
-
-        target = self.__flip_path[self.__flip_idx]
-        cmd = self.__ramp_command(
-            target, [ACTION_FLIP_CRUISE_RAD_S] * len(ARM_JOINT_NAMES),
-            MECHANICAL_LIMITS, mask=self.__unlocked_mask())
-        self.__publish_targets(cmd)
-
-        mask = self.__unlocked_mask()
-        if all(not mask[i] or abs(wrap2pi(target[i] - self.__measured[i]))
-               <= WAYPOINT_TOL for i in range(len(target))):
-            if self.__flip_idx + 1 < len(self.__flip_path):
-                self.__flip_idx += 1
-                self.__flip_move_total = self.__max_remaining(
-                    self.__flip_path[self.__flip_idx])
-            else:
-                self.__finish_flip()
-
-    def __finish_flip(self):
-        self.__publish_targets(self.__measured)
-        self.__active = ACTION_ACTIVE_IDLE
-        self.__phase = PHASE_FLIP_RUNNING
-        self.__flip_goal = None
-        self.__flip_path = None
-        self.__flip_idx = 0
-        self.get_logger().info("Flip complete")
-
-    # ------------------------------------------------------------------
-    # Homing
-    # ------------------------------------------------------------------
-
-    def __start_homing(self, index=None):
-        if self.__active == ACTION_ACTIVE_FLIPPING:
-            self.__reject("Homing blocked: a flip is running")
-            return
-        if self.__active == ACTION_ACTIVE_RESTING:
-            self.__reject("Homing blocked: resting is active")
-            return
-        # From zenith, skip the exit move and home directly.
-        self.__zenith_exit_target = None
-        self.__zenith_target = None
-
-        target = self.__home_target()
-        mask = self.__unlocked_mask()
+        start = list(self.measured)
+        mask = self.unlocked_mask()
         if index is not None:
             mask = [i == index for i in range(len(mask))]
 
-        start = list(self.__measured)
+        resumed = False
+        if not adopted and config.resume_on_repeat \
+                and self._move.goal is not None:
+            # Resume keeps the original goal; the path is re-planned from
+            # wherever the arm is now.
+            target = list(self._move.goal)
+            resumed = True
+        else:
+            if config.octant_requires_planar:
+                ok, reason = self._octant_gate(config)
+                if not ok:
+                    self.reject(reason)
+                    return
+            target = config.target(self)
+
         goal = [target[i] if mask[i] else start[i]
                 for i in range(len(target))]
-        if any(self.__locked[:3]) or (index is not None and index < 3):
+        path = self._plan_path(config, start, goal, index)
+        if path is None:
+            self.reject(
+                f"{config.name} blocked: no safe path through "
+                "restricted space")
+            return
+
+        self._move.goal = goal if config.resume_on_repeat else None
+        self._move.target = target
+        self._move.path = [list(p) for p in path[1:]] or [goal]
+        self._move.idx = 0
+        self._move.mask = mask
+        self._move.total = self._masked_max_remaining(target, mask)
+        self._move.command_at = time.monotonic()
+        self._move.single_index = index
+        self._move.pausing = False
+        self._move.exiting = False
+        self._move.exiting_target = None
+        if config.remember_entry_side:
+            config.entry_side = self.flipped
+
+        self.active = config.active_value
+        self.phase = PHASE_FLIP_RUNNING
+        self.ramp.reset()
+
+        if adopted:
+            self.get_logger().info(
+                f"{config.name} inferred from startup pose")
+        elif resumed:
+            self.get_logger().info(f"{config.name} resumed")
+        elif index is not None:
+            self.get_logger().info(f"{config.name} joint {index}")
+        else:
+            self.get_logger().info(f"{config.name} started")
+
+    def _single_joint_index(self, config, command):
+        if config.single_joint_prefix is None or not command \
+                or not command.startswith(config.single_joint_prefix):
+            return None
+        try:
+            index = int(command.partition(":")[2])
+        except ValueError:
+            return _BAD_INDEX
+        if not 0 <= index < len(ARM_JOINT_NAMES):
+            return _BAD_INDEX
+        return index
+
+    def _octant_gate(self, config):
+        octant = self.octant()
+        if octant is not None and octant not in OCTANT_DIRECT_FLIP:
+            if not self.planar:
+                return False, (
+                    f"{config.name} blocked: octant {octant} "
+                    "requires planar")
+        return True, ""
+
+    def _plan_path(self, config, start, goal, single_index=None):
+        if not config.use_safe_path or any(self.locked[:3]) \
+                or (single_index is not None and single_index < 3):
+            return [start, goal]
+        path = plan_safe_path(self.model, start, goal)
+        if path is None and not config.safe_path_required:
+            # Refuse to lose a homing move over a planner miss; the ramp
+            # and mechanical limits still bound the direct move.
             path = [start, goal]
-        else:
-            path = plan_safe_path(self.__model, start, goal)
-            if path is None:
-                # Refuse to lose homing over a planner miss; the ramp and
-                # mechanical limits still bound the direct move.
-                path = [start, goal]
+        return path
 
-        self.__homing_target = target
-        self.__homing_mask = mask
-        self.__homing_path = [list(p) for p in path[1:]] or [goal]
-        self.__homing_idx = 0
-        self.__homing_command_at = time.monotonic()
-        self.__active = ACTION_ACTIVE_HOMING
-        self.__ramp.reset()
-        self.get_logger().info(
-            "Homing started" if index is None
-            else f"Homing joint {index}")
-
-    def __home_target(self):
-        if self.__flipped:
-            return [
-                HOMING_TARGET[BASE],
-                math.pi - HOMING_TARGET[SHOULDER],
-                -HOMING_TARGET[ELBOW],
-                HOMING_TARGET[WRIST_BEND],
-                HOMING_TARGET[WRIST_TWIST],
-            ]
-        return list(HOMING_TARGET)
-
-    def __step_homing(self):
-        now = time.monotonic()
-        if now - self.__homing_command_at > HOMING_HOLD_TIMEOUT_SEC:
-            self.__stop_homing()
+    def _begin_exit(self, config):
+        if self._move.exiting:
             return
-        mask = self.__homing_mask
-        target = self.__homing_path[self.__homing_idx]
-        cmd = self.__ramp_command(
-            target, [ACTION_HOMING_CRUISE_RAD_S] * len(ARM_JOINT_NAMES),
-            MECHANICAL_LIMITS, mask=mask,
-            deadband_target=self.__homing_target)
-        self.__publish_targets(cmd)
+        exit_target = config.exit_target(self)
+        if exit_target is None:
+            return
+        self._move.exiting = True
+        self._move.pausing = False
+        self._move.exiting_target = exit_target
+        self.phase = PHASE_ZENITH_EXITING
+        self.ramp.reset()
+        self.get_logger().info(f"{config.name} exit started")
 
-        if all(not mask[i] or abs(wrap2pi(target[i] - self.__measured[i]))
-               <= WAYPOINT_TOL for i in range(len(target))):
-            if self.__homing_idx + 1 < len(self.__homing_path):
-                self.__homing_idx += 1
-            elif all(not mask[i]
-                     or abs(wrap2pi(self.__homing_target[i]
-                                    - self.__measured[i]))
-                     <= HOMING_THRESHOLD
-                     for i in range(len(self.__homing_target))):
-                self.__finish_homing()
+    def _step_move(self, config):
+        if config.hold_key and config.hold_timeout_sec \
+                and not self.restore_after_homing:
+            if time.monotonic() - self._move.command_at \
+                    > config.hold_timeout_sec:
+                self._stop_move(config)
+                return
 
-    def __stop_homing(self):
-        self.__publish_targets(self.__measured)
-        self.__homing_target = None
-        self.__homing_mask = None
-        self.__homing_path = None
-        self.__active = ACTION_ACTIVE_IDLE
-        self.get_logger().info("Homing released; stopped")
+        if self._move.pausing:
+            self._step_pause(config)
+            return
 
-    def __finish_homing(self):
-        self.__publish_targets(self.__measured)
-        self.__homing_target = None
-        self.__homing_mask = None
-        self.__homing_path = None
-        if self.__restore_after_homing:
-            self.__restore_after_homing = False
-            if self.__resting.homing_finished():
-                self.__finish_resting()
+        exiting = self._move.exiting
+        target = self._move.exiting_target if exiting \
+            else self._move.path[self._move.idx]
+        cmd = self.ramp_command(
+            target, [MOVE_SPEED_RAD_S] * len(ARM_JOINT_NAMES), config.limits,
+            mask=self._move.mask,
+            deadband_ok=config.deadband_ok and not exiting,
+            deadband_target=target if config.deadband_target else None)
+        self.publish_targets(cmd)
+
+        if exiting:
+            tol = config.exit_arrive_tol \
+                if config.exit_arrive_tol is not None \
+                else config.waypoint_tol
+            if all(abs(wrap2pi(target[i] - self.measured[i])) <= tol
+                   for i in range(len(target))):
+                self._finish_move(config)
+            return
+
+        if config.hold_mode:
+            return
+
+        mask = self._move.mask
+        if all(not mask[i] or abs(wrap2pi(target[i] - self.measured[i]))
+               <= config.waypoint_tol for i in range(len(target))):
+            if self._move.idx + 1 < len(self._move.path):
+                self._move.idx += 1
             else:
-                self.__active = ACTION_ACTIVE_IDLE
-        else:
-            self.__active = ACTION_ACTIVE_IDLE
-        self.get_logger().info("Homing complete")
+                final_tol = config.arrive_tol \
+                    if config.arrive_tol is not None \
+                    else config.waypoint_tol
+                if all(not mask[i]
+                       or abs(wrap2pi(self._move.target[i]
+                                      - self.measured[i])) <= final_tol
+                       for i in range(len(self._move.target))):
+                    self._finish_move(config)
+
+    def _step_pause(self, config):
+        target = self._move.path[self._move.idx] \
+            if self._move.path else self.measured
+        cmd = self.ramp_command(
+            target, [0.0] * len(ARM_JOINT_NAMES), config.limits,
+            mask=self._move.mask)
+        self.publish_targets(cmd)
+        if self.ramp.is_stopped():
+            self.publish_targets(self.measured)
+            self._move.pausing = False
+            self.active = ACTION_ACTIVE_IDLE
+            self.phase = PHASE_FLIP_RUNNING
+            if self._move.goal is None:
+                self._move.reset()
+            self.get_logger().info(f"{config.name} paused")
+
+    def _stop_move(self, config):
+        self.publish_targets(self.measured)
+        self._move.reset()
+        self.active = ACTION_ACTIVE_IDLE
+        self.get_logger().info(f"{config.name} released; stopped")
+
+    def _finish_move(self, config):
+        self.publish_targets(self.measured)
+        self._move.reset()
+        self.phase = PHASE_FLIP_RUNNING
+        # A resting restore hands off to homing; completing it finishes
+        # the restore too.
+        if not self.homing_completed():
+            self.active = ACTION_ACTIVE_IDLE
+        self.get_logger().info(f"{config.name} complete")
 
     # ------------------------------------------------------------------
-    # Zenith
+    # Resting engine
     # ------------------------------------------------------------------
 
-    def __toggle_zenith(self):
-        if self.__active == ACTION_ACTIVE_ZENITH:
-            if self.__phase == PHASE_ZENITH_HOLDING:
-                self.__start_zenith_exit()
-            return
-        if self.__active != ACTION_ACTIVE_IDLE:
-            self.__reject("Zenith blocked: another action is running")
-            return
+    def _begin_resting(self, config):
+        inferred = is_resting_pose(self.measured)
+        if config.requires_planar and not self.planar:
+            if not (config.planar_except_inferred and inferred):
+                self.reject(
+                    f"{config.name} blocked: planar mode is required")
+                return
 
-        self.__zenith_side = self.__flipped
-        self.__zenith_target = [
-            self.__measured[BASE],
-            math.pi / 2,
-            0.0,
-            0.0,
-            self.__measured[WRIST_TWIST],
-        ]
-        self.__zenith_exit_target = None
-        self.__active = ACTION_ACTIVE_ZENITH
-        self.__phase = PHASE_ZENITH_HOLDING
-        self.__ramp.reset()
-        self.get_logger().info("Zenith entered")
-
-    def __start_zenith_exit(self):
-        angles = list(self.__measured)
-        if self.__zenith_side:
-            _, shoulder_hi = PICK_AND_PLACE_FLIPPED_LIMITS[SHOULDER]
-            elbow = max(angles[ELBOW], ELBOW_DEADBAND)
-        else:
-            _, shoulder_hi = PICK_AND_PLACE_LIMITS[SHOULDER]
-            elbow = min(angles[ELBOW], -ELBOW_DEADBAND)
-        shoulder_lo = PICK_AND_PLACE_FLIPPED_LIMITS[SHOULDER][0] \
-            if self.__zenith_side else PICK_AND_PLACE_LIMITS[SHOULDER][0]
-        wrist_lo, wrist_hi = MECHANICAL_LIMITS[WRIST_BEND]
-        twist_lo, twist_hi = MECHANICAL_LIMITS[WRIST_TWIST]
-        self.__zenith_exit_target = [
-            angles[BASE],
-            max(shoulder_lo, min(shoulder_hi, angles[SHOULDER])),
-            elbow,
-            max(wrist_lo, min(wrist_hi, angles[WRIST_BEND])),
-            max(twist_lo, min(twist_hi, angles[WRIST_TWIST])),
-        ]
-        self.__phase = PHASE_ZENITH_EXITING
-        self.__ramp.reset()
-        self.get_logger().info("Zenith exit started")
-
-    def __step_zenith(self):
-        exiting = self.__phase == PHASE_ZENITH_EXITING
-        target = self.__zenith_exit_target if exiting \
-            else self.__zenith_target
-        cruise = ACTION_ZENITH_EXIT_CRUISE_RAD_S if exiting \
-            else ACTION_ZENITH_CRUISE_RAD_S
-        cmd = self.__ramp_command(
-            target, [cruise] * len(ARM_JOINT_NAMES),
-            MECHANICAL_LIMITS, deadband_ok=not exiting)
-        self.__publish_targets(cmd)
-
-        if exiting and all(
-                abs(wrap2pi(target[i] - self.__measured[i])) <= ARRIVE_TOL
-                for i in range(len(target))):
-            self.__active = ACTION_ACTIVE_IDLE
-            self.__phase = PHASE_ZENITH_HOLDING
-            self.__zenith_target = None
-            self.__zenith_exit_target = None
-            self.get_logger().info("Zenith exit complete")
-
-    # ------------------------------------------------------------------
-    # Resting
-    # ------------------------------------------------------------------
-
-    def __toggle_resting(self):
-        if self.__active == ACTION_ACTIVE_RESTING:
-            if self.__resting.phase in (
-                    self.__resting.PHASE_COLLAPSED,
-                    self.__resting.PHASE_HOLD):
-                if self.__resting.request_restore():
-                    self.__torque_intent = True
-                    self.__publish_torque(True)
-                    self.get_logger().info("Resting restore started")
-            elif self.__resting.active:
-                self.__resting.abort("Resting sequence aborted by operator")
-                self.get_logger().warning("Resting sequence aborted")
-            return
-
-        if self.__active != ACTION_ACTIVE_IDLE:
-            self.__reject("Resting blocked: another action is running")
-            return
-
-        inferred = is_resting_pose(self.__measured)
-        if not self.__planar and not inferred:
-            self.__reject(
-                "Resting blocked: planar mode is required")
-            return
-
-        if not self.__resting.begin_collapse():
-            self.__reject("Resting blocked: sequence already running")
+        if not self._resting_controller.begin_collapse():
+            self.reject(f"{config.name} blocked: sequence already running")
             return
 
         if inferred:
             # Startup pose: stay de-torqued and wait for the restore.
-            self.__resting.abort("Resting mode inferred from startup pose")
-            self.__torque_intent = False
-            self.__publish_torque(False)
-            self.__resting_hold = True
+            self._resting_controller.abort(
+                "Resting mode inferred from startup pose")
+            self.torque_intent = False
+            self.publish_torque(False)
             self.get_logger().info(
                 "Resting inferred from startup pose; torque stays off")
         else:
-            self.__torque_intent = True
-            self.__resting_hold = False
+            self.torque_intent = True
             self.get_logger().info("Resting collapse started")
 
-        self.__resting_path_phase = None
-        self.__active = ACTION_ACTIVE_RESTING
-        self.__ramp.reset()
+        self._resting_path_phase = None
+        self.active = ACTION_ACTIVE_RESTING
+        self.ramp.reset()
 
-    def __step_resting(self, now):
-        fresh = all(now - at <= RESTING_FEEDBACK_TIMEOUT_SEC
-                    for at in self.__measured_at)
-        self.__plan_resting_path()
-        target, max_step, events = self.__resting.update(
-            self.__measured, DT, feedback_fresh=fresh,
-            enabled=self.__enabled)
+    def _repeat_resting(self, config):
+        controller = self._resting_controller
+        if controller.phase in (controller.PHASE_COLLAPSED,
+                                controller.PHASE_HOLD):
+            if controller.request_restore():
+                self.torque_intent = True
+                self.publish_torque(True)
+                self.get_logger().info("Resting restore started")
+        elif controller.active:
+            controller.abort("Resting sequence aborted by operator")
+            self.get_logger().warning("Resting sequence aborted")
+
+    def _adopt_resting(self):
+        self._resting_controller.begin_collapse()
+        self._resting_controller.abort(
+            "Resting mode inferred from startup pose")
+        self.torque_intent = False
+        self.publish_torque(False)
+        self._resting_path_phase = None
+        self.active = ACTION_ACTIVE_RESTING
+        self.ramp.reset()
+        self.get_logger().info(
+            "Resting inferred from startup pose; torque stays off")
+
+    def _step_resting(self, config):
+        controller = self._resting_controller
+        fresh = all(
+            time.monotonic() - at <= RESTING_FEEDBACK_TIMEOUT_SEC
+            for at in self.measured_at)
+        self._plan_resting_path(config)
+        target, max_step, events = controller.update(
+            self.measured, DT, feedback_fresh=fresh,
+            enabled=self.enabled)
         for event in events:
-            self.__handle_resting_event(event)
+            self._handle_resting_event(config, event)
 
-        if self.__resting.phase == self.__resting.PHASE_TORQUE_ON \
-                and self.__torque_state:
-            self.__resting.torque_confirmed()
+        if controller.phase == controller.PHASE_TORQUE_ON \
+                and self.torque_state:
+            controller.torque_confirmed()
 
         if target is None:
-            self.__publish_targets(self.__measured)
+            self.publish_targets(self.measured)
         else:
-            caps = [RESTING_MOVE_ANG_VEL] * len(ARM_JOINT_NAMES)
+            caps = [MOVE_SPEED_RAD_S] * len(ARM_JOINT_NAMES)
             if isinstance(max_step, (list, tuple)):
-                caps = [float(step) / DT for step in max_step]
+                caps = [min(caps[i], float(step) / DT)
+                        for i, step in enumerate(max_step)]
             elif max_step is not None:
-                caps = [float(max_step) / DT] * len(ARM_JOINT_NAMES)
-            cmd = self.__ramp_command(
-                target, caps, RESTING_MODE.limits, deadband_ok=True)
-            self.__publish_targets(cmd)
+                caps = [min(cap, float(max_step) / DT) for cap in caps]
+            cmd = self.ramp_command(
+                target, caps, config.limits, deadband_ok=True)
+            self.publish_targets(cmd)
 
-        if self.__resting.phase == self.__resting.PHASE_DONE:
-            self.__finish_resting()
+        if controller.phase == controller.PHASE_DONE:
+            self._finish_resting_restore()
 
-    def __handle_resting_event(self, event: str):
+    def _handle_resting_event(self, config, event: str):
         if event == "torque_off":
-            self.__torque_intent = False
-            self.__publish_torque(False)
+            self.torque_intent = False
+            self.publish_torque(False)
             self.get_logger().info("Resting: collapsed, torque removed")
         elif event == "torque_on":
-            self.__torque_intent = True
-            self.__publish_torque(True)
+            self.torque_intent = True
+            self.publish_torque(True)
             self.get_logger().info("Resting: restoring torque")
         elif event == "home":
             self.get_logger().info(
                 "Resting: crouch reached, handing off to homing")
-            self.__active = ACTION_ACTIVE_IDLE
-            self.__restore_after_homing = True
-            self.__start_homing()
+            self.active = ACTION_ACTIVE_IDLE
+            self.restore_after_homing = True
+            self.trigger_action(self.homing, "homing")
         elif event.startswith("abort:"):
             self.get_logger().warning(f"Resting: {event[len('abort:'):]}")
 
-    def __finish_resting(self):
-        self.__active = ACTION_ACTIVE_IDLE
-        self.__resting_path_phase = None
-        self.__resting_hold = False
-        self.__torque_intent = True
+    def _plan_resting_path(self, config):
+        controller = self._resting_controller
+        phase = controller.phase
+        if phase not in (controller.PHASE_CROUCH, controller.PHASE_MOVE_OUT):
+            self._resting_path_phase = None
+            return
+        if self._resting_path_phase == phase:
+            return
+        self._resting_path_phase = phase
+        if controller._path is not None:
+            return
+        held = list(self.measured)
+        target = [config.crouch_target[i] if not self.locked[i]
+                  else held[i] for i in range(len(held))]
+        path = plan_safe_path(self.model, held, target)
+        if path and len(path) > 1:
+            controller.set_path(
+                path[1:], [MOVE_SPEED_RAD_S * DT] * len(held))
+
+    def _finish_resting_restore(self):
+        self.active = ACTION_ACTIVE_IDLE
+        self._resting_path_phase = None
+        self.torque_intent = True
         self.get_logger().info("Resting restore complete")
 
-    def __plan_resting_path(self):
-        phase = self.__resting.phase
-        if phase not in (self.__resting.PHASE_CROUCH,
-                         self.__resting.PHASE_MOVE_OUT):
-            self.__resting_path_phase = None
-            return
-        if self.__resting_path_phase == phase:
-            return
-        self.__resting_path_phase = phase
-        if self.__resting._path is not None:
-            return
-        held = list(self.__measured)
-        target = [RESTING_CROUCH_TARGET[i] if not self.__locked[i]
-                  else held[i] for i in range(len(held))]
-        path = plan_safe_path(self.__model, held, target)
-        if path and len(path) > 1:
-            self.__resting.set_path(
-                path[1:], [RESTING_MOVE_ANG_VEL * DT] * len(held))
+    def homing_completed(self):
+        """Homing completion hook; True when a resting restore finished."""
+        if not self.restore_after_homing:
+            return False
+        self.restore_after_homing = False
+        if not self._resting_controller.homing_finished():
+            return False
+        self._finish_resting_restore()
+        return True
 
     # ------------------------------------------------------------------
-    # Shared stepping helpers
+    # Action API shared by every configuration
     # ------------------------------------------------------------------
 
-    def __ramp_command(self, target, caps, limits, mask=None,
-                       deadband_ok=False, deadband_target=None):
+    def ramp_command(self, target, caps, limits, mask=None,
+                     deadband_ok=False, deadband_target=None):
         """Step the measured pose toward ``target`` with the shared ramp."""
         count = len(ARM_JOINT_NAMES)
         if mask is None:
@@ -815,212 +810,218 @@ class ArmActionDriverNode(Node):
                 effective_caps.append(0.0)
                 continue
             lo, hi = limits[i]
-            delta = wrap2pi(target[i] - self.__measured[i])
+            delta = wrap2pi(target[i] - self.measured[i])
             delta = limit_respecting_diff(
-                self.__measured[i], delta, lo, hi)
+                self.measured[i], delta, lo, hi)
             deltas.append(delta)
             effective_caps.append(caps[i])
-        steps, _ = self.__ramp.step(deltas, effective_caps)
+        steps, _ = self.ramp.step(deltas, effective_caps)
 
-        command = list(self.__measured)
+        command = list(self.measured)
         for i in range(count):
             if not mask[i]:
                 continue
             lo, hi = limits[i]
             command[i] = max(
-                lo, min(hi, self.__measured[i] + steps[i]))
+                lo, min(hi, self.measured[i] + steps[i]))
 
         if not deadband_ok:
-            self.__apply_deadband(
+            self._apply_deadband(
                 command, deadband_target if deadband_target is not None
                 else target, mask)
         return command
 
-    def __apply_deadband(self, command, target, mask):
+    def _apply_deadband(self, command, target, mask):
         """Pin the elbow to the target side of the singularity deadband."""
-        if not mask[ELBOW]:
+        elbow = JOINT_INDEX["elbow"]
+        if not mask[elbow]:
             return
-        if abs(target[ELBOW]) <= ELBOW_DEADBAND:
+        if abs(target[elbow]) <= ELBOW_DEADBAND:
             return
-        if abs(command[ELBOW]) < ELBOW_DEADBAND:
-            command[ELBOW] = math.copysign(
-                ELBOW_DEADBAND, target[ELBOW])
+        if abs(command[elbow]) < ELBOW_DEADBAND:
+            command[elbow] = math.copysign(
+                ELBOW_DEADBAND, target[elbow])
 
-    def __abort_action(self, reason: str):
-        """Release target ownership and hold the measured pose."""
-        if self.__active == ACTION_ACTIVE_RESTING:
-            # Resting keeps its latches; a hold must not silently restore
-            # torque on a collapsed arm.
-            return
-        self.__publish_targets(self.__measured)
-        self.__active = ACTION_ACTIVE_IDLE
-        self.__flip_goal = None
-        self.__flip_path = None
-        self.__homing_target = None
-        self.__homing_mask = None
-        self.__homing_path = None
-        self.__zenith_target = None
-        self.__zenith_exit_target = None
-        self.__restore_after_homing = False
-        self.get_logger().info(reason)
-
-    def __unlocked_mask(self):
-        return [not locked for locked in self.__locked]
-
-    def __max_remaining(self, target):
-        return max(
-            abs(wrap2pi(target[i] - self.__measured[i]))
-            for i in range(len(ARM_JOINT_NAMES)))
-
-    def __octant(self):
+    def octant(self):
+        """FK octant of the measured pose, or None when unavailable."""
         try:
-            pos = self.__model.solve_forward_kinematics(
-                self.__measured).position()
+            pos = self.model.solve_forward_kinematics(
+                self.measured).position()
         except Exception:
             return None
         return _get_octant(pos)
+
+    def in_zenith(self):
+        """True while the zenith holding pose owns the arm.
+
+        Homing preempts a zenith hold; the homing target uses this to
+        return to the non-flipped home instead of the side the zenith
+        was entered from.
+        """
+        return self.active == ACTION_ACTIVE_ZENITH
+
+    def unlocked_mask(self):
+        return [not locked for locked in self.locked]
+
+    def _masked_max_remaining(self, target, mask):
+        return max(
+            abs(wrap2pi(target[i] - self.measured[i]))
+            for i in range(len(ARM_JOINT_NAMES))
+            if mask[i])
 
     # ------------------------------------------------------------------
     # Control cycle
     # ------------------------------------------------------------------
 
-    def __update(self):
+    def _update(self):
         now = time.monotonic()
-        if now - self.__latch_at >= RESTING_LATCH_REFRESH_SEC:
-            self.__latch_at = now
-            self.__publish_latches()
+        if now - self._latch_at >= RESTING_LATCH_REFRESH_SEC:
+            self._latch_at = now
+            self._publish_latches()
 
-        if self.__estop:
+        if self.estop:
             # Freeze: stop publishing targets; the hardware E-stop holds the
             # measured pose.  Status keeps flowing so the master sees us.
-            self.__publish_status()
+            self._publish_status()
             return
 
-        if not self.__initialized():
-            self.__publish_status()
+        if not self._initialized():
+            self._publish_status()
             return
 
-        if self.__pending_adopt is not None:
-            pending = self.__pending_adopt
-            self.__pending_adopt = None
-            self.__adopt_startup_pose(
+        if self._pending_adopt is not None:
+            pending = self._pending_adopt
+            self._pending_adopt = None
+            self._adopt_startup_pose(
                 None if pending == "auto" else pending)
 
-        self.__consume_manual_motion()
+        self._consume_manual_motion()
 
-        if self.__active == ACTION_ACTIVE_HOMING:
-            self.__step_homing()
-        elif self.__active == ACTION_ACTIVE_FLIPPING:
-            self.__step_flip()
-        elif self.__active == ACTION_ACTIVE_ZENITH:
-            self.__step_zenith()
-        elif self.__active == ACTION_ACTIVE_RESTING:
-            self.__step_resting(now)
+        config = self._by_active.get(self.active)
+        if config is not None:
+            if config.engine == "resting":
+                self._step_resting(config)
+            else:
+                self._step_move(config)
 
-        self.__publish_status()
+        self._publish_status()
 
-    def __consume_manual_motion(self):
-        if not self.__manual_motion:
+    def _consume_manual_motion(self):
+        if not self._manual_motion:
             return
-        self.__manual_motion = False
-        if self.__active == ACTION_ACTIVE_FLIPPING:
-            self.__flip_goal = None
-            if self.__phase == PHASE_FLIP_RUNNING:
-                self.__phase = PHASE_FLIP_PAUSING
+        self._manual_motion = False
+        config = self._by_active.get(self.active)
+        if config is not None and config.cancel_on_manual:
+            self._move.goal = None
+            if not self._move.pausing and not self._move.exiting:
+                self._move.pausing = True
+                self.phase = PHASE_FLIP_PAUSING
                 self.get_logger().info(
-                    "Flip goal cancelled by manual input")
-        elif self.__flip_goal is not None:
-            self.__flip_goal = None
-            self.__flip_path = None
-            self.get_logger().info("Remembered flip goal cleared")
+                    f"{config.name} goal cancelled by manual input")
+        elif self._move.goal is not None:
+            self._move.goal = None
+            self._move.path = None
+            owner = next(
+                (c for c in self._actions if c.resume_on_repeat), None)
+            self.get_logger().info(
+                f"Remembered {owner.name if owner else 'action'} "
+                "goal cleared")
 
-    def __initialized(self):
-        return all(not math.isnan(a) for a in self.__measured)
+    def _initialized(self):
+        return all(not math.isnan(a) for a in self.measured)
 
     # ------------------------------------------------------------------
     # Publishing
     # ------------------------------------------------------------------
 
-    def __publish_targets(self, angles):
+    def publish_targets(self, angles):
         payload = tuple(float(wrap2pi(a)) for a in angles)
-        if payload == self.__last_targets:
+        if payload == self._last_targets:
             return
-        self.__last_targets = payload
+        self._last_targets = payload
         for joint, value in zip(ARM_JOINT_NAMES, payload):
-            self.__target_publishers[joint].publish(Float32(data=value))
+            self._target_publishers[joint].publish(Float32(data=value))
 
-    def __publish_torque(self, enabled: bool):
-        self.__torque_publisher.publish(Bool(data=bool(enabled)))
+    def publish_torque(self, enabled: bool):
+        self._torque_publisher.publish(Bool(data=bool(enabled)))
 
-    def __publish_latches(self):
-        self.__resting_publisher.publish(
-            Bool(data=self.__active == ACTION_ACTIVE_RESTING))
-        self.__torque_publisher.publish(
-            Bool(data=bool(self.__torque_intent)))
+    def _publish_latches(self):
+        self._resting_publisher.publish(
+            Bool(data=self.active == ACTION_ACTIVE_RESTING))
+        self._torque_publisher.publish(
+            Bool(data=bool(self.torque_intent)))
 
-    def __publish_status(self):
-        self.__active_publisher.publish(Int8(data=int(self.__active)))
+    def _publish_status(self):
+        self._active_publisher.publish(Int8(data=int(self.active)))
+        config = self._by_active.get(self.active)
         msg = ArmActionStatus()
-        msg.ready = bool(self.__initialized())
-        msg.active = int(self.__active)
-        msg.phase = int(self.__phase)
-        msg.error_code = int(self.__error[0])
-        msg.error_arg = int(self.__error[1])
-        msg.error_seq = int(self.__error_seq)
-        msg.progress = float(self.__progress())
-        msg.homing_mask = int(self.__homing_mask_value())
-        self.__status_publisher.publish(msg)
+        msg.ready = bool(self._initialized())
+        msg.active = int(self.active)
+        msg.phase = int(self.phase)
+        msg.error_code = int(self._error[0])
+        msg.error_arg = int(self._error[1])
+        msg.error_seq = int(self._error_seq)
+        if config is not None:
+            msg.progress = float(self._progress(config))
+            if config.report_homing_mask and self._move.mask is not None:
+                msg.homing_mask = self._mask_bits(self._move.mask)
+        self._status_publisher.publish(msg)
 
-    def __progress(self):
-        if self.__active == ACTION_ACTIVE_FLIPPING \
-                and self.__flip_move_total:
-            remaining = self.__max_remaining(
-                self.__flip_path[self.__flip_idx])
-            return _clamp(1.0 - remaining / self.__flip_move_total)
-        if self.__active == ACTION_ACTIVE_HOMING \
-                and self.__homing_target is not None:
-            remaining = max(
-                abs(wrap2pi(self.__homing_target[i] - self.__measured[i]))
-                for i in range(len(ARM_JOINT_NAMES))
-                if self.__homing_mask[i])
-            return _clamp(1.0 - remaining / math.pi)
-        return 0.0
+    def _progress(self, config):
+        if config.engine == "resting":
+            return 0.0
+        move = self._move
+        if move.target is None or not move.total:
+            return 0.0
+        remaining = self._masked_max_remaining(move.target, move.mask)
+        return _clamp(1.0 - remaining / move.total)
 
-    def __homing_mask_value(self):
-        if self.__active != ACTION_ACTIVE_HOMING or self.__homing_mask is None:
-            return 0
+    @staticmethod
+    def _mask_bits(mask):
         value = 0
-        for index, allowed in enumerate(self.__homing_mask):
+        for index, allowed in enumerate(mask):
             if allowed:
                 value |= 1 << index
         return value
 
     # ------------------------------------------------------------------
+    # Hold / stop
+    # ------------------------------------------------------------------
+
+    def _abort_action(self, reason: str):
+        """Release target ownership and hold the measured pose."""
+        if self.active == ACTION_ACTIVE_RESTING:
+            # Resting keeps its latches; a hold must not silently restore
+            # torque on a collapsed arm.
+            return
+        self.publish_targets(self.measured)
+        self.active = ACTION_ACTIVE_IDLE
+        self._move.reset()
+        self.restore_after_homing = False
+        self.get_logger().info(reason)
+
+    # ------------------------------------------------------------------
     # Errors
     # ------------------------------------------------------------------
 
-    def __reject(self, reason: str):
+    def reject(self, reason: str):
         code, arg = classify_failure(reason)
-        self.__emit_error(code, arg, reason=reason, force=True)
+        self.emit_error(code, arg, reason=reason, force=True)
 
-    def __emit_error(self, code: int, arg: int = 0, reason: str = "",
-                     force: bool = False):
+    def emit_error(self, code: int, arg: int = 0, reason: str = "",
+                   force: bool = False):
         code = int(code) & 0xFF
         arg = int(arg) & 0xFF
         if code == ARM_ERROR_NONE:
-            if self.__error == (ARM_ERROR_NONE, 0):
+            if self._error == (ARM_ERROR_NONE, 0):
                 return
-        elif self.__error == (code, arg) and not force:
+        elif self._error == (code, arg) and not force:
             return
-        self.__error = (code, arg)
-        self.__error_seq = (self.__error_seq + 1) & 0xFF
+        self._error = (code, arg)
+        self._error_seq = (self._error_seq + 1) & 0xFF
         if code != ARM_ERROR_NONE:
             self.get_logger().warning(
                 f"Action driver rejected: {reason}")
-
-
-def _clamp(value):
-    return max(0.0, min(1.0, float(value)))
 
 
 def main():

@@ -134,17 +134,20 @@ ACTION_ACTIVE_FLIPPING = 2
 ACTION_ACTIVE_ZENITH = 3
 ACTION_ACTIVE_RESTING = 4
 
-# Command strings the master routes to /ARM/ACTION/COMMAND.  flip_release
-# is the flip button-up event (new): the basestation sends it when the flip
-# key is released.  home_joint:<n> matches ACTION_HOME_JOINT_PREFIX.
+# Command strings the master routes to /ARM/ACTION/COMMAND.  flip_release,
+# zenith_release, and home_release are the key-up events: the basestation
+# sends them when the associated key is released so a running move stops
+# immediately.  home_joint:<n> matches ACTION_HOME_JOINT_PREFIX.
 ACTION_COMMANDS = {
     "flip",
     "flip_release",
     "home",
+    "home_release",
     "homing",
     "zenith",
     "zenith_mode",
     "toggle_zenith",
+    "zenith_release",
     "rest",
     "resting",
     "toggle_resting",
@@ -152,8 +155,8 @@ ACTION_COMMANDS = {
 ACTION_HOME_JOINT_PREFIX = "home_joint:"
 
 # Action commands that bypass the MANUAL-only owner gate: resting and zenith
-# are global safety/pose commands, and flip_release must always be able to
-# end a hold-to-run flip that a handover interrupted.
+# are global safety/pose commands, and the release events must always be able
+# to stop a hold-to-run action that a handover interrupted.
 ACTION_ALWAYS_COMMANDS = {
     "toggle_resting",
     "rest",
@@ -161,7 +164,9 @@ ACTION_ALWAYS_COMMANDS = {
     "zenith",
     "zenith_mode",
     "toggle_zenith",
+    "zenith_release",
     "flip_release",
+    "home_release",
 }
 
 # ArmActionStatus.phase substates (0 = running/entering everywhere).
@@ -650,7 +655,6 @@ TELEOP_STOP_EPSILON = 1e-3
 # Homing
 # =============================================================================
 
-HOMING_SPEED = 1 / 300                        # Radians per step during homing
 HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 
 
@@ -658,21 +662,12 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # Action driver stepping profile
 # =============================================================================
 
-# Shared trapezoidal profile for homing, flip, zenith, and resting moves
-# (arm_action_driver_node).  Per-joint hardware caps come from
-# ARM_MOTOR_MAX_ANG_VEL; the per-action cruise caps below are the effective
-# speed limits.  Proposed values; tune in simulation, then on hardware.
-# Details: planz/ACTION_DRIVER_PLAN.md §6.
+# Shared trapezoidal profile for homing, flip, zenith, and resting moves.
+# The single cruise speed is owned by arm_action_driver_node
+# (MOVE_SPEED_RAD_S = 25 deg/s for every joint); per-joint hardware caps come
+# from ARM_MOTOR_MAX_ANG_VEL.  Details: planz/ACTION_DRIVER_PLAN.md §6.
 ACTION_ACCEL_RAD_S2 = 4.0
 ACTION_DECEL_RAD_S2 = 8.0
-
-# Per-action cruise speed caps [rad/s].
-ACTION_HOMING_CRUISE_RAD_S = HOMING_SPEED / DT   # today's homing rate
-ACTION_FLIP_CRUISE_RAD_S = 2.5                   # ~current 30-frame pace
-ACTION_RESTING_CROUCH_RAD_S = RESTING_MOVE_ANG_VEL   # 2 deg/s (unchanged)
-ACTION_RESTING_PUSH_RAD_S = RESTING_PUSH_RATE        # 1 deg/s (unchanged)
-ACTION_ZENITH_CRUISE_RAD_S = 1.0            # drive to the straight-up pose
-ACTION_ZENITH_EXIT_CRUISE_RAD_S = ACTION_HOMING_CRUISE_RAD_S
 
 
 # =============================================================================

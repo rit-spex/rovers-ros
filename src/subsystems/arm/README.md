@@ -232,11 +232,12 @@ control source, and every manual input reaches an actuator through it:
   `toggle_solenoid`) go only to `arm_end_effector_node` on
   `/ARM/END_EFFECTOR/COMMAND`; the planner never sees them, so the master
   validates their preconditions.
-- **Actions:** `flip`, `flip_release`, `home`/`homing`, `home_joint:<n>`,
-  `zenith`/`toggle_zenith`, and `resting`/`toggle_resting` go to
-  `arm_action_driver_node` on `/ARM/ACTION/COMMAND`, after an internal `hold`
-  to the planner. Resting and zenith bypass the MANUAL-only gate;
-  `flip_release` is always forwarded so a hold-to-run flip can end.
+- **Actions:** `flip`, `flip_release`, `home`/`homing`, `home_release`,
+  `home_joint:<n>`, `zenith`/`toggle_zenith`/`zenith_release`, and
+  `resting`/`toggle_resting` go to `arm_action_driver_node` on
+  `/ARM/ACTION/COMMAND`, after an internal `hold` to the planner. Resting
+  and zenith bypass the MANUAL-only gate; `flip_release`, `zenith_release`,
+  and `home_release` are always forwarded so a hold-to-run action can stop.
 
 Because the master emits the arbitrated stream, the planner and end effector
 do not subscribe to `/ARM/STATE/CONTROL_SOURCE` and never need to know who owns
@@ -342,15 +343,30 @@ active**, plus:
   latches the hardware consumes.
 
 All moves use one shared positional trapezoidal profile
-(`ACTION_ACCEL_RAD_S2` / `ACTION_DECEL_RAD_S2`, per-action cruise caps in
-`arm_constants.py`). Flip is a maintained action: `flip` starts it,
+(`ACTION_ACCEL_RAD_S2` / `ACTION_DECEL_RAD_S2`) and one cruise speed owned
+by the action driver node (`MOVE_SPEED_RAD_S`, 25 deg/s for every joint). Flip
+is a maintained action: `flip` starts it,
 `flip_release` pauses it (`ACTIVE` returns to IDLE, so teleop is available),
 re-pressing resumes toward the remembered goal with a freshly planned safe
-path, and any manual velocity clears the goal. Zenith holds base and wrist
-twist, and the planner force-locks both while it runs; homing from zenith
-skips the exit move. Resting requires planar mode (or a resting-region
-startup pose). E-stop freezes target publishing; the hardware position-locks
-the measured pose.
+path, and any manual velocity clears the goal. Homing is also maintained:
+`home_release` (or the `HOMING_HOLD_TIMEOUT_SEC` deadman after the last
+`home`) stops it immediately. Zenith is hold-to-run while it drives: its
+key-up event `zenith_release` stops the move and holds the achieved pose.
+Resting stays a toggle, so releasing its key does not undo the mode it
+selected. Zenith holds base and wrist twist, and the planner force-locks
+both while it runs; homing from zenith skips the exit move. Resting requires
+planar mode (or a resting-region startup pose). E-stop freezes target
+publishing; the hardware position-locks the measured pose.
+
+The node itself is a thin shell: each action is an `ActionConfiguration`
+subclass (`arm_action_driver/actions/{homing,flip,zenith,resting}.py`)
+that declares its trigger/release commands, active enum, motion
+limits, and hold/toggle flags, and implements `trigger` / `update` /
+`release` / `abort` / `adopt` / `progress` hooks. The node routes commands,
+enforces ownership gating, and publishes status from the registry
+(`arm_action_driver/actions/__init__.py`) alone. Adding an action is
+creating a class and appending it to the registry - see
+`arm_action_driver/actions/base.py`.
 
 ---
 
@@ -584,8 +600,9 @@ Inputs:
 `toggle_joint_lock:<0-4>`, `home_joint:<0-4>`, `gripper_up`,
 `gripper_down`, and `fire_solenoid` (`toggle_solenoid` is a legacy alias).
 The resting/zenith toggles bypass the master's manual-only gate (they are
-global safety commands, not motion intent), and `flip_release` is always
-forwarded so an interrupted hold-to-run flip can end. The other motion
+global safety commands, not motion intent), and `flip_release`,
+`zenith_release`, and `home_release` are always forwarded so an interrupted
+hold-to-run action can stop. The other motion
 commands are forwarded to the route planner for validation; `flip`, `home`/
 `homing`, `home_joint:<n>`, zenith, and resting go to the action driver;
 `gripper_up`, `gripper_down`, `fire_solenoid`, and `toggle_solenoid` go only
@@ -597,9 +614,14 @@ basestation's per-action press states (0 idle, 1 just pressed, 2 held, 3
 just released). Edge-triggered actions publish on just-pressed; the held
 gripper arrows and homing keys (`home`, `home_joint:<0-4>`) publish on press
 and on every held state so the end effector can jog and the route planner
-keeps homing until the stream stops. The basestation's `ARM_STATE_COMMANDS`
-dict is the single source for the signal-to-command mapping, with
-`ARM_STATE_HELD_COMMANDS` marking the actions that repeat while held.
+keeps homing until the stream stops. On just-released, hold-to-run actions
+publish their key-up event (`flip_release`, `zenith_release`,
+`home_release`) so motion stops as soon as the operator lets go. Resting
+remains a toggle with no release command.
+The basestation's `ARM_STATE_COMMANDS` dict is the single source for the
+signal-to-command mapping, with `ARM_STATE_HELD_COMMANDS` marking the
+actions that repeat while held and `ARM_STATE_RELEASE_COMMANDS` marking the
+actions that stop on key-up.
 The physical key map (including the `Z` key for zenith) lives in the
 basestation firmware. Zenith arrives on the appended `arm_state.zenith`
 signal, after `solenoid_strike`, so existing signal offsets do not move; the
@@ -612,7 +634,7 @@ Outputs:
 | `/ARM/CMD_VELOCITY` | `custom_interfaces/Velocity` | Arbitrated teleop velocity. Zeroed on every handover and E-stop; requires a neutral stick before manual motion resumes. |
 | `/ARM/CMD_POSE` | `custom_interfaces/Pose` | Arbitrated absolute target from an autonomous source. |
 | `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. Includes the internal `hold` sent on handover/E-stop and before an action starts. |
-| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, homing, zenith, and resting, for the action driver. |
+| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, `home`/`homing`, `home_release`, zenith/`zenith_release`, and resting, for the action driver. |
 | `/ARM/END_EFFECTOR/COMMAND` | `custom_interfaces/ArmCommand` | Only the gripper/solenoid commands, gated on E-stop and readiness. Includes the internal `stop_jog` sent on a handover. |
 | `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Authoritative control owner (`0` none, `1` manual, `2` autonomous). Diagnostic; published transient-local. |
 | `/ARM/STATE/ERROR` | `std_msgs/UInt32` | Last rejection, packed as `(seq << 16) \| (code << 8) \| arg`; codes are in `rover_protocol.arm_errors`. |
@@ -690,7 +712,7 @@ Inputs:
 | Topic | Type | Notes |
 | --- | --- | --- |
 | `/ESTOP` | `std_msgs/Bool` | Freezes target publishing while asserted. |
-| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, `home`/`homing`, `home_joint:<n>`, zenith, resting, and the internal `adopt`. |
+| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, `home`/`homing`, `home_release`, `home_joint:<n>`, zenith/`zenith_release`, resting, and the internal `adopt`. |
 | `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/Velocity` | Any nonzero sample clears a remembered flip goal and pauses a running flip. |
 | `/ARM/JOINT/CURRENT_*` | `std_msgs/Float32` | Measured 5-DOF joint angles [rad]. |
 | `/ARM/STATE/ENABLED` | `std_msgs/Bool` | Resting push precondition. |

@@ -4,8 +4,16 @@ import math
 
 import pytest
 
+from arm_action_driver.actions import ACTION_CONFIG_CLASSES
+from arm_action_driver.actions.base import ActionConfiguration
 from arm_action_driver.stepping import JointRamp, LimitedRamp, remaining_delta
-from arm_constants import ACTION_ACCEL_RAD_S2, ACTION_DECEL_RAD_S2, DT
+from arm_constants import (
+    ACTION_ACCEL_RAD_S2,
+    ACTION_ACTIVE_IDLE,
+    ACTION_COMMANDS,
+    ACTION_DECEL_RAD_S2,
+    DT,
+)
 from arm_route_planner.kinematics.regions import (
     RegionTracker,
     is_resting_pose,
@@ -126,3 +134,111 @@ def test_region_tracker_tracks_the_observed_side():
 
     tracker.update([0.0, math.radians(45), math.radians(-45), 0.0, 0.0])
     assert not tracker.flipped
+
+
+def test_registry_declares_unique_active_values():
+    values = [cls.active_value for cls in ACTION_CONFIG_CLASSES]
+    assert len(values) == len(set(values))
+    assert ACTION_ACTIVE_IDLE not in values
+
+
+def test_registry_covers_the_action_command_table():
+    covered = set()
+    for cls in ACTION_CONFIG_CLASSES:
+        assert cls.trigger_commands, \
+            f"{cls.__name__} declares no trigger commands"
+        covered.update(cls.trigger_commands)
+        covered.update(cls.release_commands)
+    assert ACTION_COMMANDS <= covered
+
+
+def test_homing_matches_the_single_joint_prefix():
+    homing = next(cls for cls in ACTION_CONFIG_CLASSES
+                  if "homing" in cls.trigger_commands)
+    config = homing()
+    assert config.matches("home_joint:2")
+    assert config.matches("homing")
+    assert config.matches("home")
+    assert not config.matches("flip")
+
+
+def test_hold_to_run_actions_stop_on_release():
+    configs = {cls.__name__: cls() for cls in ACTION_CONFIG_CLASSES}
+    homing = configs["HomingConfiguration"]
+    assert "home_release" in homing.release_commands
+    assert homing.stop_on_release
+
+    zenith = configs["ZenithConfiguration"]
+    assert "zenith_release" in zenith.release_commands
+    assert zenith.stop_on_release
+
+    flip = configs["FlipConfiguration"]
+    assert "flip_release" in flip.release_commands
+    assert flip.pause_on_release
+
+
+def test_resting_has_no_release_command():
+    configs = {cls.__name__: cls() for cls in ACTION_CONFIG_CLASSES}
+    resting = configs["RestingConfiguration"]
+    assert not resting.release_commands
+    assert not resting.stop_on_release
+    assert not resting.pause_on_release
+
+
+class _HomingStub:
+    """Driver stub for the homing target helper."""
+
+    def __init__(self, flipped, in_zenith):
+        self.flipped = flipped
+        self._in_zenith = in_zenith
+
+    def in_zenith(self):
+        return self._in_zenith
+
+
+def _homing_config():
+    return next(cls for cls in ACTION_CONFIG_CLASSES
+                if "homing" in cls.trigger_commands)()
+
+
+def test_homing_target_is_the_standard_home_when_not_flipped():
+    target = _homing_config().target(_HomingStub(False, False))
+    assert target[1] == pytest.approx(math.pi / 4)
+    assert target[2] == pytest.approx(-math.pi / 4)
+
+
+def test_homing_target_mirrors_on_the_flipped_side():
+    target = _homing_config().target(_HomingStub(True, False))
+    assert target[1] == pytest.approx(math.pi - math.pi / 4)
+    assert target[2] == pytest.approx(math.pi / 4)
+
+
+def test_homing_target_from_zenith_is_always_the_non_flipped_home():
+    # Homing preempting a zenith hold returns to the standard home even
+    # when the zenith was entered from the flipped side.
+    target = _homing_config().target(_HomingStub(True, True))
+    assert target[1] == pytest.approx(math.pi / 4)
+    assert target[2] == pytest.approx(-math.pi / 4)
+
+
+def test_every_config_declares_an_engine_and_a_target():
+    for cls in ACTION_CONFIG_CLASSES:
+        config = cls()
+        assert config.engine in ("move", "resting")
+        if config.engine == "move":
+            assert config.target_angles is not None \
+                or cls.target is not ActionConfiguration.target
+        else:
+            assert config.controller_class is not None
+
+
+def test_target_helpers_are_pure_parameter_consumers():
+    # The per-action classes are parameter blocks: they must not grow
+    # lifecycle methods again.
+    lifecycle = ("trigger", "repeat_trigger", "release", "update",
+                 "abort", "adopt", "on_manual_motion")
+    for cls in ACTION_CONFIG_CLASSES:
+        for name in lifecycle:
+            assert not hasattr(cls, name), \
+                f"{cls.__name__} re-implements {name}; behaviour belongs " \
+                "in the driver node"

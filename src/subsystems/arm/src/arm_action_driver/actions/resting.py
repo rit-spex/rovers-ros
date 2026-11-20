@@ -17,6 +17,7 @@ stalled and backed off ``RESTING_BACKOFF_ANGLE``.
 """
 
 from arm_constants import (
+    ACTION_ACTIVE_RESTING,
     DT,
     RESTING_BACKOFF_ANGLE,
     RESTING_CROUCH_TARGET,
@@ -33,7 +34,10 @@ from arm_constants import (
     RESTING_START_GRACE_SEC,
     WAYPOINT_TOL,
 )
+from arm_route_planner.kinematics.limiters import RESTING_MODE
 from arm_route_planner.kinematics.linkage_models import wrap2pi
+
+from arm_action_driver.actions.base import ActionConfiguration
 
 # Joint indices.
 SHOULDER = 1
@@ -74,9 +78,15 @@ class RestingController:
     # Phases that push a joint into its physical stop.
     _PUSH_PHASES = (PHASE_PUSH_SHOULDER, PHASE_PUSH_ELBOW)
 
-    def __init__(self, crouch=RESTING_CROUCH_TARGET, limits=RESTING_LIMITS):
+    def __init__(self, crouch=RESTING_CROUCH_TARGET, limits=RESTING_LIMITS,
+                 move_speed=RESTING_MOVE_ANG_VEL,
+                 push_speed=RESTING_PUSH_RATE):
         self.crouch = [float(a) for a in crouch]
         self.limits = [tuple(pair) for pair in limits]
+        # The action driver owns motion and passes its single shared speed;
+        # the constants are only fallbacks for direct controller use.
+        self.move_speed = float(move_speed)
+        self.push_speed = float(push_speed)
         self.phase = self.PHASE_IDLE
         self.error: str | None = None
 
@@ -337,8 +347,8 @@ class RestingController:
                     return None, None, []
 
         target = self._slow_target(
-            angles, joint, self._push_target, RESTING_PUSH_RATE, dt)
-        return target, RESTING_PUSH_RATE * dt, []
+            angles, joint, self._push_target, self.push_speed, dt)
+        return target, self.push_speed * dt, []
 
     def _step_backoff(self, angles, dt):
         """Step to the backoff angle and hand over to the next phase."""
@@ -350,7 +360,7 @@ class RestingController:
             return None, None, ["abort:" + self.error]
 
         result = self._slow_target(
-            angles, joint, target, RESTING_PUSH_RATE, dt)
+            angles, joint, target, self.push_speed, dt)
         if abs(wrap2pi(target - float(angles[joint]))) \
                 <= RESTING_PUSH_ARRIVE_TOL:
             if joint == SHOULDER:
@@ -360,7 +370,7 @@ class RestingController:
             else:
                 self.phase = self.PHASE_COLLAPSED
                 return None, None, ["torque_off"]
-        return result, RESTING_PUSH_RATE * dt, []
+        return result, self.push_speed * dt, []
 
     def _step_waypoint_move(self, angles, dt, goal):
         """Follow the planned path, then step directly to *goal*."""
@@ -384,7 +394,7 @@ class RestingController:
             if self._path is not None:
                 max_step = self._path_max_steps
                 if max_step is None:
-                    max_step = RESTING_MOVE_ANG_VEL * dt
+                    max_step = self.move_speed * dt
                 return target, max_step, []
 
         # Direct slow step: every joint moves at the resting speed.
@@ -393,7 +403,7 @@ class RestingController:
             lo, hi = self.limits[i]
             result[i] = _clamp_step(
                 max(lo, min(hi, goal[i])), result[i], lo, hi,
-                RESTING_MOVE_ANG_VEL * dt)
+                self.move_speed * dt)
 
         if all(abs(wrap2pi(g - a)) <= tol
                for g, a in zip(goal, result)):
@@ -404,4 +414,34 @@ class RestingController:
             else:
                 self.phase = self.PHASE_AUTO_HOME
                 return None, None, ["home"]
-        return result, RESTING_MOVE_ANG_VEL * dt, []
+        return result, self.move_speed * dt, []
+
+
+class RestingConfiguration(ActionConfiguration):
+    """Resting collapse/de-torque/restore action (parameter block).
+
+    ``resting`` / ``rest`` / ``toggle_resting`` start the collapse (only
+    in planar mode, or when the measured pose is already resting); while
+    the sequence runs, repeating the command requests the restore from
+    COLLAPSED/HOLD or aborts an in-flight collapse.  The planner can also
+    hand over an inferred resting boot pose via ``adopt:resting``, which
+    keeps torque off until the operator restores.  The node's resting
+    engine drives ``RestingController`` with these parameters.
+    """
+
+    name = "Resting"
+    active_value = ACTION_ACTIVE_RESTING
+    trigger_commands = ("toggle_resting", "rest", "resting")
+    adopt_modes = ("resting",)
+
+    # Behaviour flags
+    toggle_on_repeat = True
+    requires_planar = True
+    planar_except_inferred = True  # an already-resting pose skips the gate
+
+    # Resting engine parameters
+    engine = "resting"
+    controller_class = RestingController
+    # The crouch pose the collapse moves through before the pushes.
+    crouch_target = list(RESTING_CROUCH_TARGET)
+    limits = RESTING_MODE.limits

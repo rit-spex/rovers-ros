@@ -48,6 +48,7 @@ from encoding import MessageEncoder
 # signal -> command mapping and the held-action set.
 ARM_STATE_JUST_PRESSED = 1
 ARM_STATE_HELD = 2
+ARM_STATE_JUST_RELEASED = 3
 
 # Every operator action: arm_state signal -> rover command.
 ARM_STATE_COMMANDS = {
@@ -88,6 +89,21 @@ ARM_STATE_HELD_COMMANDS = {
     "home_joint_4": "home_joint:4",
     "gripper_up": "gripper_up",
     "gripper_down": "gripper_down",
+}
+
+# Hold-to-run actions get an explicit key-up event so the rover stops as
+# soon as the operator lets go instead of relying on a deadman timeout.
+# Resting stays a toggle: releasing its key must not undo the mode or
+# interrupt the collapse/restore sequence.
+ARM_STATE_RELEASE_COMMANDS = {
+    "flip": "flip_release",
+    "zenith": "zenith_release",
+    "home": "home_release",
+    "home_joint_0": "home_release",
+    "home_joint_1": "home_release",
+    "home_joint_2": "home_release",
+    "home_joint_3": "home_release",
+    "home_joint_4": "home_release",
 }
 
 
@@ -264,7 +280,9 @@ class Basestation(Node):
 
         Edge-triggered actions are forwarded on the just-pressed state.  The
         held gripper arrows are forwarded on press and on every held state so
-        the end effector can jog until the stream stops.
+        the end effector can jog until the stream stops.  Hold-to-run actions
+        are also forwarded on the just-released state so the rover stops as
+        soon as the key comes up.
         """
         for signal, value in decoded_data.items():
             if value == ARM_STATE_JUST_PRESSED:
@@ -272,6 +290,8 @@ class Basestation(Node):
                            or ARM_STATE_HELD_COMMANDS.get(signal))
             elif value == ARM_STATE_HELD:
                 command = ARM_STATE_HELD_COMMANDS.get(signal)
+            elif value == ARM_STATE_JUST_RELEASED:
+                command = ARM_STATE_RELEASE_COMMANDS.get(signal)
             else:
                 continue
             if command is not None:

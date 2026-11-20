@@ -123,7 +123,9 @@ SETTLE_TOLERANCE_TICKS = [
 
 # Simulation-only randomized start: base/shoulder/elbow at home +/- 20 deg.
 # Wrist bend, wrist twist, and gripper always start at zero.
-START_JITTER_RAD = math.radians(20.0)
+# Keep randomized starts close to the main home pose so the arm always boots
+# in an easy, predictable configuration.
+START_JITTER_RAD = math.radians(10.0)
 _HOME = list(HOMING_TARGET) + [0.0]
 # Random start poses stay inside the mechanical limits; the tick limits are
 # used for command validation because they are what the hardware enforces.
@@ -200,6 +202,14 @@ class ArmSimNode(Node):
         self.__resting_at = 0.0
         self.__torque_off = False
         self.__velocities = [float("nan")] * len(GAZEBO_JOINTS)
+
+        # Arm feedback (the /ARM/JOINT/CURRENT_* stream) is withheld until
+        # the arm has been driven to its start pose.  Gazebo spawns the arm
+        # at zero angles where it hangs a couple of degrees below the
+        # shoulder/elbow inference thresholds before the position
+        # controller engages; the planner's boot inference would otherwise
+        # latch the de-torqued resting mode from that transient droop.
+        self.__feedback_ready = False
 
         self.__targets_ticks = [float("nan")] * len(GAZEBO_JOINTS)
         self.__commands_ticks = [float("nan")] * len(GAZEBO_JOINTS)
@@ -404,6 +414,11 @@ class ArmSimNode(Node):
 
     def __publish_current(self):
         """Publish the Gazebo joint positions and velocities as feedback."""
+        if not self.__feedback_ready:
+            # Boot: the arm may still be hanging at the Gazebo spawn pose.
+            # Keep the feedback stream dark until the start pose is reached
+            # so downstream boot inference sees a controlled pose only.
+            return
         for index, ticks in enumerate(self.__current_ticks):
             if math.isfinite(ticks):
                 self.__current_publishers[ARM_MOTOR_IDX(index)].publish(
@@ -483,6 +498,11 @@ class ArmSimNode(Node):
             else:
                 self.get_logger().info(
                     "Simulated arm reached its randomized start pose")
+
+        if not self.__settling:
+            # Feedback stays dark until the start pose is reached so the
+            # planner's boot inference only ever sees a controlled pose.
+            self.__feedback_ready = True
 
     def run(self):
         """Spin the node until shutdown."""
