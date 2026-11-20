@@ -38,13 +38,18 @@ src/subsystems/arm/
 │   │       ├── path_planner.py    # safe joint-space path search
 │   │       ├── slew.py            # joint slew / velocity-limit model
 │   │       ├── arm_controller.py  # RoverArmController state machine
-│   │       └── actions/           # homing and flip controllers
+│   │       └── actions/           # homing, flip, and resting controllers
 │   ├── arm_hardware/
 │   │   ├── arm_hardware_node.py   # ROS ↔ CAN boundary, transport, standard CAN
+│   │   ├── arm_simulated_teensy_node.py # wrist/gripper Teensy stand-in (no wrist HW)
 │   │   └── open_can_handler.py    # OpenCAN: base, shoulder, elbow
 │   └── arm_sniffer/               # opt-in debug node, not launched by default
 │       └── arm_sniffer_node.py
-└── test/                          # unit, limiter, and config tests
+├── planz/                          # design plans:
+│   ├── ACTION_DRIVER_PLAN.md       # action driver node proposal (not built)
+│   ├── RESTING_FEATURE_PLAN.md     # resting collapse/de-torque plan
+│   └── TELEOP_SMOOTHING_PLAN.md    # teleop smoothing plan
+└── test/                           # unit, limiter, and config tests
 ```
 
 ## Nodes
@@ -54,16 +59,30 @@ The package provides seven runtime nodes plus an opt-in debug tool.
 `arm_teleop`, `arm_typing`, `arm_route_planner`, `arm_master`,
 `arm_end_effector`, and `arm_hardware`.
 
-| Executable | Standalone node name | Launched by default | Responsibility |
-| --- | --- | --- | --- |
-| `arm_teleop_node` | `arm_teleop_node` | yes | Owns SpaceMouse semantics; publishes normalized velocity and gripper commands. |
-| `arm_typing_node` | `arm_typing_node` | yes | Autonomous keyboard typing: plane/key inputs, drive-edge alignment, Cartesian key targets, and solenoid strikes. |
-| `arm_route_planner_node` | `arm_route_planner_node` | yes | Owns 5-DOF target generation: IK, limit modes, flips, homing, locks, pose, and the arm target topics. |
-| `arm_master_node` | `arm_master_node` | yes | Arm subsystem master: arbitrates control ownership, routes commands, watches planner readiness, and is the sole `/ARM/STATE/ERROR` writer. |
-| `arm_end_effector_node` | `arm_end_effector_node` | yes | Owns the gripper target, gripper drive, and solenoid strike. |
-| `arm_hardware_node` | `arm_hardware_node` | yes | Owns the CAN link: sends targets, polls measured angles, enforces enable/E-stop. Replaced by `rover_simulation/arm_sim_node` in simulation. |
-| `arm_camera_node` | `arm_camera_node` | yes | Placeholder; no logic yet. |
-| `arm_sniffer_node` | `arm_sniffer_node` | no | Read-only diagnostic printer. |
+| Executable | Short alias | Standalone node name | Launched by default | Responsibility |
+| --- | --- | --- | --- | --- |
+| `arm_teleop_node` | `teleop` | `arm_teleop_node` | yes | Owns SpaceMouse semantics; publishes normalized velocity and gripper commands. |
+| `arm_typing_node` | `typing` | `arm_typing_node` | yes | Autonomous keyboard typing: plane/key inputs, drive-edge alignment, Cartesian key targets, and solenoid strikes. |
+| `arm_route_planner_node` | `route_planner` | `arm_route_planner_node` | yes | Owns 5-DOF target generation: IK, limit modes, flips, homing, locks, pose, and the arm target topics. |
+| `arm_master_node` | `master` | `arm_master_node` | yes | Arm subsystem master: arbitrates control ownership, routes commands, watches planner readiness, and is the sole `/ARM/STATE/ERROR` writer. |
+| `arm_end_effector_node` | `end_effector` | `arm_end_effector_node` | yes | Owns the gripper target, gripper drive, and solenoid strike. |
+| `arm_hardware_node` | `hardware` | `arm_hardware_node` | yes | Owns the CAN link: sends targets, polls measured angles, enforces enable/E-stop. Replaced by `rover_simulation/arm_sim_node` in simulation. |
+| `arm_camera_node` | `camera` | `arm_camera_node` | yes | Placeholder; no logic yet. |
+| `arm_sniffer_node` | `sniffer`, `ASN` | `arm_sniffer_node` | no | Read-only diagnostic printer. |
+| `arm_simulated_teensy_node` | `sim_teensy`, `SATN` | `arm_simulated_teensy` | no | Simulated wrist/gripper Teensy; not used by the real rover launch. |
+
+Every executable keeps its canonical `arm_*_node` name, so existing launch
+files and scripts are unchanged. The short aliases are only conveniences:
+
+```bash
+ros2 run arm sniffer
+ros2 run arm ASN
+ros2 run arm sim_teensy
+ros2 run arm SATN
+```
+
+The alias runs the same node with the same runtime node name as the canonical
+executable (`arm_sniffer_node` and `arm_simulated_teensy` respectively).
 
 ---
 
@@ -299,9 +318,11 @@ to the backend that owns that motor:
   node, using the `MOVE_WRIST`, `MOVE_GRIPPER`, and `MOVE_SOLENOID` frames.
 
 Targets are validated against `angle_limits()` and dropped when the arm is
-disabled. `/ESTOP` latches the arm off, disables the OpenCAN motors, and blocks
-enable requests until it clears; the enable level is re-asserted on every tick
-so a dropped frame cannot leave the motors latched off. OpenCAN positions are
+disabled. `/ESTOP` latches the arm off and blocks enable requests until it
+clears, but it does not remove OpenCAN torque: the handler sends every measured
+position as the new target so the drives hold the pose. The enable level is
+re-asserted on every tick so a dropped frame cannot leave the motors latched
+off. OpenCAN positions are
 requested at `DT`, and feedback is published even while the arm is disabled so
 the planner can initialize. A solenoid strike sends one
 `MOVE_SOLENOID.Enabled=1` frame; the Teensy retracts it, so there is no disable
@@ -423,7 +444,9 @@ snapshot per second. It is deliberately excluded from every
 launch file, so it only runs when started by hand:
 
 ```sh
-ros2 run arm arm_sniffer_node
+ros2 run arm arm_sniffer_node   # canonical
+ros2 run arm sniffer            # short alias
+ros2 run arm ASN                # mnemonic alias
 ```
 
 Output is an aligned status/flags block and a joint table, for example:
@@ -697,7 +720,7 @@ simulation and hardware.
   planner refreshes the `/ARM/HARDWARE/RESTING` and
   `/ARM/HARDWARE/TORQUE_ENABLED` levels at 1 Hz; the hardware times the
   resting latch out after 1.5 s of silence while the torque latch stays off
-  until an explicit re-enable. Details: `RESTING_FEATURE_PLAN.md`.
+  until an explicit re-enable. Details: `planz/RESTING_FEATURE_PLAN.md`.
 - **Startup mode inference:** on the first measured sync the planner selects
   the mode that matches the pose instead of assuming normal Pick-and-Place.
   The straight-up pose selects Zenith; a resting-region pose (shoulder below
@@ -818,8 +841,9 @@ both signals.
 Safety behaviour:
 
 - The arm only moves while `/ARM/STATE/ENABLED` is true.
-- `/ESTOP` is level-triggered: it latches off, disables the OpenCAN
-  motors, and ignores enable requests until it clears. `master_node`
+- `/ESTOP` is level-triggered: it latches off and ignores enable requests
+  until it clears, but it keeps OpenCAN torque enabled by writing the
+  measured positions as targets, so the arm holds its pose. `master_node`
   republishes the enabled level, so the arm re-arms once the stop clears.
 - Motor feedback keeps flowing while the arm is disabled, so the
   planner can initialize and track the measured pose.

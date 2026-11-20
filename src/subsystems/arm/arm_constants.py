@@ -308,7 +308,7 @@ WRIST_TWIST_LIMIT = MECHANICAL_LIMITS[4]
 # pushes the shoulder toward its lower stop and the elbow toward its upper
 # stop until each stalls, backs each off 0.5 deg, and removes torque from the
 # three OpenCAN motors.  The next R restores torque, returns to the crouch,
-# and homes the arm.  Details: RESTING_FEATURE_PLAN.md.
+# and homes the arm.  Details: planz/RESTING_FEATURE_PLAN.md.
 
 # While resting, the shoulder and elbow may travel past their normal
 # mechanical limits by this much (hard-clamped by RESTING_LIMITS below).
@@ -451,7 +451,7 @@ ARM_MOTOR_PARAMS = [
         tick_offset=-202000,
         tick_lower_limit=-202000,
         tick_upper_limit=622000,
-        max_speed=250,
+        max_speed=200,
     ),  # shoulder
     ArmMotorParams(
         ticks_per_rad=-TINSMITH_M4230_TICKS_PER_RAD,

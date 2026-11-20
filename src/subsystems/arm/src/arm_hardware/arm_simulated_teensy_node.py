@@ -67,11 +67,11 @@ def build_can_frame(template: Message, values: dict[str, object]) -> Message:
     return frame
 
 
-class SimulatedArmTeensy(Node):
+class ArmSimulatedTeensy(Node):
     """Publish the arm heartbeat and wrist feedback; leave OpenCAN alone."""
 
     def __init__(self) -> None:
-        super().__init__("simulated_arm_teensy")
+        super().__init__("arm_simulated_teensy")
 
         self.__enabled = False
         self.__estop = False
@@ -218,7 +218,7 @@ def main() -> None:
     rclpy.init(signal_handler_options=SignalHandlerOptions.ALL)
     node = None
     try:
-        node = SimulatedArmTeensy()
+        node = ArmSimulatedTeensy()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass

@@ -359,7 +359,7 @@ class ArmHardwareNode(Node):
                 f"No driver for {motor_idx.name}")
 
     def __on_estop_received(self, msg: Bool):
-        """Latch or clear the E-STOP and disable the arm on stop."""
+        """Latch or clear the E-STOP and hold the arm's measured pose."""
         # /ESTOP is level-triggered: True stops the arm, False clears the
         # latch. The node stays alive so the arm can resume after a
         # transient heartbeat loss.
@@ -374,21 +374,15 @@ class ArmHardwareNode(Node):
         if self.__estop:
             return
         self.__estop = True
-        self.get_logger().info("E-STOP latched: disabling arm motors")
-        self.arm_enabled = False
-        # Forget the in-flight targets: a re-enable must not inherit motion
-        # that was interrupted by the stop.
+        self.get_logger().info("E-STOP latched: holding measured arm pose")
+
+        # Lock the current pose instead of removing torque.  Send each
+        # measured position as the new target while the arm is still
+        # enabled, so the drives hold where they are and a later re-enable
+        # cannot resume a stale in-flight target.
         self.__forget_targets()
-
-        # Turn off the arm immediately by sending disable messages to all the
-        # OpenCAN motors.
-        self.__open_can.set_enabled(False)
-
-        # Scoped to RESTING: the E-stop also latches torque off, and the
-        # latch survives the E-stop clear until the restore re-enables it.
-        if self.__resting:
-            self.__torque_off = True
-            self.__publish_torque_state()
+        self.__target_measured_positions()
+        self.arm_enabled = False
 
     def __on_arm_enable_received(self, msg: Bool):
         """Enable or disable the motors, honouring the E-STOP latch."""
@@ -462,7 +456,11 @@ class ArmHardwareNode(Node):
         self.__publish_torque_state()
 
     def __target_measured_positions(self):
-        """Send each measured position as the target before re-enabling."""
+        """Send each measured position as the target.
+
+        Used before re-enabling after a resting torque-off, and by the
+        E-STOP handler to lock the current pose.
+        """
         for motor_idx in ARM_MOTOR_IDX:
             measured = self.__motors_actual_angles[motor_idx]
             if math.isfinite(measured):

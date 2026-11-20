@@ -34,15 +34,29 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            # Canonical names. Launch files and scripts use these.
             'arm_camera_node = arm_camera.arm_camera_node:main',
             'arm_master_node = arm_master.arm_master_node:main',
             'arm_end_effector_node = arm_end_effector.arm_end_effector_node:main',
             'arm_route_planner_node = arm_route_planner.arm_route_planner_node:main',
             'arm_hardware_node = arm_hardware.arm_hardware_node:main',
-            'simulated_arm_teensy_node = arm_hardware.simulated_arm_teensy_node:main',
+            'arm_simulated_teensy_node = arm_hardware.arm_simulated_teensy_node:main',
             'arm_teleop_node = arm_teleop.arm_teleop_node:main',
             'arm_typing_node = arm_typing.arm_typing_node:main',
             'arm_sniffer_node = arm_sniffer.arm_sniffer_node:main',
+            # Short aliases: `ros2 run arm <name>` without "arm_"/"_node".
+            'camera = arm_camera.arm_camera_node:main',
+            'master = arm_master.arm_master_node:main',
+            'end_effector = arm_end_effector.arm_end_effector_node:main',
+            'route_planner = arm_route_planner.arm_route_planner_node:main',
+            'hardware = arm_hardware.arm_hardware_node:main',
+            'sim_teensy = arm_hardware.arm_simulated_teensy_node:main',
+            'teleop = arm_teleop.arm_teleop_node:main',
+            'typing = arm_typing.arm_typing_node:main',
+            'sniffer = arm_sniffer.arm_sniffer_node:main',
+            # Mnemonic aliases for the debug/simulation-only helpers.
+            'ASN = arm_sniffer.arm_sniffer_node:main',
+            'ASTN = arm_hardware.arm_simulated_teensy_node:main',
         ],
     },
 )

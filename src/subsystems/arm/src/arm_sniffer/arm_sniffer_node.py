@@ -5,6 +5,8 @@ This node is intentionally not part of ``main_launch.xml`` or
 Run it explicitly with::
 
     ros2 run arm arm_sniffer_node
+    ros2 run arm sniffer
+    ros2 run arm ASN
 
 Every second it prints one compact snapshot: an aligned status/flags block
 and a joint table.
