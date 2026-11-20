@@ -79,7 +79,11 @@ class Xbee(Node):
 
         try:
             message_bytes = bytes(msg.data)
-            self.__xbee_device.send_data(self.__remote_xbee, message_bytes)
+            # Non-blocking: the blocking send waits for the radio's transmit
+            # status, which can take seconds on a congested link.  While it
+            # waited, this node's subscription queue overflowed and telemetry
+            # was dropped.  The streams are loss tolerant, so do not wait.
+            self.__xbee_device.send_data_async(self.__remote_xbee, message_bytes)
             self.get_logger().debug(f"sent data, {msg.data}")
 
         except ValueError as e:

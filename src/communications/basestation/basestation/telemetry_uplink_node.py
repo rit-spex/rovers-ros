@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import sys
 import os
+import time
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -51,6 +52,10 @@ ARM_FLAG_BITS = {
 
 # Pose carries metres; the compact protocol uses centi-inches.
 METERS_PER_INCH = 0.0254
+
+# Unchanged telemetry is re-sent at this period so the basestation sees the
+# link as live (its freshness timeout is 2.5 s).
+TELEMETRY_REFRESH_SEC = 1.0
 
 
 class TelemetryUplink(Node):
@@ -142,6 +147,8 @@ class TelemetryUplink(Node):
             "pose_yaw": 0,
         }
         self._arm_pose_seen = False
+        # message id -> (last encoded payload, monotonic time it was sent)
+        self._last_sent = {}
 
         self._register_subscriptions()
         self.create_timer(0.1, self._publish_uplink_packets)
@@ -311,6 +318,15 @@ class TelemetryUplink(Node):
 
     def _send(self, payload: Dict, message_id: int) -> None:
         encoded = self._encoder.encode_data(payload, message_id)
+        # The radio is shared with the basestation's commands, so an unchanged
+        # packet is only refreshed every TELEMETRY_REFRESH_SEC instead of at
+        # the 10 Hz snapshot rate.  A changed value always goes out at once.
+        now = time.monotonic()
+        last = self._last_sent.get(message_id)
+        if (last is not None and last[0] == encoded
+                and now - last[1] < TELEMETRY_REFRESH_SEC):
+            return
+        self._last_sent[message_id] = (encoded, now)
         if self._protocol_trace:
             message_name = self._encoder.get_message_name(message_id)
             self.get_logger().info(
