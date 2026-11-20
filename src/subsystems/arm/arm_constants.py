@@ -112,6 +112,68 @@ PLANNER_ALWAYS_COMMANDS = {
 # measured pose instead of chasing an abandoned Cartesian target.
 PLANNER_HOLD_COMMAND = "hold"
 
+# =============================================================================
+# Action driver interface (arm_action_driver_node)
+# =============================================================================
+
+# The action driver owns flip/homing/zenith/resting motion.  The master
+# routes the action commands here instead of to the planner, and the
+# planner suppresses its own target publishing while the driver reports a
+# running action on /ARM/ACTION/ACTIVE.
+# Details: planz/ACTION_DRIVER_PLAN.md.
+ACTION_COMMAND_TOPIC = "/ARM/ACTION/COMMAND"
+ACTION_ACTIVE_TOPIC = "/ARM/ACTION/ACTIVE"
+ACTION_STATUS_TOPIC = "/ARM/ACTION/STATUS"
+
+# /ARM/ACTION/ACTIVE values (std_msgs/Int8).  A paused flip is IDLE with a
+# remembered goal inside the driver, so there is no PAUSED value; ZENITH
+# covers both the holding and exiting substates.
+ACTION_ACTIVE_IDLE = 0
+ACTION_ACTIVE_HOMING = 1
+ACTION_ACTIVE_FLIPPING = 2
+ACTION_ACTIVE_ZENITH = 3
+ACTION_ACTIVE_RESTING = 4
+
+# Command strings the master routes to /ARM/ACTION/COMMAND.  flip_release
+# is the flip button-up event (new): the basestation sends it when the flip
+# key is released.  home_joint:<n> matches ACTION_HOME_JOINT_PREFIX.
+ACTION_COMMANDS = {
+    "flip",
+    "flip_release",
+    "home",
+    "homing",
+    "zenith",
+    "zenith_mode",
+    "toggle_zenith",
+    "rest",
+    "resting",
+    "toggle_resting",
+}
+ACTION_HOME_JOINT_PREFIX = "home_joint:"
+
+# Action commands that bypass the MANUAL-only owner gate: resting and zenith
+# are global safety/pose commands, and flip_release must always be able to
+# end a hold-to-run flip that a handover interrupted.
+ACTION_ALWAYS_COMMANDS = {
+    "toggle_resting",
+    "rest",
+    "resting",
+    "zenith",
+    "zenith_mode",
+    "toggle_zenith",
+    "flip_release",
+}
+
+# ArmActionStatus.phase substates (0 = running/entering everywhere).
+PHASE_ZENITH_HOLDING = 0
+PHASE_ZENITH_EXITING = 1
+PHASE_FLIP_RUNNING = 0
+PHASE_FLIP_PAUSING = 1
+
+# The planner treats /ARM/ACTION/ACTIVE as IDLE once it has not refreshed
+# for this long (action driver died mid-action).  Several 20 Hz cycles.
+ACTION_ACTIVE_TIMEOUT_SEC = 1.0
+
 # Autonomous command inputs.  The arm master forwards these only while the
 # AUTONOMOUS control source owns the arm, so functional nodes remain
 # source-agnostic.  The typing node is the first user of this surface.
@@ -590,6 +652,27 @@ TELEOP_STOP_EPSILON = 1e-3
 
 HOMING_SPEED = 1 / 300                        # Radians per step during homing
 HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
+
+
+# =============================================================================
+# Action driver stepping profile
+# =============================================================================
+
+# Shared trapezoidal profile for homing, flip, zenith, and resting moves
+# (arm_action_driver_node).  Per-joint hardware caps come from
+# ARM_MOTOR_MAX_ANG_VEL; the per-action cruise caps below are the effective
+# speed limits.  Proposed values; tune in simulation, then on hardware.
+# Details: planz/ACTION_DRIVER_PLAN.md §6.
+ACTION_ACCEL_RAD_S2 = 4.0
+ACTION_DECEL_RAD_S2 = 8.0
+
+# Per-action cruise speed caps [rad/s].
+ACTION_HOMING_CRUISE_RAD_S = HOMING_SPEED / DT   # today's homing rate
+ACTION_FLIP_CRUISE_RAD_S = 2.5                   # ~current 30-frame pace
+ACTION_RESTING_CROUCH_RAD_S = RESTING_MOVE_ANG_VEL   # 2 deg/s (unchanged)
+ACTION_RESTING_PUSH_RAD_S = RESTING_PUSH_RATE        # 1 deg/s (unchanged)
+ACTION_ZENITH_CRUISE_RAD_S = 1.0            # drive to the straight-up pose
+ACTION_ZENITH_EXIT_CRUISE_RAD_S = ACTION_HOMING_CRUISE_RAD_S
 
 
 # =============================================================================

@@ -17,6 +17,7 @@
 	<node pkg="arm" exec="arm_teleop_node" name="arm_teleop" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_typing_node" name="arm_typing" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_route_planner_node" name="arm_route_planner" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
+	<node pkg="arm" exec="arm_action_driver_node" name="arm_action_driver" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_master_node" name="arm_master" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 	<node pkg="arm" exec="arm_end_effector_node" name="arm_end_effector" if="$(eval &quot;'$(var robot_config)'=='arm_drivebase'&quot;)"></node>
 </launch>

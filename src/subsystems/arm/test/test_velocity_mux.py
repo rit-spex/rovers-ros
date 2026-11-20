@@ -1,7 +1,7 @@
 """Tests for the manual teleop velocity gate in the arm master mux."""
 
 from arm_master.arm_master_node import ManualVelocityGate, velocity_is_neutral
-from arm_constants import PLANNER_ALWAYS_COMMANDS
+from arm_constants import ACTION_ALWAYS_COMMANDS, PLANNER_ALWAYS_COMMANDS
 
 NEUTRAL = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 FORWARD = (0.2, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -17,6 +17,14 @@ def test_always_forward_set_covers_only_mode_toggles():
     for motion in ("flip", "home", "pnp_normal", "toggle_planar",
                    "joint_drive", "position_drive"):
         assert motion not in PLANNER_ALWAYS_COMMANDS
+
+
+def test_action_bypass_set_covers_safety_and_release_commands():
+    assert "resting" in ACTION_ALWAYS_COMMANDS
+    assert "toggle_zenith" in ACTION_ALWAYS_COMMANDS
+    assert "flip_release" in ACTION_ALWAYS_COMMANDS
+    for motion in ("flip", "home", "home_joint:2"):
+        assert motion not in ACTION_ALWAYS_COMMANDS
 
 
 def test_neutral_detection():

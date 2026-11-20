@@ -433,6 +433,17 @@ class ArmSimNode(Node):
 
         if not self.__started:
             if self.__estop or not self.__arm_enabled:
+                # Hold the spawn pose while the ROS stack boots.  Letting
+                # the arm hang under gravity here can put it in the resting
+                # region before the planner initializes, which then latches
+                # the de-torqued resting mode.
+                self.__hold_current()
+                if all(math.isfinite(value)
+                       for value in self.__current_ticks):
+                    if any(math.isnan(value)
+                           for value in self.__commands_ticks):
+                        self.__commands_ticks = list(self.__current_ticks)
+                self.__publish_targets()
                 return
             if self.__randomize_start:
                 target_angles = random_home_pose()

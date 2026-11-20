@@ -6,14 +6,17 @@ Every command reaches an actuator through this node:
 
     manual teleop   /ARM/MANUAL/CMD_VELOCITY -> /ARM/CMD_VELOCITY
     manual keys     /ARM/COMMAND             -> /ARM/PLANNER/COMMAND
+                                            -> /ARM/ACTION/COMMAND
                                             -> /ARM/END_EFFECTOR/COMMAND
 
 The functional nodes are source-agnostic and consume only the arbitrated
 output:
 
-    arm_route_planner_node : all 5-DOF motion. It validates the motion
-                             commands and owns their readiness, e-stop, and
-                             unknown-command errors
+    arm_route_planner_node : teleop, IK, limit modes, and joint locks. It
+                             validates the motion commands and owns their
+                             readiness, e-stop, and unknown-command errors
+    arm_action_driver_node : homing, side flips, zenith, and resting motion,
+                             plus the resting/torque hardware latches
     arm_end_effector_node  : gripper jog and solenoid strikes. It receives
                              only end-effector commands; the master validates
                              their preconditions and throttles errors for
@@ -56,6 +59,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import (
+    ArmActionStatus,
     ArmCommand,
     ArmPlannerStatus,
     Pose,
@@ -64,6 +68,12 @@ from custom_interfaces.msg import (
 from std_msgs.msg import Bool, String, UInt8, UInt32
 
 from arm_constants import (
+    ACTION_ACTIVE_TIMEOUT_SEC,
+    ACTION_ALWAYS_COMMANDS,
+    ACTION_COMMANDS,
+    ACTION_COMMAND_TOPIC,
+    ACTION_HOME_JOINT_PREFIX,
+    ACTION_STATUS_TOPIC,
     ARM_COMMAND_TOPIC,
     ARM_CONTROL_REQUEST_TOPIC,
     ARM_CONTROL_SOURCE_TOPIC,
@@ -229,6 +239,12 @@ class ArmMasterNode(Node):
         self.__planner_ready = False
         self.__last_error_seq = None
 
+        # Action driver health and its latest error event.
+        self.__action_status = None
+        self.__action_status_received_at = 0.0
+        self.__action_driver_ready = False
+        self.__last_action_error_seq = None
+
         # Autonomous pose stream watchdog.  The producer refreshes the target
         # while it is active; silence means it died or deliberately paused, so
         # the master holds the measured pose instead of chasing stale intent.
@@ -260,6 +276,8 @@ class ArmMasterNode(Node):
             Pose, POSE_TOPIC, 10)
         self.__planner_command_publisher = self.create_publisher(
             ArmCommand, PLANNER_COMMAND_TOPIC, 10)
+        self.__action_command_publisher = self.create_publisher(
+            ArmCommand, ACTION_COMMAND_TOPIC, 10)
         self.__end_effector_command_publisher = self.create_publisher(
             ArmCommand, END_EFFECTOR_COMMAND_TOPIC, 10)
         # One topic keeps code/arg/seq consistent for the telemetry uplink.
@@ -274,6 +292,12 @@ class ArmMasterNode(Node):
             ArmPlannerStatus,
             PLANNER_STATUS_TOPIC,
             self.__on_planner_status_received,
+            10,
+        )
+        self.create_subscription(
+            ArmActionStatus,
+            ACTION_STATUS_TOPIC,
+            self.__on_action_status_received,
             10,
         )
 
@@ -375,6 +399,8 @@ class ArmMasterNode(Node):
             return
         if command in END_EFFECTOR_COMMANDS:
             self.__forward(self.__end_effector_command_publisher, command)
+        elif self.__is_action_command(command):
+            self.__handle_action_command(command, autonomous=True)
         else:
             self.__forward(self.__planner_command_publisher, command)
 
@@ -424,6 +450,17 @@ class ArmMasterNode(Node):
         self.__last_error_seq = seq
         self.__publish_error(msg.error_code, msg.error_arg)
 
+    def __on_action_status_received(self, msg: ArmActionStatus):
+        """Relay action rejections and refresh action-driver availability."""
+        self.__action_status = msg
+        self.__action_status_received_at = time.monotonic()
+
+        seq = int(msg.error_seq) & 0xFF
+        if seq == self.__last_action_error_seq:
+            return
+        self.__last_action_error_seq = seq
+        self.__publish_error(msg.error_code, msg.error_arg)
+
     # ------------------------------------------------------------------
     # Command routing
     # ------------------------------------------------------------------
@@ -446,6 +483,10 @@ class ArmMasterNode(Node):
         MANUAL-only gate so an autonomous source cannot swallow them.  The
         planner remains the authority on whether they are accepted.
         """
+        if self.__is_action_command(command):
+            self.__handle_action_command(command)
+            return
+
         if command in PLANNER_ALWAYS_COMMANDS:
             self.__forward(self.__planner_command_publisher, command)
             return
@@ -471,6 +512,46 @@ class ArmMasterNode(Node):
         if not self.__planner_is_alive():
             # No planner to report this, so surface it locally.
             self.__publish_error(ARM_ERROR_REJECTED)
+
+    @staticmethod
+    def __is_action_command(command: str) -> bool:
+        """True when the action driver owns this command."""
+        return (command in ACTION_COMMANDS
+                or command.startswith(ACTION_HOME_JOINT_PREFIX))
+
+    def __handle_action_command(self, command: str, autonomous=False):
+        """Route one flip/homing/zenith/resting command to the driver.
+
+        Resting and zenith are global safety/pose commands and always pass;
+        flip and homing are motion intent and keep the MANUAL-only gate.  A
+        planner ``hold`` is sent first so the planner drops its own target
+        before the driver takes ownership.
+        """
+        if self.__estop:
+            return
+        allowed = (
+            autonomous
+            or command in ACTION_ALWAYS_COMMANDS
+            or self.__control_source == ArmControlSource.MANUAL
+        )
+        if not allowed:
+            if self.__should_report(command):
+                self.get_logger().warning(
+                    f"Manual command '{command}' ignored: "
+                    f"{control_source_label(self.__control_source)} "
+                    f"owns the arm")
+                self.__publish_error(ARM_ERROR_REJECTED)
+            return
+
+        if not self.__action_driver_is_alive():
+            self.get_logger().warning(
+                f"Action command '{command}' ignored: "
+                "action driver unavailable")
+            self.__publish_error(ARM_ERROR_REJECTED)
+            return
+
+        self.__publish_hold()
+        self.__forward(self.__action_command_publisher, command)
 
     def __handle_end_effector_command(self, command: str):
         """Validate and route one gripper or solenoid command."""
@@ -552,6 +633,27 @@ class ArmMasterNode(Node):
         """True when a fresh planner status says the 5-DOF arm is ready."""
         return self.__planner_is_alive() and bool(self.__planner_status.ready)
 
+    def __action_driver_is_alive(self):
+        """True when action-driver status is arriving."""
+        if self.__action_status is None:
+            return False
+        return (time.monotonic() - self.__action_status_received_at
+                <= ACTION_ACTIVE_TIMEOUT_SEC)
+
+    def __check_action_driver_health(self):
+        """Log action-driver availability transitions."""
+        alive = self.__action_driver_is_alive()
+        if alive == self.__action_driver_ready:
+            return
+        self.__action_driver_ready = alive
+        if alive:
+            self.get_logger().info("Action driver connected")
+            # Accept the driver's current error state after a restart.
+            self.__last_action_error_seq = None
+        else:
+            self.get_logger().warning(
+                "Action driver unavailable; action commands rejected")
+
     def __check_planner_health(self):
         """Log readiness transitions and surface a lost planner."""
         ready = self.__planner_is_ready()
@@ -611,6 +713,7 @@ class ArmMasterNode(Node):
         if self.__estop:
             return
         self.__check_planner_health()
+        self.__check_action_driver_health()
         self.__check_autonomous_pose()
 
     def __check_autonomous_pose(self):

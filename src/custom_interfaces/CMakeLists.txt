@@ -21,6 +21,7 @@ set(msg_files
     "msg/PointList.msg"
     "msg/ArmCommand.msg"
     "msg/ArmPlannerStatus.msg"
+    "msg/ArmActionStatus.msg"
     "msg/ArmTypingPlane.msg"
     "msg/ArmTypingStatus.msg"
     "msg/SpaceMouseAxes.msg"

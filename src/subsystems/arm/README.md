@@ -31,14 +31,19 @@ src/subsystems/arm/
 │   ├── arm_end_effector/
 │   │   └── arm_end_effector_node.py # gripper target and solenoid
 │   ├── arm_route_planner/
-│   │   ├── arm_route_planner_node.py # IK, actions, 5-DOF target writer
+│   │   ├── arm_route_planner_node.py # IK, teleop, limits, target writer
 │   │   └── kinematics/            # shared kinematic core (pure library)
 │   │       ├── linkage_models.py  # symbolic FK, IK, frames, RPY helpers
 │   │       ├── limiters.py        # workspace limiters and octant gating
 │   │       ├── path_planner.py    # safe joint-space path search
 │   │       ├── slew.py            # joint slew / velocity-limit model
-│   │       ├── arm_controller.py  # RoverArmController state machine
-│   │       └── actions/           # homing, flip, and resting controllers
+│   │       ├── regions.py         # observed flipped/zenith/resting regions
+│   │       └── arm_controller.py  # RoverArmController: teleop, IK, modes
+│   ├── arm_action_driver/
+│   │   ├── arm_action_driver_node.py # homing, flip, zenith, resting motion
+│   │   ├── stepping.py            # shared trapezoidal step profile
+│   │   └── actions/
+│   │       └── resting.py         # RESTING collapse/restore state machine
 │   ├── arm_hardware/
 │   │   ├── arm_hardware_node.py   # ROS ↔ CAN boundary, transport, standard CAN
 │   │   ├── arm_simulated_teensy_node.py # wrist/gripper Teensy stand-in (no wrist HW)
@@ -46,7 +51,7 @@ src/subsystems/arm/
 │   └── arm_sniffer/               # opt-in debug node, not launched by default
 │       └── arm_sniffer_node.py
 ├── planz/                          # design plans:
-│   ├── ACTION_DRIVER_PLAN.md       # action driver node proposal (not built)
+│   ├── ACTION_DRIVER_PLAN.md       # action driver design (implemented)
 │   ├── RESTING_FEATURE_PLAN.md     # resting collapse/de-torque plan
 │   └── TELEOP_SMOOTHING_PLAN.md    # teleop smoothing plan
 └── test/                           # unit, limiter, and config tests
@@ -54,17 +59,18 @@ src/subsystems/arm/
 
 ## Nodes
 
-The package provides seven runtime nodes plus an opt-in debug tool.
-`arm_launch.xml` starts the first seven and renames them to `arm_camera`,
-`arm_teleop`, `arm_typing`, `arm_route_planner`, `arm_master`,
-`arm_end_effector`, and `arm_hardware`.
+The package provides eight runtime nodes plus an opt-in debug tool.
+`arm_launch.xml` starts the first eight and renames them to `arm_camera`,
+`arm_teleop`, `arm_typing`, `arm_route_planner`, `arm_action_driver`,
+`arm_master`, `arm_end_effector`, and `arm_hardware`.
 
 | Executable | Short alias | Standalone node name | Launched by default | Responsibility |
 | --- | --- | --- | --- | --- |
 | `arm_teleop_node` | `teleop` | `arm_teleop_node` | yes | Owns SpaceMouse semantics; publishes normalized velocity and gripper commands. |
 | `arm_typing_node` | `typing` | `arm_typing_node` | yes | Autonomous keyboard typing: plane/key inputs, drive-edge alignment, Cartesian key targets, and solenoid strikes. |
-| `arm_route_planner_node` | `route_planner` | `arm_route_planner_node` | yes | Owns 5-DOF target generation: IK, limit modes, flips, homing, locks, pose, and the arm target topics. |
-| `arm_master_node` | `master` | `arm_master_node` | yes | Arm subsystem master: arbitrates control ownership, routes commands, watches planner readiness, and is the sole `/ARM/STATE/ERROR` writer. |
+| `arm_route_planner_node` | `route_planner` | `arm_route_planner_node` | yes | Owns 5-DOF target generation: IK, teleop, limit modes, locks, pose, and the arm target topics. |
+| `arm_action_driver_node` | `action_driver` | `arm_action_driver_node` | yes | Owns homing, side flips, zenith, and resting motion plus the resting/torque hardware latches. |
+| `arm_master_node` | `master` | `arm_master_node` | yes | Arm subsystem master: arbitrates control ownership, routes commands, watches planner and driver health, and is the sole `/ARM/STATE/ERROR` writer. |
 | `arm_end_effector_node` | `end_effector` | `arm_end_effector_node` | yes | Owns the gripper target, gripper drive, and solenoid strike. |
 | `arm_hardware_node` | `hardware` | `arm_hardware_node` | yes | Owns the CAN link: sends targets, polls measured angles, enforces enable/E-stop. Replaced by `rover_simulation/arm_sim_node` in simulation. |
 | `arm_camera_node` | `camera` | `arm_camera_node` | yes | Placeholder; no logic yet. |
@@ -226,18 +232,25 @@ control source, and every manual input reaches an actuator through it:
   `toggle_solenoid`) go only to `arm_end_effector_node` on
   `/ARM/END_EFFECTOR/COMMAND`; the planner never sees them, so the master
   validates their preconditions.
+- **Actions:** `flip`, `flip_release`, `home`/`homing`, `home_joint:<n>`,
+  `zenith`/`toggle_zenith`, and `resting`/`toggle_resting` go to
+  `arm_action_driver_node` on `/ARM/ACTION/COMMAND`, after an internal `hold`
+  to the planner. Resting and zenith bypass the MANUAL-only gate;
+  `flip_release` is always forwarded so a hold-to-run flip can end.
 
 Because the master emits the arbitrated stream, the planner and end effector
 do not subscribe to `/ARM/STATE/CONTROL_SOURCE` and never need to know who owns
 the arm.
 
-It owns `/ARM/STATE/ERROR` and consumes `/ARM/PLANNER/STATUS` for readiness
-and the latest planner error event. Commands are ignored while E-stopped;
-solenoid strikes are allowed before the arm initializes, while the gripper
-jog waits for planner readiness. Rejections of a held gripper arrow are
-throttled to one report per second so the error banner stays readable. If
-planner status stops arriving for `PLANNER_TIMEOUT_SEC` (5 s), the master
-reports `ARM_ERROR_REJECTED` so the loss stays visible.
+It owns `/ARM/STATE/ERROR` and consumes `/ARM/PLANNER/STATUS` and
+`/ARM/ACTION/STATUS` for readiness and the latest error events. Commands are
+ignored while E-stopped; solenoid strikes are allowed before the arm
+initializes, while the gripper jog waits for planner readiness. Rejections of
+a held gripper arrow are throttled to one report per second so the error
+banner stays readable. If planner status stops arriving for
+`PLANNER_TIMEOUT_SEC` (5 s), the master reports `ARM_ERROR_REJECTED` so the
+loss stays visible; action commands are likewise refused when the action
+driver has not reported for `ACTION_ACTIVE_TIMEOUT_SEC`.
 
 It is also the control arbiter and the single writer of
 `/ARM/STATE/CONTROL_SOURCE`. Sources request ownership on
@@ -281,28 +294,63 @@ and the Gazebo bridge drop targets while the arm is disabled.
 
 ### `arm_route_planner_node`
 
-The 5-DOF state machine and the main consumer of joint feedback. It owns a
+The 5-DOF teleop/IK core and the main consumer of joint feedback. It owns a
 `RoverArmController` for its whole lifetime and stays uninitialized until all
 five measured joint angles have arrived; it then syncs the controller to the
 measured pose and adopts the matching normal/flipped side. It then runs one
 cycle every `DT` (0.05 s, 20 Hz):
 
 1. Sync the controller to the measured angles.
-2. Read the latest `/ARM/CMD_VELOCITY` and convert it to per-cycle deltas,
+2. Read `/ARM/ACTION/ACTIVE`; while the action driver owns an action, stop
+   publishing targets and skip the controller step.
+3. Read the latest `/ARM/CMD_VELOCITY` and convert it to per-cycle deltas,
    unless gripper drive is active or the teleop source went quiet.
-3. Advance the mode state machine via `RoverArmController.update()`.
-4. Publish the rate-limited 5-DOF joint targets, planner state, and pose.
+4. Advance the mode state machine via `RoverArmController.update()`.
+5. Publish the rate-limited 5-DOF joint targets, planner state, and pose.
 
-It owns every 5-DOF operator behavior: position vs joint drive, normal /
-flipped / planar limit modes, homing, side flips, single-joint homing, joint
-locks, position/orientation locks, orientation guide, and target publishing.
-It is the sole writer of the five arm targets; the end effector node owns the
-gripper and solenoid. Unchanged targets are not republished every cycle, but
-are refreshed every 20 cycles so late consumers still receive them; a locked
-joint republishes its last commanded target instead of echoing encoder
-noise. Command rejections and runtime failures are reported in
-`/ARM/PLANNER/STATUS`, and the master republishes them on
-`/ARM/STATE/ERROR` so that topic has one writer.
+It owns the 5-DOF operator behavior that needs IK and limits: position vs
+joint drive, normal / flipped / planar limit modes, joint locks, position /
+orientation locks, orientation guide, and target publishing. Homing, flips,
+zenith, and resting motion live in `arm_action_driver_node`; the planner
+mirrors the active action's mode flags and locks (forced base/twist locks in
+zenith, planar during resting) so gating and telemetry stay coherent. When
+`/ARM/ACTION/ACTIVE` falls back to idle, the planner re-syncs its targets to
+the measured pose before publishing again, so the arm never jumps back to a
+pre-action target. It is the only writer of the five arm targets outside an
+action; the end effector node owns the gripper and solenoid. Unchanged
+targets are not republished every cycle, but are refreshed every 20 cycles so
+late consumers still receive them; a locked joint republishes its last
+commanded target instead of echoing encoder noise. Command rejections and
+runtime failures are reported in `/ARM/PLANNER/STATUS`, and the master
+republishes them on `/ARM/STATE/ERROR` so that topic has one writer.
+
+---
+
+### `arm_action_driver_node`
+
+Owns the discrete, mostly Cartesian-free actions that used to run inside the
+planner: homing (full and single-joint), side flips, the zenith test pose, and
+the resting collapse/de-torque/restore sequence. It consumes the measured
+joint angles and publishes the five joint targets **only while an action is
+active**, plus:
+
+- `/ARM/ACTION/ACTIVE` (`std_msgs/Int8`: IDLE/HOMING/FLIPPING/ZENITH/RESTING)
+  so the planner knows when to stop publishing.
+- `/ARM/ACTION/STATUS` (`custom_interfaces/ArmActionStatus`: ready, active,
+  phase, progress, homing mask, error event).
+- `/ARM/HARDWARE/RESTING` and `/ARM/HARDWARE/TORQUE_ENABLED`, the resting
+  latches the hardware consumes.
+
+All moves use one shared positional trapezoidal profile
+(`ACTION_ACCEL_RAD_S2` / `ACTION_DECEL_RAD_S2`, per-action cruise caps in
+`arm_constants.py`). Flip is a maintained action: `flip` starts it,
+`flip_release` pauses it (`ACTIVE` returns to IDLE, so teleop is available),
+re-pressing resumes toward the remembered goal with a freshly planned safe
+path, and any manual velocity clears the goal. Zenith holds base and wrist
+twist, and the planner force-locks both while it runs; homing from zenith
+skips the exit move. Resting requires planar mode (or a resting-region
+startup pose). E-stop freezes target publishing; the hardware position-locks
+the measured pose.
 
 ---
 
@@ -354,12 +402,12 @@ E-stop topics and prints one snapshot per second. See
 
 `arm_launch.xml` is the standalone entry point. On the real rover the
 composition root is `src/main/launch/main_launch.xml`, which starts the
-teleop, route planner, master, end effector, and hardware nodes. In
-simulation,
+teleop, route planner, action driver, master, end effector, and hardware
+nodes. In simulation,
 `src/simulation/rover_simulation/launch/simulation_launch.xml` starts the
-Gazebo bridge, teleop node, route planner, master, and end effector; the
-bridge replaces `arm_hardware_node` and speaks the same target/current
-topics.
+Gazebo bridge, teleop node, route planner, action driver, master, and end
+effector; the bridge replaces `arm_hardware_node` and speaks the same
+target/current topics.
 
 ## Data flow
 
@@ -377,6 +425,9 @@ topics.
       │            /ARM/CMD_VELOCITY ────────► arm_route_planner
       │            /ARM/CMD_POSE ────────────►        │ /ARM/JOINT/TARGET_{5}
       │            /ARM/PLANNER/COMMAND ─────►        │ /ARM/STATE/*
+      │            /ARM/ACTION/COMMAND ──────► arm_action_driver
+      │                                               │ /ARM/JOINT/TARGET_{5}
+      │                                               │ /ARM/ACTION/{ACTIVE,STATUS}
       │                                               │
       │            /ARM/STATE/CONTROL_SOURCE
       │                  (diagnostic, transient-local)
@@ -476,9 +527,10 @@ ARM   enabled : True                flags  : PLANAR
 | --- | --- | --- |
 | `arm_teleop_node` | `/ARM/MANUAL/CMD_VELOCITY` | `/BASESTATION/spacemouse/axes` |
 | `arm_typing_node` | `/ARM/CONTROL/REQUEST`, `/ARM/AUTONOMOUS/CMD_POSE`, `/ARM/AUTONOMOUS/COMMAND`, `/BASESTATION/xbox/AXIS_LY`, `/BASESTATION/xbox/AXIS_RY`, `/ARM/TYPING/STATUS` | `/ARM/TYPING/PLANE`, `/ARM/TYPING/KEYS`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/PLANNER/STATUS`, `/ARM/STATE/POSE`, `/ESTOP` |
-| `arm_master_node` | `/ARM/CMD_VELOCITY`, `/ARM/CMD_POSE`, `/ARM/PLANNER/COMMAND`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/STATE/ERROR` | `/ESTOP`, `/ARM/COMMAND`, `/ARM/MANUAL/CMD_VELOCITY`, `/ARM/AUTONOMOUS/CMD_POSE`, `/ARM/AUTONOMOUS/COMMAND`, `/ARM/CONTROL/REQUEST`, `/ARM/PLANNER/STATUS` |
+| `arm_master_node` | `/ARM/CMD_VELOCITY`, `/ARM/CMD_POSE`, `/ARM/PLANNER/COMMAND`, `/ARM/ACTION/COMMAND`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/STATE/CONTROL_SOURCE`, `/ARM/STATE/ERROR` | `/ESTOP`, `/ARM/COMMAND`, `/ARM/MANUAL/CMD_VELOCITY`, `/ARM/AUTONOMOUS/CMD_POSE`, `/ARM/AUTONOMOUS/COMMAND`, `/ARM/CONTROL/REQUEST`, `/ARM/PLANNER/STATUS`, `/ARM/ACTION/STATUS` |
 | `arm_end_effector_node` | `/ARM/JOINT/TARGET_GRIPPER`, `/ARM/JOINT/TARGET_SOLENOID` | `/ESTOP`, `/ARM/END_EFFECTOR/COMMAND`, `/ARM/JOINT/CURRENT_GRIPPER` |
-| `arm_route_planner_node` | `/ARM/JOINT/TARGET_*` (5-DOF), planner `/ARM/STATE/*` topics, `/ARM/STATE/POSE`, `/ARM/PLANNER/STATUS` | `/ESTOP`, `/ARM/PLANNER/COMMAND`, `/ARM/CMD_VELOCITY`, `/ARM/JOINT/CURRENT_*` (5-DOF) |
+| `arm_route_planner_node` | `/ARM/JOINT/TARGET_*` (5-DOF), planner `/ARM/STATE/*` topics, `/ARM/STATE/POSE`, `/ARM/PLANNER/STATUS` | `/ESTOP`, `/ARM/PLANNER/COMMAND`, `/ARM/ACTION/ACTIVE`, `/ARM/ACTION/STATUS`, `/ARM/CMD_VELOCITY`, `/ARM/JOINT/CURRENT_*` (5-DOF) |
+| `arm_action_driver_node` | `/ARM/JOINT/TARGET_*` (5-DOF while an action is active), `/ARM/ACTION/ACTIVE`, `/ARM/ACTION/STATUS`, `/ARM/HARDWARE/RESTING`, `/ARM/HARDWARE/TORQUE_ENABLED` | `/ESTOP`, `/ARM/ACTION/COMMAND`, `/ARM/MANUAL/CMD_VELOCITY`, `/ARM/JOINT/CURRENT_*` (5-DOF), `/ARM/STATE/{ENABLED,PLANAR,FLIPPED,LOCKED_JOINTS,TORQUE_ENABLED}` |
 | `arm_hardware_node` | `/ARM/JOINT/CURRENT_*`, CAN frames to the Teensy | `/ARM/JOINT/TARGET_*`, `/ARM/JOINT/TARGET_SOLENOID`, `/ARM/STATE/ENABLED`, `/ESTOP`, CAN frames from the Teensy |
 | `arm_sniffer_node` | — | currents, targets, state flags, `/ARM/STATE/ENABLED`, `/ARM/STATE/CONTROL_SOURCE`, `/ESTOP` |
 | `arm_camera_node` | — | — |
@@ -532,8 +584,10 @@ Inputs:
 `toggle_joint_lock:<0-4>`, `home_joint:<0-4>`, `gripper_up`,
 `gripper_down`, and `fire_solenoid` (`toggle_solenoid` is a legacy alias).
 The resting/zenith toggles bypass the master's manual-only gate (they are
-global safety commands, not motion intent). The other motion commands are
-forwarded to the route planner for validation;
+global safety commands, not motion intent), and `flip_release` is always
+forwarded so an interrupted hold-to-run flip can end. The other motion
+commands are forwarded to the route planner for validation; `flip`, `home`/
+`homing`, `home_joint:<n>`, zenith, and resting go to the action driver;
 `gripper_up`, `gripper_down`, `fire_solenoid`, and `toggle_solenoid` go only
 to the end effector. See the module docstring in `arm_master_node.py` for the
 routing rules.
@@ -557,7 +611,8 @@ Outputs:
 | --- | --- | --- |
 | `/ARM/CMD_VELOCITY` | `custom_interfaces/Velocity` | Arbitrated teleop velocity. Zeroed on every handover and E-stop; requires a neutral stick before manual motion resumes. |
 | `/ARM/CMD_POSE` | `custom_interfaces/Pose` | Arbitrated absolute target from an autonomous source. |
-| `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. Includes the internal `hold` sent on handover/E-stop. |
+| `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Motion commands, for planner validation. Includes the internal `hold` sent on handover/E-stop and before an action starts. |
+| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, homing, zenith, and resting, for the action driver. |
 | `/ARM/END_EFFECTOR/COMMAND` | `custom_interfaces/ArmCommand` | Only the gripper/solenoid commands, gated on E-stop and readiness. Includes the internal `stop_jog` sent on a handover. |
 | `/ARM/STATE/CONTROL_SOURCE` | `std_msgs/UInt8` | Authoritative control owner (`0` none, `1` manual, `2` autonomous). Diagnostic; published transient-local. |
 | `/ARM/STATE/ERROR` | `std_msgs/UInt32` | Last rejection, packed as `(seq << 16) \| (code << 8) \| arg`; codes are in `rover_protocol.arm_errors`. |
@@ -565,11 +620,11 @@ Outputs:
 The master runs its health cycle every `DT` (0.05 s, 20 Hz). It ignores
 commands while E-stopped; solenoid strikes are forwarded even before the arm
 initializes, while the gripper jog requires fresh planner readiness. The
-planner reports command and runtime rejections in `/ARM/PLANNER/STATUS`, and
-the master republishes them on `/ARM/STATE/ERROR`; identical runtime codes
-are suppressed until the condition changes, while each rejected command
-forces a new sequence number. Rejections of a held gripper arrow are
-throttled to one report per second.
+planner and action driver report command and runtime rejections in
+`/ARM/PLANNER/STATUS` and `/ARM/ACTION/STATUS`; the master republishes them
+on `/ARM/STATE/ERROR`; identical runtime codes are suppressed until the
+condition changes, while each rejected command forces a new sequence number.
+Rejections of a held gripper arrow are throttled to one report per second.
 
 ### `arm_end_effector_node`
 
@@ -601,6 +656,8 @@ Inputs:
 | --- | --- | --- |
 | `/ESTOP` | `std_msgs/Bool` | Pauses the planner while asserted. |
 | `/ARM/PLANNER/COMMAND` | `custom_interfaces/ArmCommand` | Forwarded high-level commands. |
+| `/ARM/ACTION/ACTIVE` | `std_msgs/Int8` | Nonzero while the action driver owns the arm; the planner stops publishing targets then. |
+| `/ARM/ACTION/STATUS` | `custom_interfaces/ArmActionStatus` | Supplies the homing-joint mask while the driver homes. |
 | `/ARM/CMD_VELOCITY` | `custom_interfaces/Velocity` | Latest teleop velocity; converted to per-cycle deltas at `DT`. |
 | `/ARM/CMD_POSE` | `custom_interfaces/Pose` | Absolute Cartesian target; takes priority over teleop while fresh. |
 | `/ARM/JOINT/CURRENT_*` | `std_msgs/Float32` | Measured 5-DOF joint angles [rad]; the planner initializes once all five arrive. |
@@ -609,16 +666,12 @@ Outputs:
 
 | Topic | Type | Notes |
 | --- | --- | --- |
-| `/ARM/JOINT/TARGET_*` | `std_msgs/Float32` | Rate-limited 5-DOF joint targets [rad]. Unchanged targets are skipped, with a forced refresh every 20 cycles. |
-| `/ARM/STATE/HOMING` … `/ARM/STATE/RESTING` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`, `ZENITH`, `RESTING`. |
-| `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is motor-locked. |
-| `/ARM/STATE/HOMING_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is being homed. |
+| `/ARM/JOINT/TARGET_*` | `std_msgs/Float32` | Rate-limited 5-DOF joint targets [rad] while no action owns the arm. Unchanged targets are skipped, with a forced refresh every 20 cycles. |
+| `/ARM/STATE/HOMING` … `/ARM/STATE/RESTING` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`, `ZENITH`, `RESTING`. `FLIPPED` and `ZENITH` track the measured pose region; `HOMING`/`FLIPPING` follow the action driver. |
+| `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is motor-locked (base/twist are forced on during zenith). |
+| `/ARM/STATE/HOMING_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is being homed (from the driver status). |
 | `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing, `4` zenith, `5` resting. |
 | `/ARM/STATE/POSE` | `custom_interfaces/Pose` | Measured end-effector pose (metres/radians). |
-| `/ARM/HARDWARE/RESTING` | `std_msgs/Bool` | Planner → hardware: widen shoulder/elbow targets to `RESTING_LIMITS` and poll velocity. Refreshed at 1 Hz; times out after 1.5 s. |
-| `/ARM/HARDWARE/TORQUE_ENABLED` | `std_msgs/Bool` | Planner → hardware: OpenCAN torque level. Sticky off: only an explicit `True` re-enables. |
-| `/ARM/STATE/TORQUE_ENABLED` | `std_msgs/Bool` | Hardware → diagnostics: the actual torque latch state. |
-| `/ARM/JOINT/CURRENT_VELOCITY_{BASE,SHOULDER,ELBOW}` | `std_msgs/Float32` | OpenCAN drive velocity (0x606C), advisory stall signal for resting. |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Readiness plus the latest command/runtime rejection code. |
 
 The planner waits until all five measured angles arrive before it starts; it
@@ -629,6 +682,32 @@ still forces a new sequence number. Path searches run inside the command
 callback, so a long homing or flip plan can delay planner status briefly;
 the master only declares the planner dead after `PLANNER_TIMEOUT_SEC`
 (5 s).
+
+### `arm_action_driver_node`
+
+Inputs:
+
+| Topic | Type | Notes |
+| --- | --- | --- |
+| `/ESTOP` | `std_msgs/Bool` | Freezes target publishing while asserted. |
+| `/ARM/ACTION/COMMAND` | `custom_interfaces/ArmCommand` | `flip`, `flip_release`, `home`/`homing`, `home_joint:<n>`, zenith, resting, and the internal `adopt`. |
+| `/ARM/MANUAL/CMD_VELOCITY` | `custom_interfaces/Velocity` | Any nonzero sample clears a remembered flip goal and pauses a running flip. |
+| `/ARM/JOINT/CURRENT_*` | `std_msgs/Float32` | Measured 5-DOF joint angles [rad]. |
+| `/ARM/STATE/ENABLED` | `std_msgs/Bool` | Resting push precondition. |
+| `/ARM/STATE/PLANAR` | `std_msgs/Bool` | Resting is accepted only in planar (or an inferred resting pose). |
+| `/ARM/STATE/FLIPPED` | `std_msgs/Bool` | Selects the remembered side for homing and the zenith exit. |
+| `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Joints held during homing and flips. |
+| `/ARM/STATE/TORQUE_ENABLED` | `std_msgs/Bool` | Hardware torque latch, for the resting restore handshake. |
+
+Outputs:
+
+| Topic | Type | Notes |
+| --- | --- | --- |
+| `/ARM/JOINT/TARGET_*` | `std_msgs/Float32` | 5-DOF targets while an action is active; nothing is published while idle. |
+| `/ARM/ACTION/ACTIVE` | `std_msgs/Int8` | `0` idle, `1` homing, `2` flipping, `3` zenith, `4` resting. |
+| `/ARM/ACTION/STATUS` | `custom_interfaces/ArmActionStatus` | Readiness, active enum, phase, progress, homing mask, and the latest rejection. |
+| `/ARM/HARDWARE/RESTING` | `std_msgs/Bool` | Widen shoulder/elbow targets to `RESTING_LIMITS`; refreshed at 1 Hz. |
+| `/ARM/HARDWARE/TORQUE_ENABLED` | `std_msgs/Bool` | OpenCAN torque intent; sticky off until an explicit `True`. |
 
 ### `arm_hardware_node`
 

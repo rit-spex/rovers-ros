@@ -1,7 +1,8 @@
 """Arm controller: kinematic state machine for the 5-DOF arm.
 
-Owns drive modes, limit modifiers, joint locks, homing, flips, and target
-generation.  Pure library: no ROS imports.
+Owns drive modes, limit modifiers, joint locks, teleop, and IK target
+generation.  Homing, flips, zenith, and resting motion live in
+``arm_action_driver_node``.  Pure library: no ROS imports.
 """
 
 import math
@@ -10,15 +11,10 @@ from typing import cast
 import numpy as np
 
 from arm_constants import (
-    HOMING_TARGET, HOMING_SPEED, HOMING_THRESHOLD,
     MAX_TRANSLATION_DELTA,
-    ELBOW_DEADBAND, MECHANICAL_LIMITS, PLANAR_BASE,
     ORIENTATION_SNAP_THRESHOLD, ORIENTATION_SNAP_OFF_AXIS,
     END_EFFECTOR_MIN_Z, TRACK_POS_TOL, TRACK_ORI_TOL, DT,
-    WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
-    ZENITH_ANGLE_TOL, ZENITH_JOINT_TARGET,
-    RESTING_CROUCH_TARGET, RESTING_INFERENCE_TOL,
-    RESTING_MOVE_ANG_VEL,
+    ZENITH_ANGLE_TOL,
     FRONT_LOW, BACK_HIGH, BACK_LOW,
     TELEOP_ACCEL_IN_S2, TELEOP_DECEL_IN_S2, TELEOP_ANG_ACCEL_RAD_S2,
     TELEOP_JOINT_ACCEL_TIME_S, TELEOP_LEAD_LIMIT_DEG,
@@ -28,18 +24,16 @@ from .linkage_models import (
     OrientationMatrix, wrap2pi, nearest_axis_aligned_rotation,
 )
 from .limiters import (
-    PLANAR_MODE, HOMING_MODE, ZENITH_MODE, RESTING_MODE,
+    PLANAR_MODE, ZENITH_MODE, RESTING_MODE,
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, TYPING_MODE,
-    OCTANT_DIRECT_FLIP, OCTANT_PLANAR_EXIT_LOCK,
+    OCTANT_PLANAR_EXIT_LOCK,
     OCTANT_NORMAL_ALLOWED, OCTANT_PLANAR_ALLOWED,
     OCTANT_PLANAR_FLIPPED_ALLOWED,
     _get_octant,
 )
-from .actions.home import HomingController
-from .actions.flip import FlipController
-from .actions.resting import RestingController
+from . import regions
 from .path_planner import (
-    build_arm_solver_object, extract_key_joints, plan_safe_path,
+    build_arm_solver_object, extract_key_joints,
 )
 from .slew import SimulatedMechanicalArm
 
@@ -64,7 +58,6 @@ class RoverArmController:
         l0, l1, l2, l3 — shorthand aliases for pos[0..3]
         solver_history: list[IterationResults] — last IK solve trace
         locked_joints: list[bool] — per-joint motor lockout flags
-        home_joint_idx: int | None — single joint being homed, or None
     """
 
     def __init__(self):
@@ -74,13 +67,13 @@ class RoverArmController:
         angles with :meth:`from_measured` or ``sync_angles()`` before issuing
         any motion command; until then the controller reports itself as
         uninitialized and refuses commands that need a pose.
+
+        Homing, flips, zenith, and resting are owned by the separate
+        ``arm_action_driver_node``.  This controller keeps the mode flags,
+        joint limits, locks, teleop, and IK only.
         """
         # Core robotics
         self.model, self.solver = build_arm_solver_object()
-
-        # Sub-controllers
-        self.homing = HomingController(HOMING_TARGET, HOMING_SPEED, HOMING_THRESHOLD)
-        self.flipper = FlipController(duration_frames=30)
 
         # Operating modes
         self.joint_drive = False       # False=position drive, True=joint drive
@@ -88,22 +81,13 @@ class RoverArmController:
         self.position_locked = False   # True = target translation disabled
         self.orientation_locked = False  # True = target rotation disabled
         self._orientation_lock_rotation: np.ndarray | None = None
-        self.home_joint_idx: int | None = None  # None=full homing, int=single
-        self._homing_flipped = False   # side whose home pose is targeted
-        self._homing_cross_dir = 0     # elbow deadband crossing direction
         self.limit_mode = PICK_AND_PLACE_MODE
         self.flipped = False           # Pick-and-Place side modifier
         self.planar = False            # base-locked vertical modifier
         self.typing = False            # keyboard-typing limits/modifier
-        self.zenith = False            # straight-up depower/test pose
-        self._zenith_side = False      # side to restore when leaving zenith
-        self._zenith_exit_target: list[float] | None = None
-        self._zenith_saved_locks: list[bool] | None = None
-        self.resting = False           # collapse/de-torque operation active
-        self._resting_saved_locks: list[bool] | None = None
-        self.resting_action = RestingController()
-        self._resting_path_phase: str | None = None
-        self._resting_events: list[str] = []
+        # Reporting mirrors of the action driver's current action.
+        self.zenith = False            # straight-up action is running
+        self.resting = False           # collapse/de-torque action is running
         self._typing_saved_locks: list[bool] | None = None
         self.solver_history = []       # debug: last IK iteration results
         self.last_failure: str | None = None
@@ -130,19 +114,6 @@ class RoverArmController:
         self.teleop_lead_cycles = 0
         self._teleop_needs_reset = True
         self._teleop_stalled = False
-
-        # Safe homing path and flip waypoint follow state
-        self._homing_path: list[list[float]] | None = None
-        self._homing_path_idx = 0
-        self._homing_seg_steps: list[float] | None = None
-        self._follow_target: list[float] | None = None
-        self._follow_path: list[list[float]] | None = None
-        self._follow_path_idx = 0
-        self._follow_limits: list[tuple[float, float]] | None = None
-        self._follow_switch_mode = False
-        self._follow_max_step: list[float] | None = None
-        self._follow_stall = 0
-        self._homing_stall = 0
 
         # Target frame is FK(target_angles) once a measured pose arrives.
         self.target_frame: OrientationMatrix = cast(OrientationMatrix, None)
@@ -278,50 +249,6 @@ class RoverArmController:
                 result[i] = (a, a)
         return result
 
-    def _all_at(self, target, tol=HOMING_THRESHOLD, mask=None):
-        """True when every allowed joint is within ``tol`` of target."""
-        for i, tgt in enumerate(target):
-            if mask is not None and i < len(mask) and not mask[i]:
-                continue
-            if abs(wrap2pi(tgt - self._angles[i])) > tol:
-                return False
-        return True
-
-    def _target_error(self, target, mask=None):
-        """Largest remaining error to ``target`` over the allowed joints."""
-        error = 0.0
-        for i, tgt in enumerate(target):
-            if mask is not None and i < len(mask) and not mask[i]:
-                continue
-            error = max(error, abs(wrap2pi(tgt - self._angles[i])))
-        return error
-
-    def _drive_mechanical(self, target_angles, joint_limits, mask=None,
-                          max_step=None, tol=HOMING_THRESHOLD):
-        """Step the mechanical arm and report whether it has arrived."""
-        self.mechanical.step(target_angles, joint_limits, DT,
-                             max_step=max_step)
-        if mask is None:
-            mask = [not locked for locked in self.locked_joints]
-        return self._all_at(target_angles, tol=tol, mask=mask)
-
-    def _synchronized_steps(self, start, target):
-        """Per-joint step limits so every moving joint finishes together.
-
-        The largest remaining joint move sets the duration at that joint's
-        hardware speed; every other joint gets the step that matches the
-        same completion time, capped by its own speed.
-        """
-        deltas = [abs(wrap2pi(t - s)) for s, t in zip(start, target)]
-        speeds = self.mechanical.max_ang_vel
-        duration = max(
-            (d / v for d, v in zip(deltas, speeds) if v > 1e-12),
-            default=0.0,
-        )
-        if duration < 1e-12:
-            return [0.0] * len(deltas)
-        return [d * DT / duration for d in deltas]
-
     # ------------------------------------------------------------------
     # FK refresh
     # ------------------------------------------------------------------
@@ -373,8 +300,7 @@ class RoverArmController:
 
     def _workspace_blocked(self, angles):
         """True when a candidate pose violates the height or octant gates."""
-        if self.is_homing or self.is_flipping or self.zenith \
-                or self.resting:
+        if self.zenith or self.resting:
             return False
         pos = self.model.solve_forward_kinematics(angles).position()
         if pos[2] < END_EFFECTOR_MIN_Z - 1e-9:
@@ -386,8 +312,7 @@ class RoverArmController:
 
     def _octant_blocked(self, angles, pos=None):
         """True when a candidate pose is outside this mode's octant set."""
-        if self.is_homing or self.is_flipping or self.zenith \
-                or self.resting:
+        if self.zenith or self.resting:
             return False
         if pos is None:
             pos = self.model.solve_forward_kinematics(angles).position()
@@ -432,21 +357,6 @@ class RoverArmController:
             source = PICK_AND_PLACE_MODE.limits
         return [tuple(pair) for pair in source]
 
-    @staticmethod
-    def _flipped_home():
-        """Home pose mirrored to the flipped Pick-and-Place side."""
-        return [
-            HOMING_TARGET[0],
-            math.pi - HOMING_TARGET[1],
-            -HOMING_TARGET[2],
-            HOMING_TARGET[3],
-            HOMING_TARGET[4],
-        ]
-
-    def _home_target(self):
-        """Home pose for the currently selected side."""
-        return self._flipped_home() if self.flipped else list(HOMING_TARGET)
-
     def settle_side(self):
         """Update the flipped flag from the achieved pose, if possible."""
         if (not self.initialized or self.planar or self.typing
@@ -469,35 +379,21 @@ class RoverArmController:
         """True when the measured joints are already the straight-up pose."""
         if not self.initialized:
             return False
-        angles = self._angles
-        if abs(wrap2pi(angles[1] - ZENITH_JOINT_TARGET[0])) > tol:
-            return False
-        if abs(wrap2pi(angles[2])) > max(tol, ELBOW_DEADBAND):
-            return False
-        if abs(wrap2pi(angles[3])) > tol:
-            return False
-        if abs(wrap2pi(angles[4])) > tol:
-            return False
-        return True
+        return regions.is_zenith_pose(self._angles, tol=tol)
 
     def _is_resting_pose(self):
         """True when the measured pose sits in the resting region.
 
-        The resting region is the shoulder below the planar lower bound
-        (0 deg: a planar top-back pose may legitimately sit at 0-2 deg) or
-        the elbow above its normal upper limit, by more than the inference
-        tolerance.  The collapsed pose (shoulder ~-9.5 deg after the
-        backoff) and mid-push crashes past the elbow limit both match.
-        Checked after zenith, so the straight-up pose never matches.
+        Resting is shoulder below the planar lower bound (0 deg: a planar
+        top-back pose may legitimately sit at 0-2 deg) or the elbow above
+        its normal upper limit, by more than the inference tolerance.  The
+        collapsed pose (shoulder ~-9.5 deg after the backoff) and mid-push
+        crashes past the elbow limit both match.  Checked after zenith, so
+        the straight-up pose never matches.
         """
         if not self.initialized:
             return False
-        angles = self._angles
-        tol = RESTING_INFERENCE_TOL
-        shoulder_below = angles[1] < 0.0 - tol
-        elbow_above = (
-            angles[2] > MECHANICAL_LIMITS[2][1] + tol)
-        return shoulder_below or elbow_above
+        return regions.is_resting_pose(self._angles)
 
     def infer_initial_mode(self):
         """Adopt the mode that best describes the measured starting pose.
@@ -521,14 +417,26 @@ class RoverArmController:
             return None
 
         if self._is_zenith_pose():
-            self.enter_zenith()
+            # The action driver owns the zenith motion.  Report the mode so
+            # the basestation sees the pose immediately.
+            self.typing = False
+            self.planar = False
+            self.flipped = False
+            self.joint_drive = False
+            self.zenith = True
+            self.limit_mode = ZENITH_MODE
             return "ZENITH"
 
         # A pose in the resting region (collapsed against the stops, or a
         # mid-crouch pose past the normal limits) means the arm was resting
         # when it lost power: stay de-torqued and wait for the restore.
         if self._is_resting_pose():
-            self.infer_resting_mode()
+            self.typing = False
+            self.flipped = False
+            self.joint_drive = False
+            self.planar = True
+            self.resting = True
+            self.limit_mode = RESTING_MODE
             return "RESTING"
 
         octant = self._ee_octant()
@@ -592,242 +500,6 @@ class RoverArmController:
         self.limit_mode = PICK_AND_PLACE_MODE
         return "PNP_FLIPPED" if self.flipped else "PNP"
 
-    def _zenith_target_angles(self):
-        """Full joint target for the straight-up pose, base included."""
-        return [self._angles[0], *[float(a) for a in ZENITH_JOINT_TARGET]]
-
-    def enter_zenith(self):
-        """Drive to the straight-up test pose and select Zenith mode.
-
-        The base stays where it is.  Joint locks are released while the
-        mode is active so every joint can reach its target, then restored
-        when the arm leaves zenith.  The Pick-and-Place side selected before
-        entry is remembered for :meth:`exit_zenith`.
-        """
-        if not self._require_initialized():
-            return False
-        if self.homing.active or self.is_flipping:
-            return self._fail("Zenith blocked: an action is running")
-        if self.zenith:
-            return True
-
-        self.set_typing_mode(False)
-        self._zenith_side = self.flipped
-        self._zenith_saved_locks = list(self.locked_joints)
-        self.locked_joints = [False] * len(self.locked_joints)
-        self.planar = False
-        self.flipped = False
-        self.joint_drive = False
-        self.zenith = True
-        self._zenith_exit_target = None
-        self.limit_mode = ZENITH_MODE
-        return True
-
-    def exit_zenith(self):
-        """Move to the nearest valid pose on the last Pick-and-Place side.
-
-        Zenith sits on the boundary between the normal and flipped sides.
-        Leaving it nudges the shoulder/elbow just inside the remembered
-        side's limits instead of guessing which side to flip to.
-        """
-        if not self.zenith:
-            return True
-        if self._zenith_exit_target is not None:
-            return True
-
-        angles = list(self._angles)
-        if self._zenith_side:
-            shoulder_lo, shoulder_hi = (
-                PICK_AND_PLACE_FLIPPED_MODE.limits[1])
-            elbow = max(angles[2], ELBOW_DEADBAND)
-        else:
-            shoulder_lo, shoulder_hi = PICK_AND_PLACE_MODE.limits[1]
-            elbow = min(angles[2], -ELBOW_DEADBAND)
-
-        wrist_lo, wrist_hi = MECHANICAL_LIMITS[3]
-        twist_lo, twist_hi = MECHANICAL_LIMITS[4]
-        self._zenith_exit_target = [
-            angles[0],
-            max(shoulder_lo, min(shoulder_hi, angles[1])),
-            elbow,
-            max(wrist_lo, min(wrist_hi, angles[3])),
-            max(twist_lo, min(twist_hi, angles[4])),
-        ]
-        return True
-
-    def toggle_zenith(self):
-        """Enter Zenith, or leave it for the nearest valid side pose."""
-        if self.zenith:
-            return self.exit_zenith()
-        return self.enter_zenith()
-
-    def _update_zenith(self):
-        """Slew to the straight-up target or to the pending exit pose."""
-        target = (
-            list(self._zenith_exit_target)
-            if self._zenith_exit_target is not None
-            else self._zenith_target_angles()
-        )
-        limits = [tuple(pair) for pair in ZENITH_MODE.limits]
-        arrived = self._drive_mechanical(target, limits, tol=1e-3)
-        self.target_angles = list(self._angles)
-        self._sync_target_to_fk()
-        if arrived and self._zenith_exit_target is not None:
-            self._finish_zenith_exit()
-
-    def _finish_zenith_exit(self):
-        """Restore the remembered side and locks after leaving zenith."""
-        self.zenith = False
-        self._zenith_exit_target = None
-        self.planar = False
-        self.typing = False
-        self.flipped = self._zenith_side
-        if self._zenith_saved_locks is not None:
-            self.locked_joints = list(self._zenith_saved_locks)
-            self._zenith_saved_locks = None
-        self.limit_mode = PICK_AND_PLACE_MODE
-        self._sync_target_to_fk()
-
-    # ------------------------------------------------------------------
-    # Resting (collapse / de-torque / restore)
-    # ------------------------------------------------------------------
-
-    def enter_resting(self):
-        """Start the RESTING collapse sequence.
-
-        Mirrors zenith's entry reset: typing is left first, the operator's
-        joint locks are saved and released, and the planar/flipped/
-        joint-drive modifiers are cleared so the resting action owns every
-        joint.  The saved locks are restored when the sequence completes.
-        """
-        if not self._require_initialized():
-            return False
-        if self.zenith:
-            return self._fail("Resting blocked: exit zenith mode first")
-        if self.homing.active or self.is_flipping:
-            return self._fail("Resting blocked: an action is running")
-        if self.resting:
-            return True
-
-        self.set_typing_mode(False)
-        self._resting_saved_locks = list(self.locked_joints)
-        self.locked_joints = [False] * len(self.locked_joints)
-        self.planar = False
-        self.flipped = False
-        self.joint_drive = False
-        self.resting = True
-        self.limit_mode = RESTING_MODE
-        self._resting_path_phase = None
-        self.invalidate_teleop_reference()
-        return self.resting_action.begin_collapse()
-
-    def infer_resting_mode(self):
-        """Enter RESTING from a startup pose, holding instead of collapsing.
-
-        A resting-region startup pose means the drives should stay
-        de-torqued; the first R restores torque instead of collapsing.
-        """
-        if not self.enter_resting():
-            return False
-        self.resting_action.abort("Resting mode inferred from startup pose")
-        return True
-
-    def toggle_resting(self):
-        """R key: enter, abort-and-hold, or begin the restore sequence.
-
-        While a sequence is running, R aborts it and holds the measured pose
-        with torque on.  From COLLAPSED or HOLD, R starts the restore.
-        """
-        if self.resting:
-            if self.resting_action.collapsed \
-                    or self.resting_action.holding:
-                return self.resting_action.request_restore()
-            self.resting_action.abort(
-                "Resting sequence aborted by operator")
-            return True
-        return self.enter_resting()
-
-    def resting_torque_confirmed(self):
-        """Advance TORQUE_ON -> MOVE_OUT after hardware feedback."""
-        return self.resting_action.torque_confirmed()
-
-    def resting_homing_finished(self):
-        """Advance AUTO_HOME -> DONE once homing completes."""
-        if not self.resting_action.homing_finished():
-            return False
-        self._finish_resting()
-        return True
-
-    def _finish_resting(self):
-        """Restore the saved locks and normal mode after the restore ends."""
-        self.resting = False
-        self.planar = False
-        self.typing = False
-        self.joint_drive = False
-        if self._resting_saved_locks is not None:
-            self.locked_joints = list(self._resting_saved_locks)
-            self._resting_saved_locks = None
-        self.limit_mode = PICK_AND_PLACE_MODE
-        self.settle_side()
-        self._sync_target_to_fk()
-
-    def take_resting_events(self):
-        """Return and clear the resting phase-transition events."""
-        events = self._resting_events
-        self._resting_events = []
-        return events
-
-    def _plan_resting_path(self):
-        """Plan a safe joint path for the crouch/move-out phase, if possible.
-
-        The elbow must cross the singularity deadband to reach the crouch
-        (+135 deg); RESTING_MODE deliberately leaves the deadband unenforced
-        so the slew can cross it, and the planned path keeps the move out of
-        restricted octants.  When no safe path exists, the resting controller
-        falls back to a direct slow step.
-        """
-        phase = self.resting_action.phase
-        if phase not in (self.resting_action.PHASE_CROUCH,
-                         self.resting_action.PHASE_MOVE_OUT):
-            self._resting_path_phase = None
-            return
-        if self._resting_path_phase == phase:
-            return
-        self._resting_path_phase = phase
-        if self.resting_action._path is not None:
-            return
-        held = list(self._angles)
-        target = self._hold_joints(RESTING_CROUCH_TARGET, held)
-        path = plan_safe_path(self.model, held, target)
-        if path and len(path) > 1:
-            self.resting_action.set_path(
-                path[1:],
-                [RESTING_MOVE_ANG_VEL * DT] * len(held))
-
-    def _update_resting(self, feedback_fresh=True, enabled=True):
-        """Advance the resting state machine and drive the mechanical arm."""
-        self._plan_resting_path()
-        target, max_step, events = self.resting_action.update(
-            self._angles, DT, feedback_fresh=feedback_fresh,
-            enabled=enabled)
-        self._resting_events.extend(events)
-
-        for event in events:
-            if event == "home":
-                # Hand the arm to the normal homing action at the crouch.
-                self.resting = False
-                self.limit_mode = PICK_AND_PLACE_MODE
-                self.start_homing()
-            elif event.startswith("abort:"):
-                self._fail(event[len("abort:"):])
-                self._sync_target_to_fk()
-
-        if target is not None:
-            limits = self._locked_limits(RESTING_MODE.limits)
-            self._command_mechanical(target, limits, max_step=max_step)
-            self._sync_target_to_fk()
-        return events
-
     def _fail(self, message):
         """Record a user-facing rejection and return False."""
         self.last_failure = message
@@ -846,13 +518,7 @@ class RoverArmController:
 
     @property
     def effective_limits(self):
-        """Per-joint limits currently enforced by the arm.
-
-        Flip and homing actions run under full mechanical travel; the
-        normal Pick-and-Place limits return when they finish.
-        """
-        if self.is_flipping or self.is_homing:
-            return [tuple(pair) for pair in MECHANICAL_LIMITS]
+        """Per-joint limits currently enforced by the arm."""
         if self.resting:
             return [tuple(pair) for pair in RESTING_MODE.limits]
         if self.zenith:
@@ -860,23 +526,6 @@ class RoverArmController:
         if self.typing:
             return [tuple(pair) for pair in TYPING_MODE.limits]
         return self._active_limits(self._angles)
-
-    @property
-    def is_flipping(self):
-        """True while the flip action or its follow-through is running."""
-        return self.flipper.active or self._follow_target is not None
-
-    @property
-    def is_homing(self):
-        """True while the homing action is running."""
-        return self.homing.active
-
-    @property
-    def homing_joints(self):
-        """Per-joint flags for joints the homing action is moving."""
-        if not self.is_homing:
-            return [False] * len(self.locked_joints)
-        return self._homing_mask()
 
     # ------------------------------------------------------------------
     # Modifier transitions (called by the simulator via keyboard actions)
@@ -1002,65 +651,6 @@ class RoverArmController:
         self.planar = True
         return True
 
-    def start_homing(self):
-        """Start full-arm homing, or keep an active full-home request alive.
-
-        Repeated calls while full homing is already active are idempotent, so
-        a held homing key can refresh the planner's release watchdog without
-        restarting or cancelling the action.
-        """
-        if not self._require_initialized():
-            return False
-        if self.zenith:
-            return self._fail("Homing blocked: exit zenith mode first")
-        if self.resting:
-            return self._fail("Homing blocked: resting is active")
-        if self.homing.active and self.home_joint_idx is None:
-            return True
-        if self.homing.active:
-            self.stop_homing(settle=False)
-        self.home_joint_idx = None
-        self.homing.target = self._home_target()
-        self._homing_flipped = self.flipped
-        self.homing.activate()
-        self._homing_path = None
-        self._homing_seg_steps = None
-        self._homing_stall = 0
-        if not any(self.locked_joints[:3]):
-            effective = self._hold_joints(
-                self.homing.target, self._angles)
-            path = plan_safe_path(
-                self.model, self._angles, effective)
-            if path and len(path) > 1:
-                self._homing_path = path[1:]
-                self._homing_path_idx = 0
-                self._homing_seg_steps = self._synchronized_steps(
-                    self._angles, self._homing_path[0])
-        self._homing_cross_dir = 0
-        return True
-
-    def stop_homing(self, settle=True):
-        """Stop an active homing action and discard its planned path."""
-        self.homing.deactivate()
-        self.home_joint_idx = None
-        self._homing_path = None
-        self._homing_seg_steps = None
-        self._homing_stall = 0
-        self._homing_cross_dir = 0
-        if settle:
-            self.settle_side()
-        return True
-
-    def toggle_homing(self):
-        """Toggle full-arm homing on/off.
-
-        Kept for direct callers and tests.  The ROS command path uses
-        start_homing()/stop_homing() so a held key can keep the action alive.
-        """
-        if self.homing.active:
-            return self.stop_homing()
-        return self.start_homing()
-
     def toggle_joint_lock(self, idx):
         """Toggle the motor lockout for one joint.
 
@@ -1074,6 +664,9 @@ class RoverArmController:
         """
         if not (0 <= idx < len(self.locked_joints)):
             return False
+        if self.zenith and idx in (0, 4):
+            return self._fail(
+                "Joint lock blocked: base/twist are locked in zenith")
         if self.resting:
             return self._fail("Joint lock blocked: resting is active")
         self.locked_joints[idx] = not self.locked_joints[idx]
@@ -1112,47 +705,6 @@ class RoverArmController:
             return frame
         return frame.with_rotation(locked_rotation)
 
-    def home_joint(self, idx):
-        """Drive a single joint to its home angle.
-
-        The joint is unlocked first so the command always takes effect.
-
-        Args:
-            idx: Joint index 0-4.
-
-        Returns:
-            bool: True if single-joint homing started.
-        """
-        if not self._require_initialized():
-            return False
-        if self.zenith:
-            return self._fail("Joint home blocked: exit zenith mode first")
-        if self.resting:
-            return self._fail("Joint home blocked: resting is active")
-        if not (0 <= idx < len(self.locked_joints)):
-            return False
-        if self.homing.active and self.home_joint_idx == idx:
-            return True
-        if self.homing.active:
-            self.stop_homing(settle=False)
-        self.locked_joints[idx] = False
-        self.homing.target = self._home_target()
-        self._homing_flipped = self.flipped
-        self.homing.activate()
-        self.home_joint_idx = idx
-        self._homing_path = None
-        self._homing_stall = 0
-        self._homing_cross_dir = 0
-        return True
-
-    def _homing_mask(self):
-        """Per-joint mask of which joints the homing action may move."""
-        mask = [not locked for locked in self.locked_joints]
-        if self.home_joint_idx is not None:
-            mask = [allowed and i == self.home_joint_idx
-                    for i, allowed in enumerate(mask)]
-        return mask
-
     def _hold_joints(self, angles, held, mask=None):
         """Replace joints that are not allowed to move with held values.
 
@@ -1188,8 +740,7 @@ class RoverArmController:
         """
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith \
-                or self.resting:
+        if self.zenith or self.resting:
             return self._fail("Command blocked: action is running")
         if not 0 <= index < min(len(self._angles), len(self.target_angles)):
             return self._fail("Command blocked: invalid joint")
@@ -1216,8 +767,7 @@ class RoverArmController:
         """Command the target position on one world axis."""
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith \
-                or self.resting:
+        if self.zenith or self.resting:
             return self._fail("Command blocked: action is running")
         if axis not in (0, 1, 2):
             return self._fail("Command blocked: invalid axis")
@@ -1248,8 +798,7 @@ class RoverArmController:
         """
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith \
-                or self.resting:
+        if self.zenith or self.resting:
             return self._fail("Command blocked: action is running")
         if len(position) != 3:
             return self._fail("Command blocked: invalid position")
@@ -1268,88 +817,11 @@ class RoverArmController:
         """Drop the current target and hold the measured pose."""
         if not self.initialized:
             return False
-        if self.zenith:
-            # Zenith is a mode, not a target; a handover hold leaves it be.
-            return True
-        if self.resting:
-            # Resting owns its target; a handover hold leaves it be.
-            return True
-        if self.homing.active or self.is_flipping:
-            return self._fail("Hold blocked: action is running")
         # The teleop stage restarts from the measured pose on the next stick
         # input rather than resuming a trajectory from before the hold.
         self._teleop_needs_reset = True
         self._sync_target_to_fk()
         return True
-
-    def activate_flip(self):
-        """Start the single side-flip action.
-
-        The shoulder mirrors about 90° and the elbow about 0°, so the
-        arm flips to the opposite side instead of inverting the elbow.
-        The mechanical arm then slews to that target under its normal
-        velocity and limit checks.
-
-        Flips are allowed directly in OCTANT_DIRECT_FLIP (the even
-        octants).  In the other octants the planar modifier must be
-        active.
-
-        Returns:
-            bool: True if a flip started, False if refused or already running.
-        """
-        if not self._require_initialized():
-            return False
-        if self.zenith:
-            return self._fail("Flip blocked: exit zenith mode first")
-        if self.resting:
-            return self._fail("Flip blocked: resting is active")
-        octant = self._ee_octant()
-        if octant not in OCTANT_DIRECT_FLIP and not self.planar:
-            return self._fail(
-                f"Flip blocked: octant {octant} requires planar")
-
-        limits = self.flip_side_limits()
-        assert self.l0 is not None
-        assert self.l1 is not None
-        assert self.l2 is not None
-        started = self.flipper.activate(
-            self._angles, self.l0, self.l1, self.l2,
-            joint_limits=limits, side=True)
-        if not started:
-            return self._fail("Flip blocked: another flip is running")
-        if started:
-            held = list(self._angles)
-            target = self._hold_joints(self.flipper.target_angles, held)
-            if any(self.locked_joints[:3]):
-                path = [held, target]
-            else:
-                path = plan_safe_path(self.model, held, target)
-            if path is None:
-                self.flipper.deactivate()
-                return self._fail(
-                    "Flip blocked: no safe path through restricted space")
-
-            waypoints = path[1:] if len(path) > 1 else [target]
-            self._follow_path = [self._hold_joints(p, held)
-                                 for p in waypoints]
-            self._follow_path_idx = 0
-            self._follow_stall = 0
-            self._follow_target = list(self._follow_path[0])
-            self._follow_limits = limits
-            self._follow_switch_mode = self.limit_mode in (
-                PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE)
-            self._follow_max_step = self._synchronized_steps(
-                held, self._follow_target)
-        return started
-
-    def flip_side_limits(self):
-        """Mechanical limits used during a side-flip animation.
-
-        The transition between Pick-and-Place and Pick-and-Place-Flipped
-        passes through angles outside both modes' workspaces, so
-        mechanical limits are used for the animation.
-        """
-        return MECHANICAL_LIMITS
 
     # ------------------------------------------------------------------
     # Update paths (one per kinematic mode)
@@ -1359,12 +831,12 @@ class RoverArmController:
         """Advance one control cycle based on the current mode.
 
         Dispatches to the appropriate update path:
-            1. Flip follow  -> slew to the flip target (overrides all)
-            2. Resting      -> collapse / de-torque / restore state machine
-            3. Homing       -> step toward home configuration
-            4. No input     -> finish the last position-drive target
-            5. Joint drive  -> direct joint deltas + clamping
-            6. Position drive -> target frame delta + IK solve
+            1. No input     -> finish the last position-drive target
+            2. Joint drive  -> direct joint deltas + clamping
+            3. Position drive -> target frame delta + IK solve
+
+        Homing, flips, zenith, and resting motion belong to the action
+        driver; this controller only runs the teleop/IK paths.
 
         The mechanical arm owns the actual angles in every path; this
         method only commands it, so a bad target is velocity-limited
@@ -1373,78 +845,14 @@ class RoverArmController:
         Args:
             deltas: dict with keys dx, dy, dz, drx, dry, drz
                     (scaled SpaceMouse deltas), or None when idle.
-            feedback_fresh: False when no fresh measured sample arrived
-                    (used by resting push abort checks).
-            resting_enabled: False when the arm is disabled (used by
-                    resting push abort checks).
+            feedback_fresh: Unused; kept for call-site compatibility.
+            resting_enabled: Unused; kept for call-site compatibility.
 
         Returns:
             bool: True if input was consumed (state was updated).
         """
         if not self.initialized:
             return False
-        # Flip motion overrides everything until the target is reached
-        if self._follow_target is not None:
-            held = list(self._angles)
-            target = self._hold_joints(self._follow_target, held)
-            limits = self._locked_limits(self._follow_limits)
-            before = self._target_error(target)
-            arrived = self._drive_mechanical(
-                target, limits, max_step=self._follow_max_step,
-                tol=WAYPOINT_TOL)
-            # A long but healthy segment must not be mistaken for a stall.
-            # Reset whenever the arm is still closing on the waypoint and
-            # only count cycles that make no progress at all.
-            if arrived or self._target_error(target) < before - 1e-9:
-                self._follow_stall = 0
-            else:
-                self._follow_stall += 1
-
-            if arrived or self._follow_stall > WAYPOINT_STALL_LIMIT:
-                self._follow_stall = 0
-                if (self._follow_path
-                        and self._follow_path_idx + 1 < len(self._follow_path)):
-                    self._follow_path_idx += 1
-                    held = list(self._angles)
-                    self._follow_target = self._hold_joints(
-                        self._follow_path[self._follow_path_idx], held)
-                    self._follow_max_step = self._synchronized_steps(
-                        held, self._follow_target)
-                else:
-                    self.flipper.deactivate()
-                    if self._follow_switch_mode:
-                        self._switch_mode_after_side_flip()
-                    self._follow_target = None
-                    self._follow_path = None
-                    self._follow_limits = None
-                    self._follow_switch_mode = False
-                    self._follow_max_step = None
-
-            self.target_angles = list(self._angles)
-            self.refresh_fk()
-            self._sync_target_to_fk()
-            return True
-
-        # Resting owns every joint until the restore sequence completes;
-        # teleop input is ignored while it is active.
-        if self.resting:
-            self._update_resting(
-                feedback_fresh=feedback_fresh,
-                enabled=resting_enabled)
-            self.refresh_fk()
-            return True
-
-        # Zenith is a static test pose; teleop input is ignored until exit.
-        if self.zenith:
-            self._update_zenith()
-            self.refresh_fk()
-            return True
-
-        # Homing runs even without new input
-        if self.homing.active:
-            self._update_homing()
-            self.refresh_fk()
-            return True
 
         # No new input: keep the mechanical arm moving toward the last
         # position-drive target until it arrives.
@@ -1463,127 +871,6 @@ class RoverArmController:
 
         self.refresh_fk()
         return True
-
-    def _switch_mode_after_side_flip(self):
-        """Update the flipped flag from the pose reached by a side flip.
-
-        Planar, if active, stays on.  Its valid octants are disjoint per
-        side, so use the octant rather than the P&P joint limits, which
-        can both reject a planar flip destination.
-        """
-        if self.planar:
-            self.flipped = self._ee_octant() in OCTANT_PLANAR_FLIPPED_ALLOWED
-            return
-        if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
-            self.flipped = True
-        elif PICK_AND_PLACE_MODE.can_set(self._angles):
-            self.flipped = False
-
-    def _update_homing(self):
-        """Step each allowed joint toward the home configuration.
-
-        Homing runs under HOMING_MODE limits so it can never drive a
-        joint outside hardware bounds, regardless of the active mode.
-        Locked joints are held in place; when ``home_joint_idx`` is set,
-        only that joint is driven and every other joint is held.
-
-        The elbow deadband (arm_constraints) prevents small steps from
-        crossing zero.  When the homing target is on the opposite side
-        of the deadband, the commanded elbow is held on the target-side
-        boundary until the mechanical arm actually crosses it.
-        """
-        held = list(self._angles)
-        was_single = self.home_joint_idx is not None
-        mask = self._homing_mask()
-
-        if self._homing_path:
-            target = self._hold_joints(
-                self._homing_path[self._homing_path_idx], held, mask)
-            limits = self._locked_limits(HOMING_MODE.limits)
-            before = self._target_error(target, mask)
-            arrived = self._drive_mechanical(
-                target, limits, mask=mask,
-                max_step=self._homing_seg_steps, tol=WAYPOINT_TOL)
-            # Count only cycles with no progress.  Legitimate segments can
-            # span many control frames (a 170 deg move takes ~4 s at the
-            # mechanical slew rate), and treating those as stalls discards
-            # the safe path and can drive the arm through a restricted
-            # octant.
-            if arrived or self._target_error(target, mask) < before - 1e-9:
-                self._homing_stall = 0
-            else:
-                self._homing_stall += 1
-
-            if self._homing_stall > WAYPOINT_STALL_LIMIT:
-                # The arm cannot close the remaining fraction of this
-                # waypoint (lag, stiction, a hardware limit).  Drop the
-                # pre-planned path and let the direct homing step below
-                # finish the action instead of hanging forever.
-                self._homing_path = None
-                self._homing_seg_steps = None
-                self._homing_stall = 0
-            elif arrived:
-                self._homing_stall = 0
-                self._homing_path_idx += 1
-                if self._homing_path_idx >= len(self._homing_path):
-                    self.homing.deactivate()
-                    self._homing_path = None
-                    self._homing_seg_steps = None
-                    self.home_joint_idx = None
-                    self.flipped = self._homing_flipped
-                    self._homing_cross_dir = 0
-                    self._sync_target_to_fk()
-                    return
-                nxt = self._hold_joints(
-                    self._homing_path[self._homing_path_idx],
-                    self._angles, mask)
-                self._homing_seg_steps = self._synchronized_steps(
-                    self._angles, nxt)
-
-            if self._homing_path is not None:
-                self._sync_target_to_fk()
-                return
-
-        commanded, done = self.homing.step(
-            self._angles, limits=HOMING_MODE.limits, mask=mask)
-        commanded = HOMING_MODE.geometry_constraint(commanded)
-        commanded = self._hold_joints(commanded, held, mask)
-
-        # Deadband crossing: the elbow cannot step through the forbidden
-        # band.  Once it is pinned at a boundary with the target on the
-        # other side, keep commanding the opposite boundary until the
-        # mechanical arm actually crosses it.
-        if mask[2]:
-            tgt_elbow = self.homing.target[2]
-            if self._homing_cross_dir == 0:
-                if (abs(commanded[2] - held[2]) < 1e-12
-                        and abs(tgt_elbow) > ELBOW_DEADBAND
-                        and (held[2] > 0) != (tgt_elbow > 0)):
-                    self._homing_cross_dir = 1 if tgt_elbow > 0 else -1
-
-            if self._homing_cross_dir != 0:
-                commanded[2] = self._homing_cross_dir * ELBOW_DEADBAND
-                crossed = (held[2] <= -ELBOW_DEADBAND
-                           if self._homing_cross_dir < 0
-                           else held[2] >= ELBOW_DEADBAND)
-                if crossed:
-                    self._homing_cross_dir = 0
-
-        limits = self._locked_limits(HOMING_MODE.limits)
-        self._command_mechanical(commanded, limits)
-
-        if done:
-            if self._all_at(self.homing.target, mask=mask):
-                if not was_single:
-                    self.flipped = self._homing_flipped
-                self.home_joint_idx = None
-                self._homing_cross_dir = 0
-            else:
-                # HomingController finished based on its commanded step,
-                # but the mechanical arm is still catching up.
-                self.homing.activate()
-
-        self._sync_target_to_fk()
 
     def _update_joint_drive(self, deltas):
         """Direct joint control: apply deltas to joints.

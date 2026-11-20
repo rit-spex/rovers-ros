@@ -94,21 +94,3 @@ def test_locked_joint_holds_its_last_commanded_angle():
     unlocked = controller.commanded_angles()
     assert unlocked is not None
     assert unlocked[0] == pytest.approx(HOMING_TARGET[0] + 0.05)
-
-
-def test_homing_requests_are_idempotent_until_stopped():
-    """Held homing commands keep the action alive without restarting it."""
-    controller = RoverArmController.from_measured(HOMING_TARGET)
-    assert controller.start_homing()
-    assert controller.start_homing()
-    assert controller.homing.active
-    assert controller.home_joint_idx is None
-
-    assert controller.home_joint(2)
-    assert controller.home_joint(2)
-    assert controller.homing.active
-    assert controller.home_joint_idx == 2
-
-    assert controller.stop_homing()
-    assert not controller.homing.active
-    assert controller.home_joint_idx is None

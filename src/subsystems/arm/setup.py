@@ -39,6 +39,8 @@ setup(
             'arm_master_node = arm_master.arm_master_node:main',
             'arm_end_effector_node = arm_end_effector.arm_end_effector_node:main',
             'arm_route_planner_node = arm_route_planner.arm_route_planner_node:main',
+            'arm_action_driver_node = '
+            'arm_action_driver.arm_action_driver_node:main',
             'arm_hardware_node = arm_hardware.arm_hardware_node:main',
             'arm_simulated_teensy_node = arm_hardware.arm_simulated_teensy_node:main',
             'arm_teleop_node = arm_teleop.arm_teleop_node:main',
@@ -49,6 +51,7 @@ setup(
             'master = arm_master.arm_master_node:main',
             'end_effector = arm_end_effector.arm_end_effector_node:main',
             'route_planner = arm_route_planner.arm_route_planner_node:main',
+            'action_driver = arm_action_driver.arm_action_driver_node:main',
             'hardware = arm_hardware.arm_hardware_node:main',
             'sim_teensy = arm_hardware.arm_simulated_teensy_node:main',
             'teleop = arm_teleop.arm_teleop_node:main',

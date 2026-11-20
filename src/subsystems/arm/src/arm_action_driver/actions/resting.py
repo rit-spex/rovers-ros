@@ -1,8 +1,8 @@
 """RESTING collapse / de-torque / restore action controller.
 
-Pure library: no ROS imports.  The planner feeds measured angles and
-planned-path waypoints; the controller returns the joint target to slow-step
-toward, a per-cycle step cap, and phase-transition events.
+Pure library: no ROS imports.  The action driver feeds measured angles and
+planned-path waypoints; the controller returns the joint target to
+slow-step toward, a per-cycle step cap, and phase-transition events.
 
 Phases:
 
@@ -33,7 +33,7 @@ from arm_constants import (
     RESTING_START_GRACE_SEC,
     WAYPOINT_TOL,
 )
-from ..linkage_models import wrap2pi
+from arm_route_planner.kinematics.linkage_models import wrap2pi
 
 # Joint indices.
 SHOULDER = 1
