@@ -21,11 +21,13 @@ Shaping values come from the shared constants, not ROS parameters:
 
 * ``TRANSLATION_SENS`` / ``ROTATION_SENS`` - stick scale.
 * ``DEADZONE`` / ``ZERO_HYSTERESIS`` / ``INPUT_EXPONENT`` - shaping curve.
+* ``SPACEMOUSE_DROPOUT_HOLD_SEC`` - how long a zero sample must persist
+  before it counts as the operator releasing the stick.
 * ``TELEOP_INPUT_TIMEOUT_SEC`` - zero an axis whose raw value stopped
   updating.
 * ``TELEOP_PUBLISH_RATE_HZ`` - republish rate.
 
-The pure shaping helpers (``normalize``, ``AxisShaper``,
+The pure shaping helpers (``normalize``, ``AxisShaper``, ``AxisHold``,
 ``clamp_vector_norm``, ``is_stale``) live at module scope below so this one
 file owns the whole device contract.
 
@@ -55,6 +57,7 @@ from arm_constants import (
     ROTATION_SENS,
     SPACEMOUSE_AXES_TOPIC,
     SPACEMOUSE_AXIS_NAMES,
+    SPACEMOUSE_DROPOUT_HOLD_SEC,
     TELEOP_INPUT_TIMEOUT_SEC,
     TELEOP_PUBLISH_RATE_HZ,
     TRANSLATION_SENS,
@@ -141,6 +144,48 @@ class AxisShaper:
         self._active = False
 
 
+class AxisHold:
+    """Hold the last nonzero value through short zero dropouts.
+
+    The basestation's SpaceMouse reader zeroes an axis when its short
+    sign-agreement filter sees a noisy report.  That zero is not the
+    operator releasing the stick, and treating it as one stops the arm and
+    costs a fresh ramp.  A zero is only passed through once it has persisted
+    for ``hold_seconds``; until then the last nonzero value is republished.
+    """
+
+    def __init__(self, hold_seconds=SPACEMOUSE_DROPOUT_HOLD_SEC):
+        """Create a hold filter with the given dropout window."""
+        self.hold_seconds = max(0.0, float(hold_seconds))
+        self._held = 0
+        self._zero_since = None
+
+    def process(self, raw_value, now: float) -> int:
+        """Return the raw value to use for this sample.
+
+        Args:
+            raw_value: Raw HID axis value.
+            now: ``time.monotonic()`` time of this sample [s].
+        """
+        value = int(raw_value)
+        if value != 0:
+            self._held = value
+            self._zero_since = None
+            return value
+        if self._held == 0:
+            return 0
+        if self._zero_since is None:
+            self._zero_since = now
+        if now - self._zero_since < self.hold_seconds:
+            return self._held
+        return 0
+
+    def reset(self) -> None:
+        """Forget the held value and the zero timer."""
+        self._held = 0
+        self._zero_since = None
+
+
 def clamp_vector_norm(values) -> tuple:
     """Scale a vector so its magnitude never exceeds one.
 
@@ -171,6 +216,12 @@ class ArmTeleopNode(Node):
         self.__axes_received_at = dict.fromkeys(
             SPACEMOUSE_AXIS_NAMES, None)
         self.__stale_axes = set()
+        # Dropout filter: a zero only counts once it has persisted for
+        # SPACEMOUSE_DROPOUT_HOLD_SEC.  This runs before the shaper so a
+        # brief dropout does not reset the hysteresis state either.
+        self.__axis_holds = {
+            axis: AxisHold() for axis in SPACEMOUSE_AXIS_NAMES
+        }
         self.__shapers = {
             axis: AxisShaper(
                 self.__deadzone, self.__exponent, self.__hysteresis)
@@ -220,7 +271,8 @@ class ArmTeleopNode(Node):
         """Latch one atomic sample of every raw axis."""
         now = time.monotonic()
         for axis in SPACEMOUSE_AXIS_NAMES:
-            self.__axes[axis] = int(getattr(msg, axis))
+            raw = int(getattr(msg, axis))
+            self.__axes[axis] = self.__axis_holds[axis].process(raw, now)
             self.__axes_received_at[axis] = now
             if axis in self.__stale_axes:
                 self.__stale_axes.discard(axis)

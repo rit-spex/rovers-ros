@@ -85,6 +85,12 @@ the teleop node has one liveness timestamp instead of six.
 - Translation is converted from inches-per-cycle to m/s at the ROS boundary.
 - The three linear axes and the three rotation axes are each scaled so a
   diagonal deflection is no faster than a single-axis one.
+- Raw HID values are normalized against `RAW_MAX = 350`, which is the
+  SpaceMouse's useful full throw; values above it clamp to full scale.
+- A zero sample only counts as a release once it has persisted for
+  `SPACEMOUSE_DROPOUT_HOLD_SEC` (0.1 s). The basestation's short sign filter
+  can emit isolated zeros while the stick is held, and treating those as a
+  release would stop the arm and cost a fresh ramp.
 - An axis whose raw value has not refreshed for `TELEOP_INPUT_TIMEOUT_SEC` is
   commanded as zero. The basestation republishes teleop axes every cycle, so a
   dead link cannot be mistaken for a held stick.
@@ -96,9 +102,10 @@ the teleop node has one liveness timestamp instead of six.
 
 Tuning lives in `arm_constants.py` (`TELEOP_PUBLISH_RATE_HZ`,
 `TRANSLATION_SENS`, `ROTATION_SENS`, `DEADZONE`, `ZERO_HYSTERESIS`,
-`INPUT_EXPONENT`, `TELEOP_INPUT_TIMEOUT_SEC`). The node does not declare ROS
-parameters because nothing overrides them; changing the constants requires a
-rebuild, which matches the rest of the arm tuning.
+`INPUT_EXPONENT`, `SPACEMOUSE_DROPOUT_HOLD_SEC`, `RAW_MAX`,
+`TELEOP_INPUT_TIMEOUT_SEC`). The node does not declare ROS parameters because
+nothing overrides them; changing the constants requires a rebuild, which
+matches the rest of the arm tuning.
 
 ---
 
@@ -645,11 +652,16 @@ simulation and hardware.
 
 - **Position drive (default):** stick translation/rotation moves the
   target frame; the frame is clamped by the active limiter, solved with
-  damped-least-squares IK, then rate-limited before it becomes a joint
-  target. This runs in the route planner. Releasing the stick holds the
-  achieved pose instead of chasing the old target frame.
+  damped-least-squares IK. Teleop does not rebuild the command from the
+  measured angles: the planner ramps the Cartesian velocity
+  (`TELEOP_ACCEL_IN_S2` / `TELEOP_DECEL_IN_S2`), the controller integrates an
+  internal joint reference, and the per-joint speed cap and accel limit are
+  applied to the whole joint vector so the path keeps its direction. The
+  reference may lead the measured arm by at most `TELEOP_LEAD_LIMIT_DEG`;
+  a longer lag stops the stage and reports a tracking stall. Releasing the
+  stick ramps to a stop in about half a second, then holds.
 - **Joint drive:** `rx → elbow`, `ry → shoulder`, `rz → base`; no IK. The
-  planner applies the joint limits.
+  planner applies the joint limits and keeps the older per-joint slew.
 - **Absolute pose:** `/ARM/CMD_POSE` replaces the target frame and runs the
   same IK/limit path. It takes priority over teleop while the target stream
   is fresh; the master's stale-target hold stops the chase.
@@ -682,12 +694,13 @@ simulation and hardware.
   `gripper_up`, `gripper_down`, and `fire_solenoid` stay in the end effector
   node. The full command list and syntax are documented in the module
   docstrings of `arm_master_node.py` and `arm_route_planner_node.py`.
-- **Slew model:** `SimulatedMechanicalArm` is used on hardware too, so a
-  target never jumps by more than each joint's hardware speed times `DT`.
-  Those speeds come from `max_speed` (motor-shaft RPM) divided by the 80:1
-  gearbox, then converted to rad/s and ticks/s with the joint calibration.
-  The planner owns the model because it is the sole writer of the five arm
-  targets.
+- **Slew model:** `SimulatedMechanicalArm` is still used by homing, flips,
+  joint drive, and absolute pose, so those targets never jump by more than
+  each joint's hardware speed times `DT`. Teleop uses the coordinated output
+  stage above instead. The per-joint speeds come from `max_speed`
+  (motor-shaft RPM) divided by the 80:1 gearbox, then converted to rad/s and
+  ticks/s with the joint calibration. The planner owns the model because it is
+  the sole writer of the five arm targets.
 - **Watchdogs:** teleop motion stops after `VELOCITY_TIMEOUT_SEC` (0.5 s)
   applied to `/ARM/CMD_VELOCITY` in the planner, and the teleop node zeroes
   an axis whose raw input stopped refreshing for `TELEOP_INPUT_TIMEOUT_SEC`

@@ -9,11 +9,13 @@ Run either:
 import math
 
 from arm_teleop.arm_teleop_node import (
+    AxisHold,
     AxisShaper,
     clamp_vector_norm,
     is_stale,
     normalize,
 )
+from arm_constants import RAW_MAX
 
 
 def close(a, b, tol=1e-9):
@@ -81,6 +83,36 @@ def test_staleness():
     assert not is_stale(None, 10.0, 0.0)
 
 
+def test_axis_hold_bridges_a_dropout():
+    """A brief zero sample is a sensor dropout, not a release."""
+    hold = AxisHold(0.1)
+    assert hold.process(60, 0.0) == 60
+    assert hold.process(0, 0.02) == 60
+    assert hold.process(0, 0.11) == 60
+    assert hold.process(0, 0.13) == 0
+
+
+def test_axis_hold_resets_on_a_new_value():
+    hold = AxisHold(0.1)
+    assert hold.process(60, 0.0) == 60
+    assert hold.process(0, 0.02) == 60
+    assert hold.process(-60, 0.03) == -60
+    assert hold.process(0, 0.04) == -60
+
+
+def test_axis_hold_leaves_rest_at_zero():
+    hold = AxisHold(0.1)
+    assert hold.process(0, 0.0) == 0
+    assert hold.process(0, 1.0) == 0
+
+
+def test_raw_range_uses_the_full_stick_throw():
+    assert normalize(RAW_MAX, RAW_MAX) == 1.0
+    assert normalize(RAW_MAX / 2.0, RAW_MAX) == 0.5
+    assert normalize(RAW_MAX * 2.0, RAW_MAX) == 1.0
+    assert normalize(-RAW_MAX, RAW_MAX) == -1.0
+
+
 def main():
     tests = (
         test_normalize,
@@ -88,6 +120,10 @@ def main():
         test_curve,
         test_vector_norm,
         test_staleness,
+        test_axis_hold_bridges_a_dropout,
+        test_axis_hold_resets_on_a_new_value,
+        test_axis_hold_leaves_rest_at_zero,
+        test_raw_range_uses_the_full_stick_throw,
     )
     for test in tests:
         test()

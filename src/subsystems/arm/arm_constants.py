@@ -469,6 +469,22 @@ MAX_ANG_VEL = min(ARM_MOTOR_MAX_ANG_VEL)
 # Time to ramp from standstill to MAX_ANG_VEL [s].
 ANGULAR_SPEED_RAMP_TIME = 1.0
 
+# Teleop output stage.  The planner ramps the Cartesian velocity and the
+# controller integrates a joint reference from it.  These are separate from
+# ANGULAR_SPEED_RAMP_TIME so autonomous actions keep their slower ramp.
+TELEOP_ACCEL_IN_S2 = 9.0          # Cartesian linear acceleration [in/s^2]
+TELEOP_DECEL_IN_S2 = 18.0         # Cartesian linear deceleration [in/s^2]
+TELEOP_ANG_ACCEL_RAD_S2 = 3.0     # Cartesian angular acceleration [rad/s^2]
+TELEOP_JOINT_ACCEL_TIME_S = 0.25  # joint speed ramp time at its own cap [s]
+# The commanded joint reference may lead the measured angle by at most this
+# much.  It bounds the drive's tracking error; it is a safety limit, not a
+# control input.
+TELEOP_LEAD_LIMIT_DEG = 5.0
+# Consecutive cycles at the lead bound before the planner reports a stall.
+TELEOP_LEAD_STALL_CYCLES = 10
+# Below this speed the teleop stage is treated as stopped [in/s, rad/s].
+TELEOP_STOP_EPSILON = 1e-3
+
 
 # =============================================================================
 # Homing
@@ -510,7 +526,14 @@ ROTATION_SENS = 0.015         # SpaceMouse rotation scale [rad/unit]
 GRIPPER_JOG_RATE = math.radians(30)    # [rad/s]
 GRIPPER_JOG_TIMEOUT_SEC = 0.25
 
-RAW_MAX = 127              # Normalization max - SpaceMouse useful range
+# The SpaceMouse reports raw HID values up to about +/-350 (some models a
+# little higher).  Normalizing against 350 uses the full stick throw; values
+# above it clamp to full scale in ``normalize()``.
+RAW_MAX = 350
+# A zero sample shorter than this is a sensor dropout, not the operator
+# releasing the stick.  The teleop node republishes the last nonzero value
+# until the zero has lasted this long [s].
+SPACEMOUSE_DROPOUT_HOLD_SEC = 0.1
 DEADZONE = 0.05            # Normalized axis deadzone - kills resting-hand drift
 INPUT_EXPONENT = 1.5       # Power curve - mild fine-control bias, not mushy
 # Extra travel needed to leave rest once the deadzone has zeroed an axis.

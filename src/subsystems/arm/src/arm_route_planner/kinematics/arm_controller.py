@@ -18,6 +18,9 @@ from arm_constants import (
     WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
     ZENITH_ANGLE_TOL, ZENITH_JOINT_TARGET,
     FRONT_LOW, BACK_HIGH, BACK_LOW,
+    TELEOP_ACCEL_IN_S2, TELEOP_DECEL_IN_S2, TELEOP_ANG_ACCEL_RAD_S2,
+    TELEOP_JOINT_ACCEL_TIME_S, TELEOP_LEAD_LIMIT_DEG,
+    TELEOP_LEAD_STALL_CYCLES, TELEOP_STOP_EPSILON,
 )
 from .linkage_models import (
     OrientationMatrix, wrap2pi, nearest_axis_aligned_rotation,
@@ -108,6 +111,17 @@ class RoverArmController:
         # Last angle sent to the hardware bridge, per joint.  Locked joints
         # keep this value so encoder noise cannot make a motor chase itself.
         self._last_commanded: list[float] = cast(list[float], None)
+
+        # Teleop output stage.  The reference is an internal, rate-limited
+        # joint trajectory.  It is separate from the measured angles so the
+        # command does not inherit encoder noise or feedback timing, and it
+        # is anchored each cycle to keep the IK target from running away.
+        self.teleop_reference: list[float] | None = None
+        self.teleop_velocity = [0.0] * 6       # [in/s, in/s, in/s, rad/s]
+        self.teleop_joint_velocity = [0.0] * 5  # [rad/s] per joint
+        self.teleop_lead_cycles = 0
+        self._teleop_needs_reset = True
+        self._teleop_stalled = False
 
         # Safe homing path and flip waypoint follow state
         self._homing_path: list[list[float]] | None = None
@@ -217,6 +231,10 @@ class RoverArmController:
         if len(angles) != expected:
             raise ValueError(
                 f"Expected {expected} angles, got {len(angles)}")
+        # Every non-teleop path syncs measured angles.  Mark the teleop
+        # reference stale so the next teleop cycle restarts from the arm
+        # instead of resuming a trajectory from before the action.
+        self._teleop_needs_reset = True
         first_sync = not self._initialized
         if first_sync:
             self.mechanical = SimulatedMechanicalArm(angles)
@@ -1057,6 +1075,9 @@ class RoverArmController:
             return True
         if self.homing.active or self.is_flipping:
             return self._fail("Hold blocked: action is running")
+        # The teleop stage restarts from the measured pose on the next stick
+        # input rather than resuming a trajectory from before the hold.
+        self._teleop_needs_reset = True
         self._sync_target_to_fk()
         return True
 
@@ -1487,3 +1508,237 @@ class RoverArmController:
         desired = self.limit_mode.clamp_target_position(
             desired, self.target_angles)
         self._solve_desired_frame(desired)
+
+    # ------------------------------------------------------------------
+    # Teleop output stage
+    # ------------------------------------------------------------------
+
+    def invalidate_teleop_reference(self):
+        """Drop the teleop reference on the next cycle.
+
+        Called when another path takes over (homing, flip, pose, joint
+        drive), on handover, and on E-stop.  The next teleop cycle restarts
+        from the measured angles instead of resuming a stale trajectory.
+        """
+        self._teleop_needs_reset = True
+        self._teleop_stalled = False
+
+    @property
+    def teleop_motion_active(self) -> bool:
+        """True while the teleop stage still has speed to spend."""
+        if self.teleop_reference is None:
+            return False
+        if any(abs(v) > TELEOP_STOP_EPSILON for v in self.teleop_velocity):
+            return True
+        return any(abs(v) > TELEOP_STOP_EPSILON
+                   for v in self.teleop_joint_velocity)
+
+    def reset_teleop_reference(self, angles):
+        """Snap the teleop reference to *angles* and clear its velocities."""
+        if not self.initialized or angles is None:
+            return False
+        angles = [wrap2pi(float(a)) for a in angles]
+        if len(angles) != len(self.mechanical.angles):
+            return False
+        self.teleop_reference = list(angles)
+        self.teleop_velocity = [0.0] * 6
+        self.teleop_joint_velocity = [0.0] * len(angles)
+        self.teleop_lead_cycles = 0
+        self._teleop_needs_reset = False
+        self._teleop_stalled = False
+        self.mechanical.angles = list(angles)
+        self.mechanical.joint_speeds = [0.0] * len(angles)
+        self._last_commanded = list(angles)
+        self.target_angles = list(angles)
+        frame = self.model.solve_forward_kinematics(self.target_angles)
+        self.target_frame = self._frame_with_orientation_lock(frame)
+        self.target_pos = list(self.target_frame.position())
+        self.refresh_fk()
+        return True
+
+    @staticmethod
+    def _ramp_component(value, target, accel, decel, dt):
+        """Move one velocity component toward *target* under a ramp."""
+        if target == value:
+            return value
+        slowing = abs(target) < abs(value) or target * value < 0.0
+        limit = decel if slowing else accel
+        step = limit * dt
+        delta = target - value
+        if abs(delta) <= step:
+            return target
+        return value + math.copysign(step, delta)
+
+    def update_teleop(self, velocity, measured, dt=DT):
+        """Run one teleop cycle against an internal joint reference.
+
+        The reference is advanced by a coordinated, rate-limited joint
+        velocity instead of being rebuilt from the measured angles.  That
+        keeps the Cartesian path straight, avoids injecting feedback noise
+        into the command, and stops the IK target from running away from
+        the arm.
+
+        Args:
+            velocity: 6-tuple ``(vx, vy, vz [in/s], wx, wy, wz [rad/s])``.
+            measured: Measured joint angles [rad].
+            dt: Control period [s].
+
+        Returns:
+            bool: True while teleop motion (including deceleration) is
+            active; False once the stage is idle or a stall is reported.
+        """
+        if not self.initialized:
+            return False
+        if measured is None or len(measured) != len(self.mechanical.angles):
+            return False
+        if any(math.isnan(float(a)) for a in measured):
+            return False
+
+        target = [float(v) for v in velocity]
+        if len(target) != 6:
+            return False
+        moving_target = any(abs(v) > TELEOP_STOP_EPSILON for v in target)
+
+        if self._teleop_stalled:
+            # Wait for the stick to return to neutral before trying again.
+            if not moving_target:
+                self._teleop_stalled = False
+                self._teleop_needs_reset = True
+            return False
+        if self._teleop_needs_reset:
+            # Idle: keep the last reference and do not adopt measured noise.
+            # A new push re-arms from the measured pose.
+            if not moving_target:
+                return False
+            if not self.reset_teleop_reference(measured):
+                return False
+        elif self.teleop_reference is None:
+            if not self.reset_teleop_reference(measured):
+                return False
+
+        if self.position_locked:
+            target[0:3] = [0.0, 0.0, 0.0]
+        if self.orientation_locked:
+            target[3:6] = [0.0, 0.0, 0.0]
+
+        linear = (TELEOP_ACCEL_IN_S2, TELEOP_ACCEL_IN_S2, TELEOP_ACCEL_IN_S2)
+        decel = (TELEOP_DECEL_IN_S2, TELEOP_DECEL_IN_S2, TELEOP_DECEL_IN_S2)
+        angular = (TELEOP_ANG_ACCEL_RAD_S2,) * 3
+        accel_all = linear + angular
+        decel_all = decel + angular
+        self.teleop_velocity = [
+            self._ramp_component(v, t, accel_all[i], decel_all[i], dt)
+            for i, (v, t) in enumerate(zip(self.teleop_velocity, target))
+        ]
+        if (all(abs(v) <= TELEOP_STOP_EPSILON
+                for v in self.teleop_velocity)
+                and all(abs(v) <= TELEOP_STOP_EPSILON
+                        for v in self.teleop_joint_velocity)):
+            self.teleop_velocity = [0.0] * 6
+            self.teleop_joint_velocity = [0.0] * len(self.teleop_joint_velocity)
+            return False
+
+        reference = list(self.teleop_reference)
+        frame = self.model.solve_forward_kinematics(reference)
+        frame = self._frame_with_orientation_lock(frame)
+        desired = frame.apply_delta({
+            "dx": self.teleop_velocity[0] * dt,
+            "dy": self.teleop_velocity[1] * dt,
+            "dz": self.teleop_velocity[2] * dt,
+            "drx": self.teleop_velocity[3] * dt,
+            "dry": self.teleop_velocity[4] * dt,
+            "drz": self.teleop_velocity[5] * dt,
+        })
+        desired = self.limit_mode.clamp_target_position(desired, reference)
+
+        limits = [tuple(pair) for pair in self._active_limits(reference)]
+        for i, locked in enumerate(self.locked_joints):
+            if locked and i < len(limits):
+                limits[i] = (reference[i], reference[i])
+
+        self.solver.joint_limits = limits
+        ik_target, _, _, _ = self.solver.solve(
+            reference, desired,
+            start_pos_tol=TRACK_POS_TOL, start_ori_tol=TRACK_ORI_TOL)
+        for i, locked in enumerate(self.locked_joints):
+            if locked and i < len(ik_target):
+                ik_target[i] = reference[i]
+
+        if self._workspace_blocked(ik_target):
+            self.teleop_velocity = [0.0] * 6
+            self.teleop_joint_velocity = [0.0] * len(self.teleop_joint_velocity)
+            return False
+
+        diff = [wrap2pi(t - r) for t, r in zip(ik_target, reference)]
+        caps = self.mechanical.max_ang_vel
+        desired_speed = [0.0] * len(reference)
+        scale = 1.0
+        for i, delta in enumerate(diff):
+            if self.locked_joints[i] or abs(delta) < 1e-12:
+                continue
+            speed = delta / dt
+            desired_speed[i] = speed
+            cap = caps[i]
+            if abs(speed) > cap:
+                scale = min(scale, cap / abs(speed))
+        desired_speed = [speed * scale for speed in desired_speed]
+
+        accel_speed = [cap / TELEOP_JOINT_ACCEL_TIME_S for cap in caps]
+        change = [want - have for want, have
+                  in zip(desired_speed, self.teleop_joint_velocity)]
+        ratio = 1.0
+        for i, value in enumerate(change):
+            if self.locked_joints[i]:
+                continue
+            limit = accel_speed[i] * dt
+            if abs(value) > limit:
+                ratio = max(ratio, abs(value) / limit)
+        self.teleop_joint_velocity = [
+            have + value / ratio
+            for have, value in zip(self.teleop_joint_velocity, change)
+        ]
+        # A joint locked mid-motion must not keep a residual velocity; its
+        # limit is already zero-width, so pin the state too.
+        for i, locked in enumerate(self.locked_joints):
+            if locked:
+                self.teleop_joint_velocity[i] = 0.0
+
+        new_reference = [
+            ref + speed * dt
+            for ref, speed in zip(reference, self.teleop_joint_velocity)
+        ]
+        for i, (lo, hi) in enumerate(limits):
+            new_reference[i] = max(lo, min(hi, new_reference[i]))
+
+        lead = math.radians(TELEOP_LEAD_LIMIT_DEG)
+        lead_active = False
+        for i, angle in enumerate(new_reference):
+            if self.locked_joints[i]:
+                continue
+            lo = float(measured[i]) - lead
+            hi = float(measured[i]) + lead
+            if angle < lo or angle > hi:
+                new_reference[i] = max(lo, min(hi, angle))
+                lead_active = True
+        if lead_active:
+            self.teleop_lead_cycles += 1
+        else:
+            self.teleop_lead_cycles = 0
+        if self.teleop_lead_cycles > TELEOP_LEAD_STALL_CYCLES:
+            self.teleop_velocity = [0.0] * 6
+            self.teleop_joint_velocity = [0.0] * len(self.teleop_joint_velocity)
+            self._teleop_stalled = True
+            self._fail(
+                "Teleop tracking stall: arm cannot follow the reference")
+            return False
+
+        self.teleop_reference = new_reference
+        self.mechanical.angles = list(new_reference)
+        self.mechanical.joint_speeds = [
+            abs(v) for v in self.teleop_joint_velocity]
+        self.target_angles = list(new_reference)
+        frame = self.model.solve_forward_kinematics(self.target_angles)
+        self.target_frame = self._frame_with_orientation_lock(frame)
+        self.target_pos = list(self.target_frame.position())
+        self.refresh_fk()
+        return True

@@ -199,6 +199,8 @@ class ArmRoutePlannerNode(Node):
         if estop == self.__estop:
             return
         self.__estop = estop
+        # Do not resume a held teleop trajectory after a stop or a clear.
+        self.__arm.invalidate_teleop_reference()
         if self.__estop:
             self.get_logger().info("E-STOP latched: route planner paused")
             self.__emit_error(
@@ -430,6 +432,32 @@ class ArmRoutePlannerNode(Node):
             "drz": velocity.angular_z * DT,
         }
 
+    def __velocity_is_fresh(self) -> bool:
+        """Return True when a manual velocity sample is still current."""
+        return (
+            self.__velocity is not None
+            and time.monotonic() - self.__velocity_received_at
+            <= VELOCITY_TIMEOUT_SEC
+        )
+
+    def __teleop_velocity(self) -> tuple:
+        """Return the teleop command as (in/s, in/s, in/s, rad/s, rad/s, rad/s).
+
+        The controller works in inches, so convert the wire units at this
+        boundary exactly once.
+        """
+        if not self.__velocity_is_fresh():
+            return (0.0,) * 6
+        velocity = self.__velocity
+        return (
+            float(velocity.linear_x) / METERS_PER_INCH,
+            float(velocity.linear_y) / METERS_PER_INCH,
+            float(velocity.linear_z) / METERS_PER_INCH,
+            float(velocity.angular_x),
+            float(velocity.angular_y),
+            float(velocity.angular_z),
+        )
+
     def __update(self):
         if self.__estop:
             # Keep the master's readiness view alive while paused.
@@ -473,34 +501,58 @@ class ArmRoutePlannerNode(Node):
                     f"limits for joints {outside}; arm may need homing")
             return
 
-        self.__arm.sync_angles(
-            list(self.__measured), reset_target=False)
-
-        # Homing is a maintained action: the basestation forwards the key on
-        # every held state.  Release (or a stale command stream) stops the
-        # arm instead of letting it finish the move on its own.
-        if (self.__arm.is_homing
-                and (self.__homing_command_at is None
-                     or time.monotonic() - self.__homing_command_at
-                     > HOMING_HOLD_TIMEOUT_SEC)):
-            self.__homing_command_at = None
-            self.__arm.stop_homing()
-            self.get_logger().info("Homing released; stopped")
-
         pose_active = self.__pose_is_fresh()
-        if pose_active:
-            self.__apply_pose_target()
-        deltas = None if pose_active else self.__next_deltas()
-        # Teleop is a position target, not a trajectory.  Once the operator
-        # releases the SpaceMouse, hold the achieved pose instead of spending
-        # seconds catching up to the last target frame.  Absolute pose targets
-        # and the homing/flip actions still finish normally.
-        if (not pose_active and deltas is None
-                and not self.__arm.homing.active
-                and not self.__arm.is_flipping
-                and not self.__arm.zenith):
-            self.__arm.hold()
-        consumed = self.__arm.update(deltas)
+        # Manual teleop owns the arm while a velocity sample is arriving or
+        # while the teleop stage is still ramping down.  It gets its own
+        # output stage so the command is a smooth internal reference rather
+        # than "measured + one step".
+        teleop_active = (
+            not pose_active
+            and not self.__arm.joint_drive
+            and not self.__arm.homing.active
+            and not self.__arm.is_flipping
+            and not self.__arm.zenith
+            and (self.__velocity_is_fresh()
+                 or self.__arm.teleop_motion_active)
+        )
+
+        if teleop_active:
+            moved = self.__arm.update_teleop(
+                self.__teleop_velocity(), self.__measured)
+            if moved:
+                consumed = True
+            else:
+                # Stopped (or stalled): drop the target so the arm holds
+                # wherever it finished instead of chasing a stale frame.
+                self.__arm.hold()
+                consumed = False
+        else:
+            self.__arm.sync_angles(
+                list(self.__measured), reset_target=False)
+
+            # Homing is a maintained action: the basestation forwards the key
+            # on every held state.  Release (or a stale command stream) stops
+            # the arm instead of letting it finish the move on its own.
+            if (self.__arm.is_homing
+                    and (self.__homing_command_at is None
+                         or time.monotonic() - self.__homing_command_at
+                         > HOMING_HOLD_TIMEOUT_SEC)):
+                self.__homing_command_at = None
+                self.__arm.stop_homing()
+                self.get_logger().info("Homing released; stopped")
+
+            if pose_active:
+                self.__apply_pose_target()
+            deltas = None if pose_active else self.__next_deltas()
+            # An idle non-teleop path holds the achieved pose instead of
+            # chasing the last target frame.  Absolute pose targets and the
+            # homing/flip actions still finish normally.
+            if (not pose_active and deltas is None
+                    and not self.__arm.homing.active
+                    and not self.__arm.is_flipping
+                    and not self.__arm.zenith):
+                self.__arm.hold()
+            consumed = self.__arm.update(deltas)
         self.__publish_counter += 1
         self.__publish_targets(force=self.__publish_counter % 20 == 0)
         self.__publish_arm_status()
@@ -569,17 +621,16 @@ class ArmRoutePlannerNode(Node):
     def __publish_pose(self):
         """Publish the measured end-effector pose for the basestation.
 
-        The controller works in inches; the message contract is metres
-        and radians.  The telemetry uplink converts back to the compact
-        protocol's centi-inch/centi-degree fields.
+        Teleop keeps an internal joint reference, so the controller's FK is
+        the commanded pose, not the achieved one.  Publish the measured pose
+        explicitly: the typing node's arrival checks and the operator display
+        both depend on it.
         """
-        pos = self.__arm.pos
-        frames = self.__arm.frames
-        if pos is None or frames is None:
+        if any(math.isnan(a) for a in self.__measured):
             return
-        x, y, z = (float(value) for value in pos[-1])
-        roll, pitch, yaw = rotation_to_rpy(
-            frames[-1].rotation_matrix())
+        frame = self.__arm.model.solve_forward_kinematics(self.__measured)
+        x, y, z = (float(value) for value in frame.position())
+        roll, pitch, yaw = rotation_to_rpy(frame.rotation_matrix())
         self.__pose_publisher.publish(Pose(
             x=x * METERS_PER_INCH,
             y=y * METERS_PER_INCH,
