@@ -666,8 +666,8 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # The single cruise speed is owned by arm_action_driver_node
 # (MOVE_SPEED_RAD_S = 25 deg/s for every joint); per-joint hardware caps come
 # from ARM_MOTOR_MAX_ANG_VEL.  Details: planz/ACTION_DRIVER_PLAN.md §6.
-ACTION_ACCEL_RAD_S2 = 4.0
-ACTION_DECEL_RAD_S2 = 8.0
+ACTION_ACCEL_RAD_S2 = 2.0
+ACTION_DECEL_RAD_S2 = 4.0
 
 
 # =============================================================================

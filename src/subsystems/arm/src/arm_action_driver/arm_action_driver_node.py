@@ -585,11 +585,13 @@ class ArmActionDriverNode(Node):
         exiting = self._move.exiting
         target = self._move.exiting_target if exiting \
             else self._move.path[self._move.idx]
+        final_leg = exiting or self._move.idx + 1 >= len(self._move.path)
         cmd = self.ramp_command(
             target, [MOVE_SPEED_RAD_S] * len(ARM_JOINT_NAMES), config.limits,
             mask=self._move.mask,
             deadband_ok=config.deadband_ok and not exiting,
-            deadband_target=target if config.deadband_target else None)
+            deadband_target=target if config.deadband_target else None,
+            brake=final_leg)
         self.publish_targets(cmd)
 
         if exiting:
@@ -797,7 +799,7 @@ class ArmActionDriverNode(Node):
     # ------------------------------------------------------------------
 
     def ramp_command(self, target, caps, limits, mask=None,
-                     deadband_ok=False, deadband_target=None):
+                     deadband_ok=False, deadband_target=None, brake=True):
         """Step the measured pose toward ``target`` with the shared ramp."""
         count = len(ARM_JOINT_NAMES)
         if mask is None:
@@ -815,7 +817,7 @@ class ArmActionDriverNode(Node):
                 self.measured[i], delta, lo, hi)
             deltas.append(delta)
             effective_caps.append(caps[i])
-        steps, _ = self.ramp.step(deltas, effective_caps)
+        steps, _ = self.ramp.step(deltas, effective_caps, brake=brake)
 
         command = list(self.measured)
         for i in range(count):
@@ -864,10 +866,13 @@ class ArmActionDriverNode(Node):
         return [not locked for locked in self.locked]
 
     def _masked_max_remaining(self, target, mask):
-        return max(
+        remaining = [
             abs(wrap2pi(target[i] - self.measured[i]))
             for i in range(len(ARM_JOINT_NAMES))
-            if mask[i])
+            if mask[i]]
+        # Every joint can be locked (hardware e-stop, maintenance mode):
+        # there is no remaining travel to report.
+        return max(remaining) if remaining else 0.0
 
     # ------------------------------------------------------------------
     # Control cycle

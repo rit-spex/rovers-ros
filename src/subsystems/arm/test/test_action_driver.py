@@ -242,3 +242,32 @@ def test_target_helpers_are_pure_parameter_consumers():
             assert not hasattr(cls, name), \
                 f"{cls.__name__} re-implements {name}; behaviour belongs " \
                 "in the driver node"
+
+
+def test_ramp_passes_through_waypoint_without_stopping():
+    ramp = make_ramp()
+    cap = 1.0
+    for _ in range(100):
+        ramp.step([10.0], [cap], brake=False)
+    assert ramp.velocity[0] == pytest.approx(cap)
+
+    crossing, _ = ramp.step([1e-3], [cap], brake=False)
+    assert crossing[0] == pytest.approx(1e-3)
+    assert abs(ramp.velocity[0]) == pytest.approx(cap)
+
+    next_leg, _ = ramp.step([0.5], [cap], brake=False)
+    assert abs(next_leg[0]) == pytest.approx(cap * DT)
+
+
+def test_masked_max_remaining_handles_every_joint_locked():
+    from arm_action_driver.arm_action_driver_node import ArmActionDriverNode
+    from arm_constants import ARM_JOINT_NAMES
+
+    node = object.__new__(ArmActionDriverNode)
+    node.measured = [0.0] * len(ARM_JOINT_NAMES)
+    target = [1.0] * len(ARM_JOINT_NAMES)
+
+    # A hardware lock on every joint leaves nothing to move; the empty
+    # mask must not raise ValueError from max().
+    assert node._masked_max_remaining(target, [False] * len(target)) == 0.0
+    assert node._masked_max_remaining(target, [True] * len(target)) == 1.0

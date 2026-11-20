@@ -41,7 +41,7 @@ class JointRamp:
         """Begin a controlled stop; no new cruise velocity is requested."""
         return [0.0] * self.count
 
-    def step(self, deltas, caps):
+    def step(self, deltas, caps, brake=True):
         """Advance one cycle.
 
         Args:
@@ -50,6 +50,10 @@ class JointRamp:
                 long ways around).
             caps: Per-joint cruise speed cap [rad/s].  A cap of zero holds
                 that joint and decelerates it to rest.
+            brake: When False the joint cruises straight through a
+                waypoint instead of braking for it.  The step is still
+                clamped to the remaining distance, so the waypoint itself
+                is never overshot.
 
         Returns:
             (steps, done): per-joint angle step for this cycle [rad], and
@@ -69,18 +73,27 @@ class JointRamp:
                 continue
             done = False
 
-            # Requested speed: cruise cap, limited by the braking distance.
-            v_cruise = min(cap, abs(d) / self.dt)
-            v_brake = math.sqrt(
-                2.0 * self.decel * abs(d)
-                + (self.decel * self.dt / 2.0) ** 2
-            ) - self.decel * self.dt / 2.0
-            target = max(0.0, min(v_cruise, v_brake))
+            # Requested speed: cruise cap, limited by the braking distance
+            # on the final leg only.
+            if brake:
+                v_cruise = min(cap, abs(d) / self.dt)
+                v_brake = math.sqrt(
+                    2.0 * self.decel * abs(d)
+                    + (self.decel * self.dt / 2.0) ** 2
+                ) - self.decel * self.dt / 2.0
+                target = max(0.0, min(v_cruise, v_brake))
+            else:
+                target = cap
             target = math.copysign(target, d)
 
             # Ramp toward the request: accelerate when speeding up,
-            # decelerate otherwise.
-            if abs(target) >= abs(v):
+            # decelerate otherwise.  A direction change decays through
+            # zero before the joint turns around.
+            if v * target < 0.0:
+                rate = self.decel
+                magnitude = min(abs(v), rate * self.dt)
+                v = math.copysign(abs(v) - magnitude, v)
+            elif abs(target) >= abs(v):
                 rate = self.accel
                 magnitude = min(abs(target) - abs(v), rate * self.dt)
                 v = math.copysign(abs(v) + magnitude, v if v else target)
@@ -93,8 +106,13 @@ class JointRamp:
             step = v * self.dt
             if abs(step) >= abs(d):
                 step = d
-                v = 0.0
-                self.velocity[i] = 0.0
+                if brake:
+                    v = 0.0
+                else:
+                    # Keep cruising through the waypoint; only the sign
+                    # follows the next segment.
+                    v = math.copysign(abs(v), d)
+                self.velocity[i] = v
             else:
                 self.velocity[i] = v
             steps[i] = step
