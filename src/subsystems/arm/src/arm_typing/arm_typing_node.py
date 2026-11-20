@@ -341,9 +341,8 @@ class ArmTypingNode(Node):
 
         ``chassis_node`` treats these values exactly like a physical stick,
         including its own direction inversion, so an explicit sign flip here
-        would double-invert.  A nonzero command is a stream: the chassis
-        stops the wheels when it goes quiet, so keep refreshing it while the
-        error remains.  A zero command only needs to be sent once.
+        would double-invert.  The chassis latches the last command, so send
+        the current value while driving and always finish with a zero.
         """
         command = (float(left), float(right))
         if command == self.__last_drive and not any(command):

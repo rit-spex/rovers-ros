@@ -11,15 +11,14 @@ from rclpy.node import Node
 from rclpy.publisher import Publisher
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from custom_interfaces.msg import Can
-from std_msgs.msg import Float32
-from std_msgs.msg import Bool, Float32, UInt8MultiArray, Int8, Int16
+from std_msgs.msg import Bool, Float32
 
 TELEOP_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 class Chassis(Node):
     __topic: dict[str, Any]
-    
+
     __LY_value: float
     __RY_value: float
 
@@ -40,11 +39,18 @@ class Chassis(Node):
                     qos_profile=10
                 )
 
+        xbox_topic = "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/"
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR, self.__LY_callback, TELEOP_QOS
+            Float32,
+            xbox_topic + CONSTANTS.XBOX.JOYSTICK.AXIS_LY_STR,
+            self.__LY_callback,
+            TELEOP_QOS,
         )
         self.create_subscription(
-            Float32, "/BASESTATION/" + CONSTANTS.XBOX.NAME + "/" + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR, self.__RY_callback, TELEOP_QOS
+            Float32,
+            xbox_topic + CONSTANTS.XBOX.JOYSTICK.AXIS_RY_STR,
+            self.__RY_callback,
+            TELEOP_QOS,
         )
         self.create_subscription(
             msg_type=Bool,
@@ -79,6 +85,14 @@ class Chassis(Node):
             self.__drive_power_can_message)
         self.__publishers[CAN_MESSAGE_IDS.DRIVE_POWER].publish(can_packet)
 
+    def __zero_drive(self):
+        """Set both drive sides to zero and publish the stop."""
+        self.__LY_value = 0.0
+        self.__RY_value = 0.0
+        self.__drive_power_can_message.signals["left"].set_value(0.0)
+        self.__drive_power_can_message.signals["right"].set_value(0.0)
+        self.__publish_drive_power()
+
     def __on_estop_received(self, msg: Bool):
         # /ESTOP is level-triggered. On TRUE, zero the drive command and
         # ignore joystick input. On FALSE, resume accepting commands. The
@@ -88,11 +102,7 @@ class Chassis(Node):
                 return
             self.__estop = True
             self.get_logger().info("E-STOP received, stopping chassis...")
-            self.__LY_value = 0.0
-            self.__RY_value = 0.0
-            self.__drive_power_can_message.signals["left"].set_value(0.0)
-            self.__drive_power_can_message.signals["right"].set_value(0.0)
-            self.__publish_drive_power()
+            self.__zero_drive()
         else:
             if not self.__estop:
                 return
@@ -103,11 +113,7 @@ class Chassis(Node):
     def destroy_node(self):
         # Best effort: leave the drive at zero if this node goes down alone.
         try:
-            self.__LY_value = 0.0
-            self.__RY_value = 0.0
-            self.__drive_power_can_message.signals["left"].set_value(0.0)
-            self.__drive_power_can_message.signals["right"].set_value(0.0)
-            self.__publish_drive_power()
+            self.__zero_drive()
         except Exception:
             pass
         return super().destroy_node()
