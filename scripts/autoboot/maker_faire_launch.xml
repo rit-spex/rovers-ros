@@ -1,0 +1,7 @@
+<launch>
+	<!-- Autoboot-only startup profile for Maker Faire demos. The normal rover
+	     stack is launched unchanged; the simulated wrist/gripper Teensy is
+	     added here so main_launch.xml stays free of demo-only nodes. -->
+	<include file="$(find-pkg-share main)/launch/main_launch.xml"></include>
+	<node pkg="arm" exec="arm_simulated_teensy_node" name="arm_simulated_teensy"></node>
+</launch>

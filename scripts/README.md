@@ -8,7 +8,7 @@ Helper scripts for building, sourcing, and running the rover workspace.
 | `common.sh` | Shared paths, build helpers, and process cleanup (source only) |
 | `sim.sh` | Start/stop the simulation, run the rover stack headless, or open the RViz view |
 | `restart_gazebo.sh` | Rebuild and restart Gazebo + rover stack (used by the GUI panel) |
-| `autoboot/install.sh` | Install the systemd unit that launches the rover stack at boot |
+| `autoboot/install.sh` | Install the systemd unit that launches the rover stack at boot (`--maker-faire` adds the simulated Teensy) |
 | `autoboot/uninstall.sh` | Stop, disable, and remove the autoboot systemd unit |
 | `can/install.sh` | Install the narrow passwordless sudo rule for `can0` setup |
 

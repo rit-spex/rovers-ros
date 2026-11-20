@@ -194,6 +194,7 @@ unit (it runs `main_launch.xml`, not the simulation):
 
 ```bash
 ./scripts/autoboot/install.sh     # enable at boot
+./scripts/autoboot/install.sh --maker-faire   # also run the simulated Teensy
 ./scripts/autoboot/uninstall.sh   # disable and remove
 ```
 
