@@ -441,7 +441,7 @@ TINSMITH_M4230_TICKS_PER_RAD = (
 ARM_MOTOR_PARAMS = [
     ArmMotorParams(
         ticks_per_rad=-TINSMITH_M4230_TICKS_PER_RAD,
-        tick_offset=-43333,
+        tick_offset=-308000,
         tick_lower_limit=-1040833,
         tick_upper_limit=954000,
         max_speed=500,
