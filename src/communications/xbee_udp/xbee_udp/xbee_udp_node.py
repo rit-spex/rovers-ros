@@ -31,7 +31,20 @@ class xbee_udp(Node):
 
         self.__address = CONSTANTS.COMMUNICATION.UDP_HOST
         self.__port = CONSTANTS.COMMUNICATION.UDP_ROVER_PORT
-        self.__basestation_port = CONSTANTS.COMMUNICATION.UDP_BASESTATION_PORT
+        # The two deployments listen for telemetry on different ports:
+        #   simulation   -> the basestation app's UDP telemetry socket
+        #   real rover   -> the basestation radio/command socket
+        # Default to simulation because xbee_udp is the simulated
+        # transport; the real-robot launch overrides this to false.
+        self.declare_parameter("simulation", True)
+        self.__simulation = self.get_parameter(
+            "simulation").get_parameter_value().bool_value
+        if self.__simulation:
+            self.__telemetry_port = (
+                CONSTANTS.COMMUNICATION.UDP_TELEMETRY_PORT)
+        else:
+            self.__telemetry_port = (
+                CONSTANTS.COMMUNICATION.UDP_BASESTATION_PORT)
         self.__socket = socket(skt.AF_INET, skt.SOCK_DGRAM)
         self.__buffer_size = 1024
         self.__publisher = self.create_publisher(
@@ -58,10 +71,11 @@ class xbee_udp(Node):
         pack and send the message to the basestation
         """
         try:
-            self.__socket.sendto(bytes(msg.data), (self.__address, self.__basestation_port))
+            self.__socket.sendto(
+                bytes(msg.data), (self.__address, self.__telemetry_port))
             self.get_logger().debug(
-                f"sent {len(msg.data)} bytes to {self.__address}:{self.__basestation_port}: "
-                f"{bytes(msg.data).hex(' ')}"
+                f"sent {len(msg.data)} bytes to {self.__address}:"
+                f"{self.__telemetry_port}: {bytes(msg.data).hex(' ')}"
             )
         except Exception as e:
             self.get_logger().error(f"failed to send data: {e}")
@@ -72,7 +86,10 @@ class xbee_udp(Node):
         self.__publisher.publish(msg)
 
     def run(self) -> None:
-        self.get_logger().info("starting xbee udp socket connection...")
+        self.get_logger().info(
+            "starting xbee udp socket connection... "
+            f"mode={'simulation' if self.__simulation else 'real robot'} "
+            f"uplink port={self.__telemetry_port}")
         self.__socket.setsockopt(
             skt.SOL_SOCKET, skt.SO_RCVBUF, 1 << 20)
         self.__socket.bind((self.__address, self.__port))

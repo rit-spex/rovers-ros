@@ -3,7 +3,9 @@
 	<arg name="robot_config" default="arm_drivebase"></arg>
 	<set_env name="ROVER_PROTOCOL_TRACE" value="$(var protocol_trace)"></set_env>
 	<node pkg="can_udp" exec="can_udp_node" name="can_udp"></node>
-	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp"></node>
+	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp">
+		<param name="simulation" value="true"></param>
+	</node>
 	<node pkg="basestation" exec="basestation_node" name="basestation"></node>
 	<node pkg="basestation" exec="telemetry_uplink_node" name="telemetry_uplink"></node>
 	<node pkg="chassis" exec="chassis_node" name="chassis"></node>

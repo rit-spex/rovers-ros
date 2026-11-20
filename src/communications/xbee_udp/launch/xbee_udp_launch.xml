@@ -1,3 +1,5 @@
 <launch>
-	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp"></node>
+	<node pkg="xbee_udp" exec="xbee_udp_node" name="xbee_udp">
+		<param name="simulation" value="false"></param>
+	</node>
 </launch>
