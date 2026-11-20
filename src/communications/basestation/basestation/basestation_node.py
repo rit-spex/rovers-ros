@@ -53,6 +53,7 @@ ARM_STATE_HELD = 2
 ARM_STATE_COMMANDS = {
     "flip": "flip",
     "zenith": "zenith",
+    "rest": "toggle_resting",
     "home": "home",
     "position_drive": "position_drive",
     "joint_drive": "joint_drive",

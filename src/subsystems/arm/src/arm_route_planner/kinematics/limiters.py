@@ -5,7 +5,7 @@ import numpy as np
 from arm_constants import (
     MECHANICAL_LIMITS, FULL_RANGE_LIMITS, PLANAR_LIMITS,
     PICK_AND_PLACE_LIMITS, PICK_AND_PLACE_FLIPPED_LIMITS, HOMING_LIMITS,
-    TYPING_LIMITS,
+    TYPING_LIMITS, RESTING_LIMITS,
     ELBOW_DEADBAND, O3_RELAX_MAX, EXCLUSION_RADIUS,
     BASE_ZERO_RANGE, HOMING_TARGET, END_EFFECTOR_MIN_Z,
     FRONT_HIGH, RIGHT_HIGH, BACK_HIGH, LEFT_HIGH,
@@ -299,6 +299,25 @@ class ZenithMode(BaseLimiter):
         return list(angles)
 
 
+class RestingMode(BaseLimiter):
+    """Collapse/de-torque operation with padded shoulder/elbow travel.
+
+    The shoulder lower and elbow upper bounds are widened by the resting
+    padding so the limit pushes can reach the physical stops.  Like Zenith,
+    the elbow may pass through the singularity deadband: the crouch pose
+    (+135 deg) is on the opposite side of the band from a normal-side start,
+    and the crossing is a controlled slew along a planned path, not an IK
+    solve.
+    """
+
+    name = "Resting"
+    limits = RESTING_LIMITS
+
+    def geometry_constraint(self, angles):
+        """Leave angles untouched; the crouch move crosses the deadband."""
+        return list(angles)
+
+
 FULL_RANGE_MODE = FullRangeMode()
 PLANAR_MODE = PlanarMode()
 PICK_AND_PLACE_MODE = PickAndPlaceMode()
@@ -306,5 +325,6 @@ PICK_AND_PLACE_FLIPPED_MODE = PickAndPlaceFlippedMode()
 TYPING_MODE = TypingMode()
 HOMING_MODE = HomingMode()
 ZENITH_MODE = ZenithMode()
+RESTING_MODE = RestingMode()
 
 LIMIT_MODES = [PICK_AND_PLACE_MODE]

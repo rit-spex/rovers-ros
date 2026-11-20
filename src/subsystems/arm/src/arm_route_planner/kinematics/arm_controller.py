@@ -17,6 +17,8 @@ from arm_constants import (
     END_EFFECTOR_MIN_Z, TRACK_POS_TOL, TRACK_ORI_TOL, DT,
     WAYPOINT_TOL, WAYPOINT_STALL_LIMIT,
     ZENITH_ANGLE_TOL, ZENITH_JOINT_TARGET,
+    RESTING_CROUCH_TARGET, RESTING_INFERENCE_TOL,
+    RESTING_MOVE_ANG_VEL,
     FRONT_LOW, BACK_HIGH, BACK_LOW,
     TELEOP_ACCEL_IN_S2, TELEOP_DECEL_IN_S2, TELEOP_ANG_ACCEL_RAD_S2,
     TELEOP_JOINT_ACCEL_TIME_S, TELEOP_LEAD_LIMIT_DEG,
@@ -26,7 +28,7 @@ from .linkage_models import (
     OrientationMatrix, wrap2pi, nearest_axis_aligned_rotation,
 )
 from .limiters import (
-    PLANAR_MODE, HOMING_MODE, ZENITH_MODE,
+    PLANAR_MODE, HOMING_MODE, ZENITH_MODE, RESTING_MODE,
     PICK_AND_PLACE_MODE, PICK_AND_PLACE_FLIPPED_MODE, TYPING_MODE,
     OCTANT_DIRECT_FLIP, OCTANT_PLANAR_EXIT_LOCK,
     OCTANT_NORMAL_ALLOWED, OCTANT_PLANAR_ALLOWED,
@@ -35,6 +37,7 @@ from .limiters import (
 )
 from .actions.home import HomingController
 from .actions.flip import FlipController
+from .actions.resting import RestingController
 from .path_planner import (
     build_arm_solver_object, extract_key_joints, plan_safe_path,
 )
@@ -96,6 +99,11 @@ class RoverArmController:
         self._zenith_side = False      # side to restore when leaving zenith
         self._zenith_exit_target: list[float] | None = None
         self._zenith_saved_locks: list[bool] | None = None
+        self.resting = False           # collapse/de-torque operation active
+        self._resting_saved_locks: list[bool] | None = None
+        self.resting_action = RestingController()
+        self._resting_path_phase: str | None = None
+        self._resting_events: list[str] = []
         self._typing_saved_locks: list[bool] | None = None
         self.solver_history = []       # debug: last IK iteration results
         self.last_failure: str | None = None
@@ -251,9 +259,11 @@ class RoverArmController:
             self.target_pos = list(self.target_frame.position())
         self.refresh_fk()
 
-    def _command_mechanical(self, target_angles, joint_limits):
+    def _command_mechanical(self, target_angles, joint_limits,
+                            max_step=None):
         """Slew the mechanical arm toward a target for one cycle."""
-        self.mechanical.step(target_angles, joint_limits, DT)
+        self.mechanical.step(target_angles, joint_limits, DT,
+                             max_step=max_step)
 
     def _locked_limits(self, joint_limits):
         """Pin locked joints to their actual angles in a limit list."""
@@ -363,7 +373,8 @@ class RoverArmController:
 
     def _workspace_blocked(self, angles):
         """True when a candidate pose violates the height or octant gates."""
-        if self.is_homing or self.is_flipping or self.zenith:
+        if self.is_homing or self.is_flipping or self.zenith \
+                or self.resting:
             return False
         pos = self.model.solve_forward_kinematics(angles).position()
         if pos[2] < END_EFFECTOR_MIN_Z - 1e-9:
@@ -375,7 +386,8 @@ class RoverArmController:
 
     def _octant_blocked(self, angles, pos=None):
         """True when a candidate pose is outside this mode's octant set."""
-        if self.is_homing or self.is_flipping or self.zenith:
+        if self.is_homing or self.is_flipping or self.zenith \
+                or self.resting:
             return False
         if pos is None:
             pos = self.model.solve_forward_kinematics(angles).position()
@@ -437,7 +449,8 @@ class RoverArmController:
 
     def settle_side(self):
         """Update the flipped flag from the achieved pose, if possible."""
-        if not self.initialized or self.planar or self.typing or self.zenith:
+        if (not self.initialized or self.planar or self.typing
+                or self.zenith or self.resting):
             return
         if PICK_AND_PLACE_FLIPPED_MODE.can_set(self._angles):
             self.flipped = True
@@ -467,6 +480,25 @@ class RoverArmController:
             return False
         return True
 
+    def _is_resting_pose(self):
+        """True when the measured pose sits in the resting region.
+
+        The resting region is the shoulder below the planar lower bound
+        (0 deg: a planar top-back pose may legitimately sit at 0-2 deg) or
+        the elbow above its normal upper limit, by more than the inference
+        tolerance.  The collapsed pose (shoulder ~-9.5 deg after the
+        backoff) and mid-push crashes past the elbow limit both match.
+        Checked after zenith, so the straight-up pose never matches.
+        """
+        if not self.initialized:
+            return False
+        angles = self._angles
+        tol = RESTING_INFERENCE_TOL
+        shoulder_below = angles[1] < 0.0 - tol
+        elbow_above = (
+            angles[2] > MECHANICAL_LIMITS[2][1] + tol)
+        return shoulder_below or elbow_above
+
     def infer_initial_mode(self):
         """Adopt the mode that best describes the measured starting pose.
 
@@ -491,6 +523,13 @@ class RoverArmController:
         if self._is_zenith_pose():
             self.enter_zenith()
             return "ZENITH"
+
+        # A pose in the resting region (collapsed against the stops, or a
+        # mid-crouch pose past the normal limits) means the arm was resting
+        # when it lost power: stay de-torqued and wait for the restore.
+        if self._is_resting_pose():
+            self.infer_resting_mode()
+            return "RESTING"
 
         octant = self._ee_octant()
         normal_fits = PICK_AND_PLACE_MODE.can_set(self._angles)
@@ -649,6 +688,146 @@ class RoverArmController:
         self.limit_mode = PICK_AND_PLACE_MODE
         self._sync_target_to_fk()
 
+    # ------------------------------------------------------------------
+    # Resting (collapse / de-torque / restore)
+    # ------------------------------------------------------------------
+
+    def enter_resting(self):
+        """Start the RESTING collapse sequence.
+
+        Mirrors zenith's entry reset: typing is left first, the operator's
+        joint locks are saved and released, and the planar/flipped/
+        joint-drive modifiers are cleared so the resting action owns every
+        joint.  The saved locks are restored when the sequence completes.
+        """
+        if not self._require_initialized():
+            return False
+        if self.zenith:
+            return self._fail("Resting blocked: exit zenith mode first")
+        if self.homing.active or self.is_flipping:
+            return self._fail("Resting blocked: an action is running")
+        if self.resting:
+            return True
+
+        self.set_typing_mode(False)
+        self._resting_saved_locks = list(self.locked_joints)
+        self.locked_joints = [False] * len(self.locked_joints)
+        self.planar = False
+        self.flipped = False
+        self.joint_drive = False
+        self.resting = True
+        self.limit_mode = RESTING_MODE
+        self._resting_path_phase = None
+        self.invalidate_teleop_reference()
+        return self.resting_action.begin_collapse()
+
+    def infer_resting_mode(self):
+        """Enter RESTING from a startup pose, holding instead of collapsing.
+
+        A resting-region startup pose means the drives should stay
+        de-torqued; the first R restores torque instead of collapsing.
+        """
+        if not self.enter_resting():
+            return False
+        self.resting_action.abort("Resting mode inferred from startup pose")
+        return True
+
+    def toggle_resting(self):
+        """R key: enter, abort-and-hold, or begin the restore sequence.
+
+        While a sequence is running, R aborts it and holds the measured pose
+        with torque on.  From COLLAPSED or HOLD, R starts the restore.
+        """
+        if self.resting:
+            if self.resting_action.collapsed \
+                    or self.resting_action.holding:
+                return self.resting_action.request_restore()
+            self.resting_action.abort(
+                "Resting sequence aborted by operator")
+            return True
+        return self.enter_resting()
+
+    def resting_torque_confirmed(self):
+        """Advance TORQUE_ON -> MOVE_OUT after hardware feedback."""
+        return self.resting_action.torque_confirmed()
+
+    def resting_homing_finished(self):
+        """Advance AUTO_HOME -> DONE once homing completes."""
+        if not self.resting_action.homing_finished():
+            return False
+        self._finish_resting()
+        return True
+
+    def _finish_resting(self):
+        """Restore the saved locks and normal mode after the restore ends."""
+        self.resting = False
+        self.planar = False
+        self.typing = False
+        self.joint_drive = False
+        if self._resting_saved_locks is not None:
+            self.locked_joints = list(self._resting_saved_locks)
+            self._resting_saved_locks = None
+        self.limit_mode = PICK_AND_PLACE_MODE
+        self.settle_side()
+        self._sync_target_to_fk()
+
+    def take_resting_events(self):
+        """Return and clear the resting phase-transition events."""
+        events = self._resting_events
+        self._resting_events = []
+        return events
+
+    def _plan_resting_path(self):
+        """Plan a safe joint path for the crouch/move-out phase, if possible.
+
+        The elbow must cross the singularity deadband to reach the crouch
+        (+135 deg); RESTING_MODE deliberately leaves the deadband unenforced
+        so the slew can cross it, and the planned path keeps the move out of
+        restricted octants.  When no safe path exists, the resting controller
+        falls back to a direct slow step.
+        """
+        phase = self.resting_action.phase
+        if phase not in (self.resting_action.PHASE_CROUCH,
+                         self.resting_action.PHASE_MOVE_OUT):
+            self._resting_path_phase = None
+            return
+        if self._resting_path_phase == phase:
+            return
+        self._resting_path_phase = phase
+        if self.resting_action._path is not None:
+            return
+        held = list(self._angles)
+        target = self._hold_joints(RESTING_CROUCH_TARGET, held)
+        path = plan_safe_path(self.model, held, target)
+        if path and len(path) > 1:
+            self.resting_action.set_path(
+                path[1:],
+                [RESTING_MOVE_ANG_VEL * DT] * len(held))
+
+    def _update_resting(self, feedback_fresh=True, enabled=True):
+        """Advance the resting state machine and drive the mechanical arm."""
+        self._plan_resting_path()
+        target, max_step, events = self.resting_action.update(
+            self._angles, DT, feedback_fresh=feedback_fresh,
+            enabled=enabled)
+        self._resting_events.extend(events)
+
+        for event in events:
+            if event == "home":
+                # Hand the arm to the normal homing action at the crouch.
+                self.resting = False
+                self.limit_mode = PICK_AND_PLACE_MODE
+                self.start_homing()
+            elif event.startswith("abort:"):
+                self._fail(event[len("abort:"):])
+                self._sync_target_to_fk()
+
+        if target is not None:
+            limits = self._locked_limits(RESTING_MODE.limits)
+            self._command_mechanical(target, limits, max_step=max_step)
+            self._sync_target_to_fk()
+        return events
+
     def _fail(self, message):
         """Record a user-facing rejection and return False."""
         self.last_failure = message
@@ -674,6 +853,8 @@ class RoverArmController:
         """
         if self.is_flipping or self.is_homing:
             return [tuple(pair) for pair in MECHANICAL_LIMITS]
+        if self.resting:
+            return [tuple(pair) for pair in RESTING_MODE.limits]
         if self.zenith:
             return [tuple(pair) for pair in ZENITH_MODE.limits]
         if self.typing:
@@ -712,6 +893,8 @@ class RoverArmController:
             return False
         if enabled and self.zenith:
             return self._fail("Typing blocked: exit zenith mode first")
+        if enabled and self.resting:
+            return self._fail("Typing blocked: resting is active")
         if enabled:
             if not self.typing:
                 self._typing_saved_locks = list(self.locked_joints)
@@ -740,6 +923,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Normal unavailable: exit zenith mode first")
+        if self.resting:
+            return self._fail("Normal unavailable: resting is active")
         if self.planar and not self._planar_exit_allowed():
             return self._fail(
                 "Normal unavailable: restricted octant requires planar")
@@ -761,6 +946,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Flipped unavailable: exit zenith mode first")
+        if self.resting:
+            return self._fail("Flipped unavailable: resting is active")
         if self.planar and not self._planar_exit_allowed():
             return self._fail(
                 "Flipped unavailable: restricted octant requires planar")
@@ -790,6 +977,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Planar unavailable: exit zenith mode first")
+        if self.resting:
+            return self._fail("Planar unavailable: resting is active")
         if self.planar:
             if not self._planar_exit_allowed():
                 return self._fail(
@@ -824,6 +1013,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Homing blocked: exit zenith mode first")
+        if self.resting:
+            return self._fail("Homing blocked: resting is active")
         if self.homing.active and self.home_joint_idx is None:
             return True
         if self.homing.active:
@@ -883,6 +1074,8 @@ class RoverArmController:
         """
         if not (0 <= idx < len(self.locked_joints)):
             return False
+        if self.resting:
+            return self._fail("Joint lock blocked: resting is active")
         self.locked_joints[idx] = not self.locked_joints[idx]
         return self.locked_joints[idx]
 
@@ -934,6 +1127,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Joint home blocked: exit zenith mode first")
+        if self.resting:
+            return self._fail("Joint home blocked: resting is active")
         if not (0 <= idx < len(self.locked_joints)):
             return False
         if self.homing.active and self.home_joint_idx == idx:
@@ -993,7 +1188,8 @@ class RoverArmController:
         """
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith:
+        if self.homing.active or self.is_flipping or self.zenith \
+                or self.resting:
             return self._fail("Command blocked: action is running")
         if not 0 <= index < min(len(self._angles), len(self.target_angles)):
             return self._fail("Command blocked: invalid joint")
@@ -1020,7 +1216,8 @@ class RoverArmController:
         """Command the target position on one world axis."""
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith:
+        if self.homing.active or self.is_flipping or self.zenith \
+                or self.resting:
             return self._fail("Command blocked: action is running")
         if axis not in (0, 1, 2):
             return self._fail("Command blocked: invalid axis")
@@ -1051,7 +1248,8 @@ class RoverArmController:
         """
         if not self._require_initialized():
             return False
-        if self.homing.active or self.is_flipping or self.zenith:
+        if self.homing.active or self.is_flipping or self.zenith \
+                or self.resting:
             return self._fail("Command blocked: action is running")
         if len(position) != 3:
             return self._fail("Command blocked: invalid position")
@@ -1072,6 +1270,9 @@ class RoverArmController:
             return False
         if self.zenith:
             # Zenith is a mode, not a target; a handover hold leaves it be.
+            return True
+        if self.resting:
+            # Resting owns its target; a handover hold leaves it be.
             return True
         if self.homing.active or self.is_flipping:
             return self._fail("Hold blocked: action is running")
@@ -1100,6 +1301,8 @@ class RoverArmController:
             return False
         if self.zenith:
             return self._fail("Flip blocked: exit zenith mode first")
+        if self.resting:
+            return self._fail("Flip blocked: resting is active")
         octant = self._ee_octant()
         if octant not in OCTANT_DIRECT_FLIP and not self.planar:
             return self._fail(
@@ -1152,15 +1355,16 @@ class RoverArmController:
     # Update paths (one per kinematic mode)
     # ------------------------------------------------------------------
 
-    def update(self, deltas=None):
+    def update(self, deltas=None, feedback_fresh=True, resting_enabled=True):
         """Advance one control cycle based on the current mode.
 
         Dispatches to the appropriate update path:
             1. Flip follow  -> slew to the flip target (overrides all)
-            2. Homing       -> step toward home configuration
-            3. No input     -> finish the last position-drive target
-            4. Joint drive  -> direct joint deltas + clamping
-            5. Position drive -> target frame delta + IK solve
+            2. Resting      -> collapse / de-torque / restore state machine
+            3. Homing       -> step toward home configuration
+            4. No input     -> finish the last position-drive target
+            5. Joint drive  -> direct joint deltas + clamping
+            6. Position drive -> target frame delta + IK solve
 
         The mechanical arm owns the actual angles in every path; this
         method only commands it, so a bad target is velocity-limited
@@ -1169,6 +1373,10 @@ class RoverArmController:
         Args:
             deltas: dict with keys dx, dy, dz, drx, dry, drz
                     (scaled SpaceMouse deltas), or None when idle.
+            feedback_fresh: False when no fresh measured sample arrived
+                    (used by resting push abort checks).
+            resting_enabled: False when the arm is disabled (used by
+                    resting push abort checks).
 
         Returns:
             bool: True if input was consumed (state was updated).
@@ -1215,6 +1423,15 @@ class RoverArmController:
             self.target_angles = list(self._angles)
             self.refresh_fk()
             self._sync_target_to_fk()
+            return True
+
+        # Resting owns every joint until the restore sequence completes;
+        # teleop input is ignored while it is active.
+        if self.resting:
+            self._update_resting(
+                feedback_fresh=feedback_fresh,
+                enabled=resting_enabled)
+            self.refresh_fk()
             return True
 
         # Zenith is a static test pose; teleop input is ignored until exit.

@@ -83,6 +83,7 @@ from arm_constants import (
     PLANNER_COMMAND_TOPIC,
     PLANNER_HOLD_COMMAND,
     PLANNER_STATUS_TOPIC,
+    PLANNER_ALWAYS_COMMANDS,
     PLANNER_TIMEOUT_SEC,
     POSE_TOPIC,
     PRE_READY_END_EFFECTOR_COMMANDS,
@@ -439,7 +440,16 @@ class ArmMasterNode(Node):
         their readiness/e-stop/unknown-command errors.  Gripper and solenoid
         commands belong to the end effector and never reach the planner, so
         the master validates their preconditions here.
+
+        Mode toggles in ``PLANNER_ALWAYS_COMMANDS`` (resting, zenith) are
+        global safety/pose commands, not motion intent: they bypass the
+        MANUAL-only gate so an autonomous source cannot swallow them.  The
+        planner remains the authority on whether they are accepted.
         """
+        if command in PLANNER_ALWAYS_COMMANDS:
+            self.__forward(self.__planner_command_publisher, command)
+            return
+
         if self.__control_source != ArmControlSource.MANUAL:
             if self.__should_report(command):
                 self.get_logger().warning(

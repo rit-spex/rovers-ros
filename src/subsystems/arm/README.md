@@ -501,13 +501,16 @@ Inputs:
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Planner readiness and the latest command/runtime rejection. |
 
 `/ARM/COMMAND` accepts:
-`flip`, `zenith` / `toggle_zenith`, `planar` / `toggle_planar`,
+`flip`, `zenith` / `toggle_zenith`, `resting` / `toggle_resting`,
+`planar` / `toggle_planar`,
 `pnp_normal`, `toggle_flipped`,
 `homing` / `home`, `joint_drive`, `position_drive`, `sync` / `sync_target`,
 `toggle_position_lock`, `toggle_orientation_lock`, `guide_orientation`,
 `toggle_joint_lock:<0-4>`, `home_joint:<0-4>`, `gripper_up`,
 `gripper_down`, and `fire_solenoid` (`toggle_solenoid` is a legacy alias).
-The motion commands are forwarded to the route planner for validation;
+The resting/zenith toggles bypass the master's manual-only gate (they are
+global safety commands, not motion intent). The other motion commands are
+forwarded to the route planner for validation;
 `gripper_up`, `gripper_down`, `fire_solenoid`, and `toggle_solenoid` go only
 to the end effector. See the module docstring in `arm_master_node.py` for the
 routing rules.
@@ -584,11 +587,15 @@ Outputs:
 | Topic | Type | Notes |
 | --- | --- | --- |
 | `/ARM/JOINT/TARGET_*` | `std_msgs/Float32` | Rate-limited 5-DOF joint targets [rad]. Unchanged targets are skipped, with a forced refresh every 20 cycles. |
-| `/ARM/STATE/HOMING` … `/ARM/STATE/ZENITH` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`, `ZENITH`. |
+| `/ARM/STATE/HOMING` … `/ARM/STATE/RESTING` | `std_msgs/Bool` | Planner flags: `HOMING`, `FLIPPING`, `FLIPPED`, `PLANAR`, `JOINT_DRIVE`, `POSITION_LOCK`, `ORIENTATION_LOCK`, `ZENITH`, `RESTING`. |
 | `/ARM/STATE/LOCKED_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is motor-locked. |
 | `/ARM/STATE/HOMING_JOINTS` | `std_msgs/UInt8` | Bitmask: bit `i` set means joint `i` is being homed. |
-| `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing, `4` zenith. |
+| `/ARM/STATE/OPERATION_MODE` | `std_msgs/UInt8` | Wire code: `0` PNP, `1` PNP flipped, `2` planar, `3` homing, `4` zenith, `5` resting. |
 | `/ARM/STATE/POSE` | `custom_interfaces/Pose` | Measured end-effector pose (metres/radians). |
+| `/ARM/HARDWARE/RESTING` | `std_msgs/Bool` | Planner → hardware: widen shoulder/elbow targets to `RESTING_LIMITS` and poll velocity. Refreshed at 1 Hz; times out after 1.5 s. |
+| `/ARM/HARDWARE/TORQUE_ENABLED` | `std_msgs/Bool` | Planner → hardware: OpenCAN torque level. Sticky off: only an explicit `True` re-enables. |
+| `/ARM/STATE/TORQUE_ENABLED` | `std_msgs/Bool` | Hardware → diagnostics: the actual torque latch state. |
+| `/ARM/JOINT/CURRENT_VELOCITY_{BASE,SHOULDER,ELBOW}` | `std_msgs/Float32` | OpenCAN drive velocity (0x606C), advisory stall signal for resting. |
 | `/ARM/PLANNER/STATUS` | `custom_interfaces/ArmPlannerStatus` | Readiness plus the latest command/runtime rejection code. |
 
 The planner waits until all five measured angles arrive before it starts; it
@@ -667,7 +674,8 @@ simulation and hardware.
   is fresh; the master's stale-target hold stops the chase.
 - **Limit modes:** Pick-and-Place normal and flipped, Planar (base lock),
   Typing (base limited to +/-90 deg, wrist locks released), Zenith
-  (straight-up test pose), and Homing. Restricted octants (3, 5, 7) require
+  (straight-up test pose), Resting (collapse/de-torque with padded
+  shoulder/elbow travel), and Homing. Restricted octants (3, 5, 7) require
   Planar.
 - **Zenith mode:** the `Z` key commands `[any base, 90, 0, 0, 0]` degrees, a
   straight-up pose suitable for depowering the motors. It releases joint
@@ -675,13 +683,30 @@ simulation and hardware.
   nearest valid pose on the last Pick-and-Place side before restoring that
   side and its locks. Other mode commands, homing, and flips are refused
   until zenith is exited.
+- **Resting:** the `R` key collapses the arm for transport: slow-step to the
+  crouch `[0, 0, 135, 0, 0]` degrees along a planned path, push the shoulder
+  toward its lower stop and the elbow toward its upper stop at 1 deg/s until
+  each stalls, back each off 0.5 degrees, then remove torque from the three
+  OpenCAN motors. The next `R` restores torque at the measured pose, returns
+  to the crouch, hands off to normal homing, and ends in Pick-and-Place with
+  the operator's saved joint locks restored. R mid-sequence aborts and holds
+  with torque on; an E-stop during resting latches torque off until the
+  restore. While resting, other mode commands, homing, flips, joint locks,
+  and teleop are rejected, and the shoulder/elbow targets are validated
+  against the padded `RESTING_LIMITS` instead of the normal limits. The
+  planner refreshes the `/ARM/HARDWARE/RESTING` and
+  `/ARM/HARDWARE/TORQUE_ENABLED` levels at 1 Hz; the hardware times the
+  resting latch out after 1.5 s of silence while the torque latch stays off
+  until an explicit re-enable. Details: `RESTING_FEATURE_PLAN.md`.
 - **Startup mode inference:** on the first measured sync the planner selects
   the mode that matches the pose instead of assuming normal Pick-and-Place.
-  The straight-up pose selects Zenith; restricted octants (notably top-back)
+  The straight-up pose selects Zenith; a resting-region pose (shoulder below
+  the planar bound or elbow past its upper limit) selects Resting and keeps
+  torque off until the restore; restricted octants (notably top-back)
   select Planar when the base is inside the planar band; otherwise the
   Pick-and-Place side whose limits fit is adopted, falling back to the side
   with the smaller excursion. The inferred mode is published on
-  `/ARM/STATE/OPERATION_MODE` and `/ARM/STATE/ZENITH` so the basestation
+  `/ARM/STATE/OPERATION_MODE` and its flag topic so the basestation
   display matches the arm; `telemetry_uplink_node` mirrors the mode, locks,
   and flags into `arm_status` as well as `arm_encoders`, so the basestation
   stored state updates even before every joint angle has arrived.

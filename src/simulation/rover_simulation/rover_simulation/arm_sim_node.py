@@ -12,6 +12,7 @@ teleop, and typing nodes are identical between simulation and the rover.
 
 import math
 import random
+import time
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -25,12 +26,18 @@ from arm_constants import (
     ARM_JOINTS,
     ARM_MOTOR_IDX,
     ARM_MOTOR_PARAMS,
+    ARM_RESTING_TOPIC,
+    ARM_TORQUE_ENABLED_TOPIC,
+    ARM_TORQUE_STATE_TOPIC,
     CURRENT_ANGLE_TOPICS,
+    CURRENT_VELOCITY_TOPICS,
     ESTOP_TOPIC,
     GRIPPER_MAX_ANGLE,
     GRIPPER_MIN_ANGLE,
     HOMING_TARGET,
     MECHANICAL_LIMITS,
+    RESTING_LATCH_TIMEOUT_SEC,
+    RESTING_LIMITS,
     SOLENOID_TARGET_TOPIC,
     TARGET_ANGLE_TOPICS,
 )
@@ -77,6 +84,26 @@ def _tick_limits(index: int) -> tuple[float, float]:
 
 
 TICK_LIMITS = [_tick_limits(index) for index in range(len(GAZEBO_JOINTS))]
+# Resting widens the shoulder/elbow target acceptance to RESTING_LIMITS,
+# converted through the same calibration.  The provisional ARM_MOTOR_PARAMS
+# tick limits are tighter than the resting region (elbow ~150.8 deg), so the
+# resting latch replaces rather than pads them.
+_RESTING_RAD_LIMITS = [
+    MECHANICAL_LIMITS[0],
+    RESTING_LIMITS[1],
+    RESTING_LIMITS[2],
+    MECHANICAL_LIMITS[3],
+    MECHANICAL_LIMITS[4],
+    (GRIPPER_MIN_ANGLE, GRIPPER_MAX_ANGLE),
+]
+RESTING_TICK_LIMITS = [
+    (min(angle_to_ticks(index, lo), angle_to_ticks(index, hi)),
+     max(angle_to_ticks(index, lo), angle_to_ticks(index, hi)))
+    for index, (lo, hi) in enumerate(_RESTING_RAD_LIMITS)
+]
+# Torque-off holds only the three OpenCAN joints; the wrists stay active.
+OPEN_CAN_JOINTS = (
+    ARM_MOTOR_IDX.BASE, ARM_MOTOR_IDX.SHOULDER, ARM_MOTOR_IDX.ELBOW)
 LIMIT_TOLERANCE_TICKS = [
     LIMIT_TOLERANCE_RAD * abs(ARM_MOTOR_PARAMS[index].ticks_per_rad)
     for index in range(len(GAZEBO_JOINTS))
@@ -169,6 +196,10 @@ class ArmSimNode(Node):
         self.__started = False
         self.__settling = False
         self.__settle_ticks = 0
+        self.__resting = False
+        self.__resting_at = 0.0
+        self.__torque_off = False
+        self.__velocities = [float("nan")] * len(GAZEBO_JOINTS)
 
         self.__targets_ticks = [float("nan")] * len(GAZEBO_JOINTS)
         self.__commands_ticks = [float("nan")] * len(GAZEBO_JOINTS)
@@ -181,6 +212,13 @@ class ArmSimNode(Node):
                 Float32, CURRENT_ANGLE_TOPICS[index], 10)
             for index in ARM_MOTOR_IDX
         }
+        self.__velocity_publishers = {
+            index: self.create_publisher(
+                Float32, CURRENT_VELOCITY_TOPICS[index], 10)
+            for index in CURRENT_VELOCITY_TOPICS
+        }
+        self.__torque_state_publisher = self.create_publisher(
+            Bool, ARM_TORQUE_STATE_TOPIC, 10)
 
         self.create_subscription(
             JointState, joint_state_topic, self.__on_joint_state, 10)
@@ -194,6 +232,11 @@ class ArmSimNode(Node):
             self.__on_solenoid_received,
             10,
         )
+        self.create_subscription(
+            Bool, ARM_RESTING_TOPIC, self.__on_resting_received, 10)
+        self.create_subscription(
+            Bool, ARM_TORQUE_ENABLED_TOPIC,
+            self.__on_torque_enabled_received, 10)
         for index in ARM_MOTOR_IDX:
             self.create_subscription(
                 Float32,
@@ -228,7 +271,10 @@ class ArmSimNode(Node):
         # matching angle instead of being rejected.
         angle = math.remainder(angle, 2.0 * math.pi)
         ticks = angle_to_ticks(index, angle)
-        low, high = TICK_LIMITS[index]
+        if self.__resting:
+            low, high = RESTING_TICK_LIMITS[index]
+        else:
+            low, high = TICK_LIMITS[index]
         tolerance = LIMIT_TOLERANCE_TICKS[index]
         if ticks < low - tolerance or ticks > high + tolerance:
             low_rad = ticks_to_angle(index, low)
@@ -283,6 +329,10 @@ class ArmSimNode(Node):
         self.__arm_enabled = False
         self.__settling = False
         self.__hold_current()
+        if self.__resting:
+            self.__torque_off = True
+            self.__torque_state_publisher.publish(
+                Bool(data=not self.__torque_off))
         self.get_logger().info("E-STOP latched: holding simulated arm pose")
 
     def __on_solenoid_received(self, msg: Bool):
@@ -290,13 +340,31 @@ class ArmSimNode(Node):
         if msg.data and self.__arm_enabled:
             self.get_logger().debug("Simulated solenoid strike")
 
+    def __on_resting_received(self, msg: Bool):
+        """Widen shoulder/elbow target acceptance while resting is active."""
+        self.__resting = bool(msg.data)
+        self.__resting_at = time.monotonic()
+
+    def __on_torque_enabled_received(self, msg: Bool):
+        """Remove or restore torque on the simulated OpenCAN joints."""
+        if not msg.data:
+            self.__torque_off = True
+            self.get_logger().info("Simulated resting torque off")
+        elif self.__torque_off and not self.__estop:
+            self.__torque_off = False
+            self.get_logger().info("Simulated resting torque restored")
+        self.__torque_state_publisher.publish(
+            Bool(data=not self.__torque_off))
+
     def __on_joint_state(self, msg: JointState):
         """Latch Gazebo joint positions for the current-angle feedback."""
-        for name, position in zip(msg.name, msg.position):
+        for name, position, velocity in zip(
+                msg.name, msg.position, msg.velocity):
             if name in GAZEBO_JOINTS:
                 index = GAZEBO_JOINTS.index(name)
                 self.__current_ticks[index] = angle_to_ticks(
                     index, float(position))
+                self.__velocities[index] = float(velocity)
 
     # ------------------------------------------------------------------
     # Gazebo outputs
@@ -314,6 +382,11 @@ class ArmSimNode(Node):
             return
         commands = list(self.__commands_ticks)
         for index, target in enumerate(self.__targets_ticks):
+            # Torque off: the simulated OpenCAN joints hold their pose; the
+            # wrists (Teensy side) stay position-controlled.
+            if self.__torque_off and index in OPEN_CAN_JOINTS:
+                commands[index] = self.__commands_ticks[index]
+                continue
             diff = target - commands[index]
             if index == ARM_MOTOR_IDX.BASE:
                 # The base is continuous.  Take the shortest tick path.
@@ -330,11 +403,15 @@ class ArmSimNode(Node):
             ]))
 
     def __publish_current(self):
-        """Publish the Gazebo joint positions as arm feedback."""
+        """Publish the Gazebo joint positions and velocities as feedback."""
         for index, ticks in enumerate(self.__current_ticks):
             if math.isfinite(ticks):
                 self.__current_publishers[ARM_MOTOR_IDX(index)].publish(
                     Float32(data=ticks_to_angle(index, ticks)))
+                if index in self.__velocity_publishers and math.isfinite(
+                        self.__velocities[index]):
+                    self.__velocity_publishers[index].publish(
+                        Float32(data=self.__velocities[index]))
 
     # ------------------------------------------------------------------
     # Control cycle
@@ -344,6 +421,13 @@ class ArmSimNode(Node):
         """Publish feedback and refresh the Gazebo joint targets."""
         if any(math.isnan(value) for value in self.__current_ticks):
             return
+
+        if self.__resting and (
+                time.monotonic() - self.__resting_at
+                > RESTING_LATCH_TIMEOUT_SEC):
+            self.__resting = False
+            self.get_logger().warning(
+                "Simulated resting latch timed out; normal limits restored")
 
         self.__publish_current()
 

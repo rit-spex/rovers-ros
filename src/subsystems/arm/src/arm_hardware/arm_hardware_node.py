@@ -2,10 +2,14 @@
 
 import math
 import threading
+import time
 
 from arm_constants import (
-    ARM_ENABLED_TOPIC, ARM_MOTOR_IDX, CURRENT_ANGLE_TOPICS, DT,
-    ESTOP_TOPIC, SOLENOID_TARGET_TOPIC, STANDARD_CAN_ANGLE_SIGNALS,
+    ARM_ENABLED_TOPIC, ARM_MOTOR_IDX, ARM_RESTING_TOPIC,
+    ARM_TORQUE_ENABLED_TOPIC, ARM_TORQUE_STATE_TOPIC,
+    CURRENT_ANGLE_TOPICS, CURRENT_VELOCITY_TOPICS, DT,
+    ESTOP_TOPIC, RESTING_LATCH_TIMEOUT_SEC, RESTING_LIMITS,
+    SOLENOID_TARGET_TOPIC, STANDARD_CAN_ANGLE_SIGNALS,
     STANDARD_CAN_READ_MOTORS, TARGET_ANGLE_TOPICS, angle_limits,
 )
 from constants.CAN_constants import (
@@ -48,6 +52,14 @@ class ArmHardwareNode(Node):
         self.arm_enabled = False
         self.__estop = False
         self.__enable_ignored_logged = False
+        self.__torque_ignored_logged = False
+        # Resting latches: widened target limits and removed drive torque.
+        # The resting latch times out if the planner goes silent; the torque
+        # latch is sticky and clears only on an explicit re-enable.
+        self.__resting = False
+        self.__resting_at = 0.0
+        self.__torque_off = False
+        self.__velocity_toggle = False
         self.__motors_target_angles = [float("nan")] * len(ARM_MOTOR_IDX)
         self.__motors_actual_angles = [float("nan")] * len(ARM_MOTOR_IDX)
 
@@ -73,6 +85,18 @@ class ArmHardwareNode(Node):
             callback=self.__on_estop_received,
             qos_profile=10,
         )
+        self.create_subscription(
+            msg_type=Bool,
+            topic=ARM_RESTING_TOPIC,
+            callback=self.__on_resting_received,
+            qos_profile=10,
+        )
+        self.create_subscription(
+            msg_type=Bool,
+            topic=ARM_TORQUE_ENABLED_TOPIC,
+            callback=self.__on_torque_enabled_received,
+            qos_profile=10,
+        )
 
         # Request OpenCAN positions at the controller rate.  The feedback
         # path used to run at 2 Hz, which left the 20 Hz controller working
@@ -81,6 +105,7 @@ class ArmHardwareNode(Node):
             timer_period_sec=DT,
             callback=self.request_position,
         )
+        self.__torque_state_publisher.publish(Bool(data=not self.__torque_off))
 
     def set_arm_motor_publishers(self):
         """Create the CAN and joint-state publishers for the arm motors."""
@@ -101,6 +126,21 @@ class ArmHardwareNode(Node):
                 topic=topic,
                 qos_profile=10,
             )
+
+        # velocity feedback for the OpenCAN joints (resting stall signal)
+        self.__velocity_publishers = {}
+        for motor_idx, topic in CURRENT_VELOCITY_TOPICS.items():
+            self.__velocity_publishers[motor_idx] = self.create_publisher(
+                msg_type=Float32,
+                topic=topic,
+                qos_profile=10,
+            )
+
+        self.__torque_state_publisher = self.create_publisher(
+            msg_type=Bool,
+            topic=ARM_TORQUE_STATE_TOPIC,
+            qos_profile=10,
+        )
 
     def set_arm_motor_subscribers(self):
         """Create the CAN and joint-target subscriptions for the arm motors."""
@@ -282,8 +322,18 @@ class ArmHardwareNode(Node):
         if not self.arm_enabled:
             return
 
+        # The resting torque latch suppresses every OpenCAN target until the
+        # restore explicitly re-enables torque.
+        if self.__torque_off:
+            return
+
         # check if the target angle is within the limits of the motor
-        lower, upper = angle_limits(motor_idx)
+        if (self.__resting
+                and motor_idx in (ARM_MOTOR_IDX.SHOULDER,
+                                  ARM_MOTOR_IDX.ELBOW)):
+            lower, upper = RESTING_LIMITS[motor_idx]
+        else:
+            lower, upper = angle_limits(motor_idx)
         if target_angle < lower or target_angle > upper:
             self.get_logger().error(
                 f"Target angle {target_angle:.4f} rad for motor "
@@ -334,6 +384,12 @@ class ArmHardwareNode(Node):
         # OpenCAN motors.
         self.__open_can.set_enabled(False)
 
+        # Scoped to RESTING: the E-stop also latches torque off, and the
+        # latch survives the E-stop clear until the restore re-enables it.
+        if self.__resting:
+            self.__torque_off = True
+            self.__publish_torque_state()
+
     def __on_arm_enable_received(self, msg: Bool):
         """Enable or disable the motors, honouring the E-STOP latch."""
         # An E-STOP latches the arm off; ignore enable requests until the
@@ -357,10 +413,66 @@ class ArmHardwareNode(Node):
         # The master republishes this level while the arm is enabled.  Re-send
         # the enable/speed frames each time so a frame dropped during an
         # E-STOP cannot leave the motors latched off.
+        if self.__torque_off:
+            if not self.__torque_ignored_logged:
+                self.__torque_ignored_logged = True
+                self.get_logger().warning(
+                    "Ignoring arm enable while resting torque is latched")
+            return
+
         if not self.arm_enabled:
             self.arm_enabled = True
             self.get_logger().info("Arm enabled")
         self.__open_can.set_enabled(True)
+
+    def __on_resting_received(self, msg: Bool):
+        """Widen the shoulder/elbow target limits while resting is active.
+
+        The planner refreshes the level at 1 Hz; the latch times out if the
+        planner goes silent so a dead node cannot keep the widened limits.
+        """
+        self.__resting = bool(msg.data)
+        self.__resting_at = time.monotonic()
+
+    def __on_torque_enabled_received(self, msg: Bool):
+        """Remove or restore OpenCAN torque (resting latch, sticky off)."""
+        if not msg.data:
+            if self.__torque_off:
+                return
+            self.__torque_off = True
+            self.get_logger().info("Resting torque latch: motors off")
+            self.__forget_targets()
+            self.__open_can.set_enabled(False)
+            self.__publish_torque_state()
+            return
+
+        if self.__estop:
+            self.get_logger().warning(
+                "Ignoring torque enable while E-STOP is latched")
+            return
+        if not self.__torque_off:
+            return
+        self.__torque_off = False
+        self.get_logger().info("Resting torque latch: restoring motors")
+        # Re-enable at the measured positions, and only when the master has
+        # the arm enabled: the torque level never enables a disabled arm.
+        if self.arm_enabled:
+            self.__target_measured_positions()
+            self.__open_can.set_enabled(True)
+        self.__publish_torque_state()
+
+    def __target_measured_positions(self):
+        """Send each measured position as the target before re-enabling."""
+        for motor_idx in ARM_MOTOR_IDX:
+            measured = self.__motors_actual_angles[motor_idx]
+            if math.isfinite(measured):
+                self.__motors_target_angles[motor_idx] = float("nan")
+                self.__send_motor_command(motor_idx, float(measured))
+
+    def __publish_torque_state(self):
+        """Report the actual torque latch state for diagnostics."""
+        self.__torque_state_publisher.publish(
+            Bool(data=not self.__torque_off))
 
     def __on_new_CAN_message_received(self, msg: Can):
         """Decode a motor frame and publish the reported angle."""
@@ -385,6 +497,15 @@ class ArmHardwareNode(Node):
         # decode with the backend that owns the motor
         if self.__open_can.handles(motor_idx):
             angle = self.__open_can.decode_angle(motor_idx, can_message)
+            if angle is None:
+                # Not a position response: try the velocity object (0x606C)
+                # the resting push polls.  decode_velocity rejects frames
+                # whose object index does not match.
+                velocity = self.__open_can.decode_velocity(can_message)
+                if velocity is not None:
+                    self.__velocity_publishers[motor_idx].publish(
+                        Float32(data=velocity))
+                return
         else:
             angle = self.__decode_standard_angle(can_message)
         if angle is None:
@@ -403,9 +524,22 @@ class ArmHardwareNode(Node):
         """Ask the OpenCAN motors for their current positions.
 
         This runs even while the arm is disabled so measured angles stay
-        available to the controller.
+        available to the controller.  While resting, the shoulder and elbow
+        velocity objects (0x606C) are polled too, staggered on alternate
+        cycles so they never collide with the position reads in one cycle.
         """
         self.__open_can.request_positions()
+        if self.__resting:
+            if (time.monotonic() - self.__resting_at
+                    > RESTING_LATCH_TIMEOUT_SEC):
+                self.__resting = False
+                self.get_logger().warning(
+                    "Resting latch timed out; normal target limits restored")
+            else:
+                self.__velocity_toggle = not self.__velocity_toggle
+                self.__open_can.request_velocity(
+                    ARM_MOTOR_IDX.SHOULDER if self.__velocity_toggle
+                    else ARM_MOTOR_IDX.ELBOW)
 
     def destroy_node(self):
         """Disable the motors before shutting the node down."""

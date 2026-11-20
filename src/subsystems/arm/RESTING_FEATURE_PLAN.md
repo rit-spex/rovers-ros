@@ -1,6 +1,8 @@
 # Arm Resting Feature — Implementation Plan
 
-Status: planned, not implemented.
+Status: implemented (2026-11-20). The rover-side code, simulation, telemetry,
+and tests are in place; the external basestation app/firmware sync and the
+hardware verification checklist (§14) remain open.
 
 ## 1. Goal
 
@@ -143,7 +145,9 @@ existing arm actions.
 - The command-key single source is
   `src/communications/basestation/basestation/basestation_node.py`. Add
   `"rest": "toggle_resting"` to `ARM_STATE_COMMANDS` (`"zenith": "zenith"`
-  is already present). Do **not** add `lock_all_joints`.
+  is already present). Do **not** add `rest` to `ARM_STATE_HELD_COMMANDS`:
+  R is press-only, and a held repeat would re-fire the toggle and abort the
+  collapse it just started. Do **not** add `lock_all_joints`.
 - The master's manual-command mux (`arm_master_node.__handle_command`) drops
   `/ARM/COMMAND` whenever the MANUAL control source does not own the arm, so
   R would never reach the planner while AUTONOMOUS is active. Special-case
@@ -321,6 +325,11 @@ command mux must let `toggle_resting` through regardless of control source
 authority.
 
 - **R during ZENITH is rejected** with an error until zenith exits.
+- **R during an active HOMING or FLIPPING action is rejected** with an error
+  until the action completes. The resting action and a homing/flip action
+  would otherwise both step the target stream.
+- **R during E-stop is rejected** by the planner's existing e-stop
+  readiness gate (the master forwards the command, the planner refuses).
 - **While RESTING is active**, reject `flip`, `home`, `home_joint_N`,
   `position_drive`, `joint_drive`, `pnp_normal`, `toggle_planar`,
   `toggle_joint_lock_N`, `toggle_position_lock`, `toggle_orientation_lock`,
@@ -336,6 +345,13 @@ authority.
   elbow would silently refuse the crouch move). The saved locks are restored
   when RESTING completes (`DONE`), not at `AUTO_HOME` start, so homing never
   has to fight a locked joint.
+- **Mode flags**: entering RESTING mirrors zenith's full reset —
+  `planar=False`, `flipped=False`, `joint_drive=False`, and
+  `limit_mode=RESTING_MODE`. Otherwise a planar/typing/joint-drive flag left
+  set keeps the old mode's idle paths and limit reporting alive.
+- **Limit mode**: add a `RESTING_MODE` limiter to `limiters.py` alongside
+  `ZENITH_MODE`/`HOMING_MODE`, carrying `RESTING_LIMITS`, instead of passing
+  the table ad hoc.
 
 ### Planner integration points
 
@@ -358,8 +374,9 @@ After a power cycle the drives default to disabled and the planner infers a
 mode from the measured pose. On startup the planner first publishes
 `resting=False` (clearing any resting latch a crashed planner left behind),
 then runs the inference. Add a resting-region check *before* the existing
-zenith/flipped/planar inference: if the measured shoulder is below the normal
-lower limit or the elbow is above the normal upper limit by more than the
+zenith/flipped/planar inference: if the measured shoulder is below the
+planar shoulder bound (0°, so a legitimate planar top-back pose at 0–2° is
+not misread) or the elbow is above its normal upper limit by more than the
 inference tolerance, infer `RESTING`: publish mode `RESTING`, re-assert
 `resting=True`, hold the measured pose, and publish `torque_enabled=False`
 immediately so the hardware latch is set and the continuously republished
@@ -506,9 +523,11 @@ Do **not** change `MECHANICAL_LIMITS` in `arm_constants.py`.
   - E-stop torque latch.
 - Gating and startup:
   - R rejected during ZENITH; Z and mode commands rejected during RESTING;
+  - R rejected during an active HOMING or FLIPPING action;
   - R rejected while the arm is disabled;
   - the master forwards `toggle_resting` while AUTONOMOUS owns the arm;
-  - entering RESTING releases joint locks and `DONE` restores them;
+  - entering RESTING releases joint locks, resets planar/flipped/joint_drive
+    mode flags, and `DONE` restores the locks;
   - a resting-region startup pose infers mode RESTING and publishes
     `torque_enabled=False`;
   - a crashed-planner startup sequence resets `resting` before inference.

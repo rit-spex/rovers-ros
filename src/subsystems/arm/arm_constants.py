@@ -94,6 +94,19 @@ PRE_READY_END_EFFECTOR_COMMANDS = {
 # timeout.
 END_EFFECTOR_STOP_COMMAND = "stop_jog"
 
+# Planner commands the master forwards regardless of the active control
+# source.  Mode toggles like resting/zenith are global safety/pose commands,
+# not motion intent, so an autonomous source owning the arm must not be able
+# to swallow them.  The planner stays the authority on whether they are
+# accepted.
+PLANNER_ALWAYS_COMMANDS = {
+    "toggle_resting",
+    "rest",
+    "zenith",
+    "zenith_mode",
+    "toggle_zenith",
+}
+
 # Internal planner command.  The master emits it whenever a control handover
 # or E-stop invalidates the previous owner's target, so the planner holds the
 # measured pose instead of chasing an abandoned Cartesian target.
@@ -115,6 +128,7 @@ ARM_FLAG_NAMES = (
     "POSITION_LOCK",
     "ORIENTATION_LOCK",
     "ZENITH",
+    "RESTING",
 )
 
 ARM_STATE_TOPICS = {
@@ -179,6 +193,7 @@ _ARM_OPERATION_MODES = {
     "PLANAR": (2, "PLANAR"),
     "HOMING": (3, "HOMING"),
     "ZENITH": (4, "ZENITH"),
+    "RESTING": (5, "RESTING"),
 }
 ARM_OPERATION_MODES = {
     name: code for name, (code, _) in _ARM_OPERATION_MODES.items()
@@ -286,6 +301,82 @@ WRIST_TWIST_LIMIT = MECHANICAL_LIMITS[4]
 
 
 # =============================================================================
+# Resting (collapse / de-torque / restore)
+# =============================================================================
+#
+# The R key drives the arm to the crouch pose [0, 0, 135, 0, 0] deg, then
+# pushes the shoulder toward its lower stop and the elbow toward its upper
+# stop until each stalls, backs each off 0.5 deg, and removes torque from the
+# three OpenCAN motors.  The next R restores torque, returns to the crouch,
+# and homes the arm.  Details: RESTING_FEATURE_PLAN.md.
+
+# While resting, the shoulder and elbow may travel past their normal
+# mechanical limits by this much (hard-clamped by RESTING_LIMITS below).
+RESTING_LIMIT_PADDING = math.radians(30.0)
+
+# Crouch pose the arm collapses to before the limit pushes.
+RESTING_CROUCH_TARGET = [0.0, 0.0, math.radians(135.0), 0.0, 0.0]
+
+# Slow move speeds: crouch/restore moves run at 2 deg/s, the limit pushes at
+# 1 deg/s.
+RESTING_MOVE_ANG_VEL = math.radians(2.0)
+RESTING_PUSH_RATE = math.radians(1.0)
+# Watchdog for the crouch and move-out phases.  The worst case is a 270 deg
+# elbow swing at 2 deg/s (~135 s); this leaves generous margin.
+RESTING_MOVE_TIMEOUT_SEC = 240.0
+
+# Expected physical stops and the push targets 5 deg past them.  The elbow
+# target equals its padded upper limit, so a stop that is missing entirely
+# trips the padded-limit abort instead of idling until the push timeout.
+RESTING_PUSH_MARGIN = math.radians(5.0)
+RESTING_EXPECTED_SHOULDER_STALL = math.radians(-10.0)
+RESTING_EXPECTED_ELBOW_STALL = math.radians(160.0)
+RESTING_SHOULDER_PUSH = math.radians(-15.0)
+RESTING_ELBOW_PUSH = RESTING_EXPECTED_ELBOW_STALL + RESTING_PUSH_MARGIN
+
+# Stall detection.  The position window is the primary check; the rolling
+# velocity average is advisory and is never required to declare a stall
+# (the 0x606C scale is unverified).
+RESTING_START_GRACE_SEC = 1.0
+RESTING_STALL_WINDOW_SEC = 0.5
+RESTING_STALL_MOVE_EPS = math.radians(0.05)
+RESTING_STALL_VELOCITY_EPS = 3.0
+RESTING_PUSH_TIMEOUT_SEC = 60.0
+RESTING_PUSH_ARRIVE_TOL = math.radians(0.1)
+
+# Unload distance after a stall, per joint.
+RESTING_BACKOFF_ANGLE = math.radians(0.5)
+
+# Startup inference: a measured pose this far outside the normal shoulder
+# lower / elbow upper limits is treated as a resting-region pose.
+RESTING_INFERENCE_TOL = math.radians(1.0)
+
+# Latch topics.  The planner refreshes the levels at 1 Hz; the hardware
+# clears the resting latch after a longer silence, while the torque latch
+# stays off until an explicit re-enable.
+ARM_RESTING_TOPIC = "/ARM/HARDWARE/RESTING"
+ARM_TORQUE_ENABLED_TOPIC = "/ARM/HARDWARE/TORQUE_ENABLED"
+ARM_TORQUE_STATE_TOPIC = "/ARM/STATE/TORQUE_ENABLED"
+RESTING_LATCH_REFRESH_SEC = 1.0
+RESTING_LATCH_TIMEOUT_SEC = 1.5
+# Position feedback is treated as dead during a resting push when no sample
+# has arrived for this long.
+RESTING_FEEDBACK_TIMEOUT_SEC = 0.25
+
+# Joint limits while resting: the shoulder lower and elbow upper bounds grow
+# by the padding; base and wrists keep their mechanical travel.
+RESTING_LIMITS = [
+    MECHANICAL_LIMITS[0],
+    (MECHANICAL_LIMITS[1][0] - RESTING_LIMIT_PADDING,
+     MECHANICAL_LIMITS[1][1]),
+    (MECHANICAL_LIMITS[2][0],
+     MECHANICAL_LIMITS[2][1] + RESTING_LIMIT_PADDING),
+    MECHANICAL_LIMITS[3],
+    MECHANICAL_LIMITS[4],
+]
+
+
+# =============================================================================
 # Motor identity and calibration
 # =============================================================================
 
@@ -360,7 +451,7 @@ ARM_MOTOR_PARAMS = [
         tick_offset=-202000,
         tick_lower_limit=-202000,
         tick_upper_limit=622000,
-        max_speed=150,
+        max_speed=250,
     ),  # shoulder
     ArmMotorParams(
         ticks_per_rad=-TINSMITH_M4230_TICKS_PER_RAD,
@@ -454,6 +545,13 @@ CURRENT_ANGLE_TOPICS = {
 }
 TARGET_ANGLE_TOPICS = {
     idx: JOINT_TARGET_TOPICS[name] for idx, name in MOTOR_JOINT_NAMES.items()
+}
+# Drive velocity feedback (0x606C) published for the OpenCAN joints.  The
+# resting push uses the shoulder and elbow values as an advisory stall signal.
+CURRENT_VELOCITY_TOPICS = {
+    ARM_MOTOR_IDX.BASE: "/ARM/JOINT/CURRENT_VELOCITY_BASE",
+    ARM_MOTOR_IDX.SHOULDER: "/ARM/JOINT/CURRENT_VELOCITY_SHOULDER",
+    ARM_MOTOR_IDX.ELBOW: "/ARM/JOINT/CURRENT_VELOCITY_ELBOW",
 }
 
 

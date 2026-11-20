@@ -53,10 +53,14 @@ from arm_route_planner.kinematics.linkage_models import (
 )
 from arm_route_planner.kinematics.arm_controller import RoverArmController
 from arm_constants import (
+    ARM_ENABLED_TOPIC,
     ARM_FLAG_NAMES,
     ARM_JOINT_NAMES,
     ARM_OPERATION_MODES,
+    ARM_RESTING_TOPIC,
     ARM_STATE_TOPICS,
+    ARM_TORQUE_ENABLED_TOPIC,
+    ARM_TORQUE_STATE_TOPIC,
     AUTONOMOUS_POSE_TIMEOUT_SEC,
     DT,
     ESTOP_TOPIC,
@@ -68,6 +72,8 @@ from arm_constants import (
     PLANNER_HOLD_COMMAND,
     PLANNER_STATUS_TOPIC,
     POSE_TOPIC,
+    RESTING_FEEDBACK_TIMEOUT_SEC,
+    RESTING_LATCH_REFRESH_SEC,
     VELOCITY_TIMEOUT_SEC,
     VELOCITY_TOPIC,
 )
@@ -75,6 +81,7 @@ from rover_protocol.arm_errors import (
     ARM_ERROR_ESTOP,
     ARM_ERROR_NONE,
     ARM_ERROR_NOT_READY,
+    ARM_ERROR_REJECTED,
     ARM_ERROR_UNKNOWN_COMMAND,
     classify_failure,
     error_text,
@@ -114,10 +121,15 @@ class ArmRoutePlannerNode(Node):
         self.__error_seq = 0
 
         self.__estop = False
+        self.__arm_enabled = False
+        self.__torque_state = False
+        self.__torque_intent = True
         self.__log_divider = 0
         self.__last_status_key: tuple[object, ...] | None = None
         self.__last_targets: tuple[float, ...] | None = None
         self.__publish_counter = 0
+        self.__latch_publish_at = 0.0
+        self.__joint_feedback_at = [0.0] * len(ARM_JOINT_NAMES)
 
         # Latest absolute Cartesian target.  The master forwards it only
         # while an autonomous source owns the arm, so this node stays
@@ -134,6 +146,11 @@ class ArmRoutePlannerNode(Node):
         self.__state_publishers()
         self.__input_subscribers()
         self.create_timer(DT, self.__update)
+        # Clear any resting latch a crashed planner left behind.  The torque
+        # level is only published after the startup inference, so a
+        # mid-collapse crash keeps its de-torqued state until the inference
+        # re-asserts it.
+        self.__resting_publisher.publish(Bool(data=False))
 
     # ------------------------------------------------------------------
     # ROS interfaces
@@ -174,6 +191,10 @@ class ArmRoutePlannerNode(Node):
             Pose, ARM_STATE_TOPICS["pose"], 10)
         self.__status_publisher = self.create_publisher(
             ArmPlannerStatus, PLANNER_STATUS_TOPIC, 10)
+        self.__resting_publisher = self.create_publisher(
+            Bool, ARM_RESTING_TOPIC, 10)
+        self.__torque_publisher = self.create_publisher(
+            Bool, ARM_TORQUE_ENABLED_TOPIC, 10)
 
     def __input_subscribers(self):
         """Create the E-stop, command, velocity, and gripper subscriptions."""
@@ -189,6 +210,10 @@ class ArmRoutePlannerNode(Node):
             Velocity, VELOCITY_TOPIC, self.__on_velocity_received, 10)
         self.create_subscription(
             Pose, POSE_TOPIC, self.__on_pose_received, 10)
+        self.create_subscription(
+            Bool, ARM_ENABLED_TOPIC, self.__on_arm_enable_received, 10)
+        self.create_subscription(
+            Bool, ARM_TORQUE_STATE_TOPIC, self.__on_torque_state_received, 10)
 
     # ------------------------------------------------------------------
     # Input callbacks
@@ -205,6 +230,13 @@ class ArmRoutePlannerNode(Node):
             self.get_logger().info("E-STOP latched: route planner paused")
             self.__emit_error(
                 ARM_ERROR_ESTOP, force=True, log=False)
+            # Scoped to RESTING: the E-stop removes torque and the hardware
+            # latch keeps it off until the restore publishes a re-enable.
+            if self.__arm.resting:
+                self.__arm.resting_action.abort(
+                    "Resting aborted by E-stop")
+                self.__torque_intent = False
+                self.__torque_publisher.publish(Bool(data=False))
         else:
             self.get_logger().info("E-STOP cleared: route planner resumed")
             self.__emit_error(ARM_ERROR_NONE, log=False)
@@ -219,6 +251,14 @@ class ArmRoutePlannerNode(Node):
         self.__pose = msg
         self.__pose_received_at = time.monotonic()
 
+    def __on_arm_enable_received(self, msg: Bool):
+        """Track the master's arm enable level (resting push precondition)."""
+        self.__arm_enabled = bool(msg.data)
+
+    def __on_torque_state_received(self, msg: Bool):
+        """Track the hardware torque latch state (restore handshake)."""
+        self.__torque_state = bool(msg.data)
+
     def __on_command_received(self, msg: ArmCommand):
         """Handle one high-level operator command."""
         command = msg.command.strip()
@@ -231,6 +271,7 @@ class ArmRoutePlannerNode(Node):
 
         def callback(msg: Float32):
             self.__measured[index] = wrap2pi(msg.data)
+            self.__joint_feedback_at[index] = time.monotonic()
         return callback
 
     # ------------------------------------------------------------------
@@ -288,6 +329,18 @@ class ArmRoutePlannerNode(Node):
             )
             return
 
+        # RESTING needs an enabled arm: its pushes rely on the drives
+        # actually moving during the start grace.
+        if command in ("toggle_resting", "rest", "resting") \
+                and not self.__arm_enabled:
+            self.__emit_error(
+                ARM_ERROR_REJECTED,
+                reason=(f"Arm command '{command}' ignored: "
+                        "arm is disabled"),
+                force=True,
+            )
+            return
+
         handled, _ = self.__dispatch_command(command)
         failure = self.__arm.take_failure()
         if failure:
@@ -315,6 +368,8 @@ class ArmRoutePlannerNode(Node):
             return True, self.__arm.activate_flip()
         if command in ("zenith", "zenith_mode", "toggle_zenith"):
             return True, self.__arm.toggle_zenith()
+        if command in ("toggle_resting", "rest", "resting"):
+            return True, self.__arm.toggle_resting()
         if command in ("homing", "home"):
             result = self.__arm.start_homing()
             if result:
@@ -367,6 +422,45 @@ class ArmRoutePlannerNode(Node):
         self.__velocity_received_at = 0.0
         self.__arm.hold()
         self.get_logger().info("Arm target held")
+
+    def __resting_feedback_fresh(self) -> bool:
+        """True while every joint has recent measured-angle samples."""
+        now = time.monotonic()
+        return all(
+            now - received_at <= RESTING_FEEDBACK_TIMEOUT_SEC
+            for received_at in self.__joint_feedback_at)
+
+    def __handle_resting_events(self):
+        """Publish torque intents and log resting phase transitions."""
+        for event in self.__arm.take_resting_events():
+            if event == "torque_off":
+                self.__torque_intent = False
+                self.__torque_publisher.publish(Bool(data=False))
+                self.get_logger().info(
+                    "RESTING: collapsed, torque removed")
+            elif event == "torque_on":
+                self.__torque_intent = True
+                self.__torque_publisher.publish(Bool(data=True))
+                self.get_logger().info(
+                    "RESTING: restoring torque")
+            elif event == "home":
+                self.get_logger().info(
+                    "RESTING: crouch reached, handing off to homing")
+            elif event.startswith("abort:"):
+                self.get_logger().warning(
+                    f"RESTING: {event[len('abort:'):]}")
+
+    def __publish_resting_latches(self):
+        """Refresh the resting/torque levels for the hardware latches.
+
+        The resting level gates the widened target limits; the torque level
+        is the planner's intent (False while collapsed or after a resting
+        E-stop, True otherwise).
+        """
+        self.__resting_publisher.publish(
+            Bool(data=bool(self.__arm.resting)))
+        self.__torque_publisher.publish(
+            Bool(data=bool(self.__torque_intent)))
 
     # ------------------------------------------------------------------
     # Control cycle
@@ -476,6 +570,8 @@ class ArmRoutePlannerNode(Node):
             self.__arm.sync_angles(
                 list(self.__measured), reset_target=True)
             mode = self.__arm.infer_initial_mode()
+            if mode == "RESTING":
+                self.__torque_intent = False
             angle_text = " ".join(
                 f"{math.degrees(a):.1f}" for a in self.__measured)
             self.get_logger().info(
@@ -487,6 +583,9 @@ class ArmRoutePlannerNode(Node):
             # the starting pose as soon as the arm is ready.
             self.__publish_arm_status()
             self.__publish_pose()
+            # Apply the inferred resting/torque levels right away so the
+            # hardware latches match the startup pose.
+            self.__publish_resting_latches()
 
             limits = self.__arm.effective_limits
             outside = [
@@ -512,6 +611,7 @@ class ArmRoutePlannerNode(Node):
             and not self.__arm.homing.active
             and not self.__arm.is_flipping
             and not self.__arm.zenith
+            and not self.__arm.resting
             and (self.__velocity_is_fresh()
                  or self.__arm.teleop_motion_active)
         )
@@ -530,6 +630,12 @@ class ArmRoutePlannerNode(Node):
             self.__arm.sync_angles(
                 list(self.__measured), reset_target=False)
 
+            # The resting sequence hands off to homing at the crouch.  Keep
+            # the homing hold timestamp fresh until the action completes so
+            # the release watchdog does not stop it mid-way.
+            if self.__arm.resting_action.phase == "AUTO_HOME":
+                self.__homing_command_at = time.monotonic()
+
             # Homing is a maintained action: the basestation forwards the key
             # on every held state.  Release (or a stale command stream) stops
             # the arm instead of letting it finish the move on its own.
@@ -546,19 +652,39 @@ class ArmRoutePlannerNode(Node):
             deltas = None if pose_active else self.__next_deltas()
             # An idle non-teleop path holds the achieved pose instead of
             # chasing the last target frame.  Absolute pose targets and the
-            # homing/flip actions still finish normally.
+            # homing/flip/resting actions still finish normally.
             if (not pose_active and deltas is None
                     and not self.__arm.homing.active
                     and not self.__arm.is_flipping
-                    and not self.__arm.zenith):
+                    and not self.__arm.zenith
+                    and not self.__arm.resting):
                 self.__arm.hold()
-            consumed = self.__arm.update(deltas)
+            consumed = self.__arm.update(
+                deltas,
+                feedback_fresh=self.__resting_feedback_fresh(),
+                resting_enabled=self.__arm_enabled)
+            self.__handle_resting_events()
+            # Restore handshake: wait for the hardware torque latch to
+            # confirm before leaving TORQUE_ON.
+            if (self.__arm.resting_action.phase == "TORQUE_ON"
+                    and self.__torque_state):
+                self.__arm.resting_torque_confirmed()
+                self.get_logger().info("RESTING: torque confirmed")
+            # The resting sequence completes once the auto-home finishes.
+            if (self.__arm.resting_action.phase == "AUTO_HOME"
+                    and not self.__arm.is_homing):
+                self.__arm.resting_homing_finished()
+                self.get_logger().info("RESTING: restore complete")
         self.__publish_counter += 1
         self.__publish_targets(force=self.__publish_counter % 20 == 0)
         self.__publish_arm_status()
         self.__publish_pose()
         self.__report_status(consumed)
         self.__publish_status()
+        now = time.monotonic()
+        if now - self.__latch_publish_at >= RESTING_LATCH_REFRESH_SEC:
+            self.__latch_publish_at = now
+            self.__publish_resting_latches()
 
     def __publish_targets(self, force=False):
         """Publish the rate-limited 5-DOF joint targets."""
@@ -592,6 +718,8 @@ class ArmRoutePlannerNode(Node):
 
         if self.__arm.zenith:
             mode = ARM_OPERATION_MODES["ZENITH"]
+        elif self.__arm.resting:
+            mode = ARM_OPERATION_MODES["RESTING"]
         elif self.__arm.is_homing:
             mode = ARM_OPERATION_MODES["HOMING"]
         elif self.__arm.planar:
@@ -610,6 +738,7 @@ class ArmRoutePlannerNode(Node):
             "POSITION_LOCK": self.__arm.position_locked,
             "ORIENTATION_LOCK": self.__arm.orientation_locked,
             "ZENITH": self.__arm.zenith,
+            "RESTING": self.__arm.resting,
         }
 
         self.__locked_publisher.publish(UInt8(data=locked))
@@ -660,6 +789,8 @@ class ArmRoutePlannerNode(Node):
         drive = "joint" if self.__arm.joint_drive else "position"
         if self.__arm.zenith:
             state = "zenith"
+        elif self.__arm.resting:
+            state = "resting"
         elif self.__arm.is_homing:
             state = "homing"
         elif self.__arm.is_flipping:

@@ -48,6 +48,7 @@ ARM_FLAG_BITS = {
     "POSITION_LOCK": 1 << 5,
     "ORIENTATION_LOCK": 1 << 6,
     "ZENITH": 1 << 7,
+    "RESTING": 1 << 8,
 }
 
 # Pose carries metres; the compact protocol uses centi-inches.
