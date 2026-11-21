@@ -78,6 +78,21 @@ _resolve_setup() {
     return 1
 }
 
+# ament/colcon setup files test variables such as AMENT_TRACE_SETUP_FILES
+# without a default.  A caller running under `set -u` (the autoboot service
+# does) therefore aborts inside /opt/ros/.../setup.bash at its trace check.
+# Suspend nounset just for each setup file and restore it afterwards, so the
+# ROS and workspace environment always loads completely.
+_safe_source() {
+    _ss_nounset=0
+    case "$-" in *u*) _ss_nounset=1; set +u ;; esac
+    # shellcheck disable=SC1090
+    source "$1"
+    _ss_rc=$?
+    [ "$_ss_nounset" = "1" ] && set -u
+    return "$_ss_rc"
+}
+
 if [ -n "${BASH_SOURCE[0]:-}" ]; then
     _ws_src="${BASH_SOURCE[0]}"
 elif [ -n "${ZSH_VERSION:-}" ]; then
@@ -141,7 +156,7 @@ fi
 export ROS_SETUP="$_ros_setup"
 
 # shellcheck disable=SC1090
-if ! source "$_ros_setup"; then
+if ! _safe_source "$_ros_setup"; then
     echo "[!] Failed to source ROS 2 from $_ros_setup" >&2
     echo "    If this keeps happening, run the script from a bash shell:" >&2
     echo "    bash -c 'source scripts/source.sh; exec bash'" >&2
@@ -167,7 +182,7 @@ done
 
 if [ -n "$_overlay" ]; then
     # shellcheck disable=SC1090
-    if source "$_overlay"; then
+    if _safe_source "$_overlay"; then
         _loaded="$_loaded + overlay"
 
         _build_ref="$_ws_dir/log/latest_build"
@@ -298,7 +313,7 @@ if [ -f "$_venv/bin/activate" ]; then
             fi
 
             # shellcheck disable=SC1091
-            if source "$_venv/bin/activate"; then
+            if _safe_source "$_venv/bin/activate"; then
                 # zsh caches command paths; point python3 at the venv
                 rehash 2>/dev/null || hash -r 2>/dev/null || true
                 _loaded="$_loaded + .venv"
@@ -499,7 +514,7 @@ if [ "$_source_build" = "1" ]; then
             fi
         done
         if [ -n "$_overlay" ]; then
-            source "$_overlay" || \
+            _safe_source "$_overlay" || \
                 echo "[!] Failed to source $_overlay" >&2
         fi
     fi
@@ -522,7 +537,8 @@ unset _ros_prefix _ros_py_ver _venv_info _venv_ver _venv_arch _host_arch
 unset _venv_missing _shell_kind _venv_fresh _venv_install
 unset _venv_req _venv_stamp _venv_hash _venv_stamp_hash
 unset _venv_site _venv_plat _venv_lib
+unset _ss_nounset _ss_rc
 unset _prune_var _prune_value _prune_noglob _prune_old_ifs _prune_result
 unset _prune_entry
 unset _source_arg _source_build _source_run _source_arm _source_build_ok
-unset -f _short _resolve_setup _prune_prefix_paths 2>/dev/null || true
+unset -f _short _resolve_setup _prune_prefix_paths _safe_source 2>/dev/null || true
