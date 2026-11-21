@@ -398,10 +398,16 @@ class ArmHardwareNode(Node):
         if not msg.data:
             if not self.arm_enabled:
                 return
+            # A disable (for example the arm Teensy heartbeat timing out)
+            # must not remove OpenCAN torque: the arm would drop under
+            # gravity.  Hold the measured pose and only stop accepting new
+            # targets until the master re-enables the arm.
+            self.__target_measured_positions()
             self.arm_enabled = False
             self.__forget_targets()
-            self.get_logger().info("Arm disabled")
-            self.__open_can.set_enabled(False)
+            self.get_logger().info(
+                "Arm disabled; holding measured pose "
+                "(OpenCAN torque retained)")
             return
 
         # The master republishes this level while the arm is enabled.  Re-send
@@ -416,6 +422,10 @@ class ArmHardwareNode(Node):
 
         if not self.arm_enabled:
             self.arm_enabled = True
+            # Pull a fresh position sample before the first post-enable
+            # command: while disabled the measured angles can be stale, and
+            # the controller must not start from old feedback.
+            self.request_position()
             self.get_logger().info("Arm enabled")
         self.__open_can.set_enabled(True)
 

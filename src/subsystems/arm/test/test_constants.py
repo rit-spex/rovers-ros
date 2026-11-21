@@ -153,4 +153,4 @@ def test_controller_tuning_lives_in_the_arm_constants_module():
     assert arm_constants.DT == 0.05
     assert arm_constants.HOMING_TARGET is HOMING_TARGET
     assert arm_constants.MAX_ANG_VEL > 0
-    assert arm_constants.PLANAR_BASE == math.radians(5)
+    assert arm_constants.PLANAR_BASE == math.radians(2)

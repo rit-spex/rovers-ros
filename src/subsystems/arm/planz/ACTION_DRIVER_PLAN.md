@@ -68,7 +68,7 @@ provides it — but no IK solver.
 | Target ownership | `arm_route_planner_node` is the sole writer of the five `/ARM/JOINT/TARGET_*` topics today; actions run inside its 20 Hz cycle. After the split the invariant becomes "at most one writer": the planner or the action driver, never both (§5.1). |
 | Stepping | Homing: fixed `HOMING_SPEED` per-cycle step (plus waypointed `_homing_path`). Flip: smoothstep over 30 frames. Resting: 1°/s pushes and 2°/s crouch moves, stall-detected. Teleop has its own Cartesian ramp. |
 | Zenith | Target `[any base, 90°, 0°, 0°, 0°]`; releases joint locks and restores them on exit; remembers the previous PNP side; blocks other mode commands while active; teleop ignored. Base is *not* currently forced locked. |
-| Planar | `PLANAR_LIMITS`: base ±5°, shoulder 0–180°, elbow mechanical, wrists mechanical. Exit is blocked in octants 3/5/7 and when the pose fits neither PNP side. |
+| Planar | `PLANAR_LIMITS`: base ±2°, shoulder 0–180°, elbow mechanical, wrists mechanical. Exit is blocked in octants 3/5/7 and when the pose fits neither PNP side. |
 | Resting | Enterable from any mode; resets mode flags on entry like zenith. |
 | Regions | `flipped` is a commanded flag; zenith is a commanded mode; both are also reported on `/ARM/STATE/*` flag topics and mirrored in telemetry. |
 
@@ -202,7 +202,7 @@ either duplicate the hardware interface or add a third arbiter.
 
 - `PLANAR_LIMITS` shoulder/elbow become purely mechanical limits
   (`MECHANICAL_LIMITS[1]` and `MECHANICAL_LIMITS[2]`), so planar covers the
-  full mechanical shoulder/elbow travel with the base locked to ±5°.
+  full mechanical shoulder/elbow travel with the base locked to ±2°.
 - Flipped and zenith stop being modes that planar excludes. While planar is
   active, the pose may happen to be on the flipped side or straight up; that
   coincidence is **tracked from the measured pose** and reported on the

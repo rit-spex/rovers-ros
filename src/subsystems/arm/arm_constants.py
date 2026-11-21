@@ -873,7 +873,7 @@ TRACK_ORI_TOL = 1e-4             # Orientation-drive early-exit tolerance [rad]
 ELBOW_DEADBAND = 0.2               # Radians - keep the elbow away from singularity
 O3_RELAX_MAX = math.radians(35)    # Max overshoot excused by octant relief
 EXCLUSION_RADIUS = 6.0             # End effector keep-out radius around the base [in]
-BASE_ZERO_RANGE = (math.radians(-5), math.radians(5))  # "Base near zero" band
+BASE_ZERO_RANGE = (math.radians(-2), math.radians(2))  # near-zero band
 END_EFFECTOR_MIN_Z = -20.0         # Lower height bound for the end effector [in]
 
 
@@ -892,9 +892,9 @@ FULL_RANGE_LIMITS = list(MECHANICAL_LIMITS)
 # Homing: mechanical bounds only - no dynamic overrides
 HOMING_LIMITS = list(MECHANICAL_LIMITS)
 
-# Planar: base locked to +/-5 deg, shoulder 0-180 deg, rest mechanical
+# Planar: base locked to +/-2 deg, shoulder 0-180 deg, rest mechanical
 PLANAR_LIMITS = [
-    (-math.radians(5), math.radians(5)),    # base restricted to +/-5 deg
+    (-math.radians(2), math.radians(2)),    # base restricted to +/-2 deg
     (0, math.pi),                           # shoulder 0-180 deg
     MECHANICAL_LIMITS[2],                   # elbow (mechanical)
     MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)

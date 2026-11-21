@@ -385,9 +385,11 @@ to the backend that owns that motor:
 Targets are validated against `angle_limits()` and dropped when the arm is
 disabled. `/ESTOP` latches the arm off and blocks enable requests until it
 clears, but it does not remove OpenCAN torque: the handler sends every measured
-position as the new target so the drives hold the pose. The enable level is
-re-asserted on every tick so a dropped frame cannot leave the motors latched
-off. OpenCAN positions are
+position as the new target so the drives hold the pose. A plain disable (for
+example an arm Teensy heartbeat timeout) does the same: it commands the
+measured pose and keeps OpenCAN torque on instead of dropping the arm. The
+enable level is re-asserted on every tick so a dropped frame cannot leave the
+motors latched off. OpenCAN positions are
 requested at `DT`, and feedback is published even while the arm is disabled so
 the planner can initialize. A solenoid strike sends one
 `MOVE_SOLENOID.Enabled=1` frame; the Teensy retracts it, so there is no disable
@@ -950,6 +952,10 @@ Safety behaviour:
   republishes the enabled level, so the arm re-arms once the stop clears.
 - Motor feedback keeps flowing while the arm is disabled, so the
   planner can initialize and track the measured pose.
+- A normal disable (such as the arm Teensy heartbeat timing out) also keeps
+  OpenCAN torque on: the measured pose is commanded as the hold target, so
+  the arm does not fall under gravity. Only the resting torque latch and
+  node shutdown remove drive torque.
 - `destroy_node()` makes a best-effort attempt to disable the motors.
 
 ## Build and run

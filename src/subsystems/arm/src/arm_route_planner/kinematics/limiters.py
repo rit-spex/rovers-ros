@@ -214,7 +214,7 @@ class FullRangeMode(BaseLimiter):
 class PlanarMode(BaseLimiter):
     """Base-locked Pick-and-Place subset with extra vertical freedom.
 
-    The base is restricted to +/-5 degrees, so the mode can only be
+    The base is restricted to +/-2 degrees, so the mode can only be
     activated when the base is already inside that band.  Shoulder and
     elbow use the full mechanical travel, giving the arm more vertical
     reach than either Pick-and-Place side.
@@ -224,7 +224,7 @@ class PlanarMode(BaseLimiter):
     limits = PLANAR_LIMITS
 
     def can_set(self, angles):
-        bmin, bmax = BASE_ZERO_RANGE
+        bmin, bmax = self.limits[0]
         return bmin <= angles[0] <= bmax
 
 
