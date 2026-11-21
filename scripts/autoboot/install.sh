@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Install the autoboot systemd service for this workspace.
 #
 #   ./scripts/autoboot/install.sh                 # normal rover stack

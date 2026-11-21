@@ -13,6 +13,11 @@
 #
 # --maker-faire is an autoboot-only demo profile; main_launch.xml is unchanged.
 # ------------------------------------------------------------------
+# The systemd unit already runs /bin/bash; re-exec here so a manual launch
+# from zsh still uses standard bash rather than the caller's shell.
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec /bin/bash "$0" "$@"
+fi
 set -u
 
 _usage() {

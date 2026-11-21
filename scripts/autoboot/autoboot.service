@@ -8,6 +8,7 @@ Type=simple
 User=@USER@
 WorkingDirectory=@ROS_WS@
 Environment=HOME=@HOME@
+Environment=SHELL=/bin/bash
 ExecStart=/bin/bash @ROS_WS@/scripts/autoboot/autoboot.sh @AUTOBOOT_ARGS@
 Restart=on-failure
 RestartSec=5

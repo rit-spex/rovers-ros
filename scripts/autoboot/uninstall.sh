@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Remove the autoboot systemd service installed by install.sh.
 #
 #   ./scripts/autoboot/uninstall.sh

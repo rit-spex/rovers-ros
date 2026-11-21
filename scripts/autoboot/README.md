@@ -8,7 +8,10 @@ Run the rover stack automatically at boot through a systemd service.
 ros2 launch main main_launch.xml
 ```
 
-That is the real rover stack only: no Gazebo and no basestation.
+That is the real rover stack only: no Gazebo and no basestation. The service
+runs it with `/bin/bash` and sets `SHELL=/bin/bash`, so a zsh login shell on
+the rover does not affect autoboot; `autoboot.sh` also re-execs itself under
+bash if started from another shell.
 
 ## Maker Faire mode
 
