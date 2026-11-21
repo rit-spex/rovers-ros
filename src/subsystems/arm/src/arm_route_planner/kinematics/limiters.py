@@ -214,7 +214,7 @@ class FullRangeMode(BaseLimiter):
 class PlanarMode(BaseLimiter):
     """Base-locked Pick-and-Place subset with extra vertical freedom.
 
-    The base is restricted to +/-2 degrees, so the mode can only be
+    The base is restricted to +/-1 degrees, so the mode can only be
     activated when the base is already inside that band.  Shoulder and
     elbow use the full mechanical travel, giving the arm more vertical
     reach than either Pick-and-Place side.

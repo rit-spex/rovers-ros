@@ -5,7 +5,10 @@ import threading
 import time
 
 from arm_constants import (
-    ARM_ENABLED_TOPIC, ARM_MOTOR_IDX, ARM_RESTING_TOPIC,
+    ARM_ENABLED_TOPIC, ARM_MOTOR_IDX,
+    # RESTING DISABLED: the /ARM/HARDWARE/RESTING latch subscriber below is
+    # commented out, so the topic constant is unused here.
+    # ARM_RESTING_TOPIC,
     ARM_TORQUE_ENABLED_TOPIC, ARM_TORQUE_STATE_TOPIC,
     CURRENT_ANGLE_TOPICS, CURRENT_VELOCITY_TOPICS, DT,
     ESTOP_TOPIC, RESTING_LATCH_TIMEOUT_SEC, RESTING_LIMITS,
@@ -93,12 +96,16 @@ class ArmHardwareNode(Node):
             callback=self.__on_estop_received,
             qos_profile=10,
         )
-        self.create_subscription(
-            msg_type=Bool,
-            topic=ARM_RESTING_TOPIC,
-            callback=self.__on_resting_received,
-            qos_profile=10,
-        )
+        # RESTING DISABLED: do not subscribe to the resting hardware latch.
+        # With no subscriber the latch level can never become active, so
+        # the widened resting limits and torque-off path stay unused.
+        # Re-enable by un-commenting this subscription.
+        # self.create_subscription(
+        #     msg_type=Bool,
+        #     topic=ARM_RESTING_TOPIC,
+        #     callback=self.__on_resting_received,
+        #     qos_profile=10,
+        # )
         self.create_subscription(
             msg_type=Bool,
             topic=ARM_TORQUE_ENABLED_TOPIC,

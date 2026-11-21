@@ -652,7 +652,7 @@ class RoverArmController:
                 "Planar cannot be exited at this pose")
 
         if not PLANAR_MODE.can_set(self._angles):
-            return self._fail("Planar needs base within +/-2 deg")
+            return self._fail("Planar needs base within +/-1 deg")
         self.set_typing_mode(False)
         self.planar = True
         return True

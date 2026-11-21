@@ -354,6 +354,12 @@ class ArmActionDriverNode(Node):
 
     def _match_command(self, command: str):
         for config in self._actions:
+            # RESTING DISABLED: the resting configuration stays registered
+            # (no resting code was deleted) but never matches an incoming
+            # command, so nothing can update the action state to RESTING.
+            # Re-enable by deleting this guard.
+            if config.engine == "resting":
+                continue
             if config.matches(command):
                 return config
         return None
@@ -447,10 +453,12 @@ class ArmActionDriverNode(Node):
             self._adopted = True
             return
         self._adopted = True
-        if mode == "resting" or (mode is None and is_resting_pose(
-                self.measured)):
-            self._adopt_resting()
-            return
+        # RESTING DISABLED: a resting boot pose is never adopted, so the
+        # driver cannot enter resting from startup inference.
+        # if mode == "resting" or (mode is None and is_resting_pose(
+        #         self.measured)):
+        #     self._adopt_resting()
+        #     return
         if mode == "zenith" or (mode is None and is_zenith_pose(
                 self.measured)):
             self._begin(self._zenith, adopted=True)

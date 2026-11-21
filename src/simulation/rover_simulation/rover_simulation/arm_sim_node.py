@@ -26,7 +26,9 @@ from arm_constants import (
     ARM_JOINTS,
     ARM_MOTOR_IDX,
     ARM_MOTOR_PARAMS,
-    ARM_RESTING_TOPIC,
+    # RESTING DISABLED: the /ARM/HARDWARE/RESTING subscriber below is
+    # commented out, so the topic constant is unused here.
+    # ARM_RESTING_TOPIC,
     ARM_TORQUE_ENABLED_TOPIC,
     ARM_TORQUE_STATE_TOPIC,
     CURRENT_ANGLE_TOPICS,
@@ -242,8 +244,11 @@ class ArmSimNode(Node):
             self.__on_solenoid_received,
             10,
         )
-        self.create_subscription(
-            Bool, ARM_RESTING_TOPIC, self.__on_resting_received, 10)
+        # RESTING DISABLED: do not subscribe to the resting hardware latch,
+        # so the simulated arm can never enter the resting state either.
+        # Re-enable by un-commenting this subscription.
+        # self.create_subscription(
+        #     Bool, ARM_RESTING_TOPIC, self.__on_resting_received, 10)
         self.create_subscription(
             Bool, ARM_TORQUE_ENABLED_TOPIC,
             self.__on_torque_enabled_received, 10)

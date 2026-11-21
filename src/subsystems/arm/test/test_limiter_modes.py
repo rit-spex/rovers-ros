@@ -87,8 +87,10 @@ def test_can_set():
     check("Homing always allowed", HOMING_MODE.can_set([0, 0, 0, 0, 0]))
 
     check("Planar allowed at base 0", PLANAR_MODE.can_set([0, 0.5, -0.5, 0, 0]))
-    check("Planar allowed at base +1.5deg", PLANAR_MODE.can_set([math.radians(1.5), 0.5, -0.5, 0, 0]))
-    check("Planar allowed at base -1.5deg", PLANAR_MODE.can_set([math.radians(-1.5), 0.5, -0.5, 0, 0]))
+    check("Planar allowed at base +0.75deg", PLANAR_MODE.can_set([math.radians(0.75), 0.5, -0.5, 0, 0]))
+    check("Planar allowed at base -0.75deg", PLANAR_MODE.can_set([math.radians(-0.75), 0.5, -0.5, 0, 0]))
+    check("Planar rejected at base +1.5deg", not PLANAR_MODE.can_set([math.radians(1.5), 0.5, -0.5, 0, 0]))
+    check("Planar rejected at base -1.5deg", not PLANAR_MODE.can_set([math.radians(-1.5), 0.5, -0.5, 0, 0]))
     check("Planar rejected at base +4deg", not PLANAR_MODE.can_set([math.radians(4), 0.5, -0.5, 0, 0]))
     check("Planar rejected at base -4deg", not PLANAR_MODE.can_set([math.radians(-4), 0.5, -0.5, 0, 0]))
     check("Planar rejected at base +10deg", not PLANAR_MODE.can_set([math.radians(10), 0.5, -0.5, 0, 0]))
@@ -319,7 +321,7 @@ def test_clamp_angles():
     check("base clamped to 135deg", abs(math.degrees(out[0]) - 135) < 1e-6)
 
     out = PLANAR_MODE.clamp_angles([math.radians(30), 0.5, -0.5, 0, 0], None)
-    check("Planar clamps base to +2deg", abs(math.degrees(out[0]) - 2) < 1e-6)
+    check("Planar clamps base to +1deg", abs(math.degrees(out[0]) - 1) < 1e-6)
 
     out = HOMING_MODE.clamp_angles([math.radians(200), 0.5, -0.5, 0, 0], None)
     check("Homing clamps base to 135deg", abs(math.degrees(out[0]) - 135) < 1e-6)

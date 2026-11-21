@@ -59,7 +59,9 @@ from arm_route_planner.kinematics.linkage_models import (
 from arm_route_planner.kinematics.arm_controller import RoverArmController
 from arm_route_planner.kinematics.limiters import (
     PICK_AND_PLACE_MODE,
-    RESTING_MODE,
+    # RESTING DISABLED: RESTING_MODE is only used by the resting
+    # activation block in __mirror_action_state, commented out below.
+    # RESTING_MODE,
     ZENITH_MODE,
 )
 from arm_route_planner.kinematics.regions import RegionTracker
@@ -494,13 +496,16 @@ class ArmRoutePlannerNode(Node):
             self.__arm.typing = False
             self.__arm.locked_joints[0] = True
             self.__arm.locked_joints[4] = True
-        if resting_now and not self.__arm.resting:
-            self.__action_saved_locks = list(self.__arm.locked_joints)
-            self.__arm.resting = True
-            self.__arm.limit_mode = RESTING_MODE
-            self.__arm.planar = True
-            self.__arm.locked_joints = [
-                False] * len(self.__arm.locked_joints)
+        # RESTING DISABLED: never mirror the driver's resting action into
+        # the planner state.  Deactivation above still runs, so a planner
+        # already marked resting can leave the mode cleanly.
+        # if resting_now and not self.__arm.resting:
+        #     self.__action_saved_locks = list(self.__arm.locked_joints)
+        #     self.__arm.resting = True
+        #     self.__arm.limit_mode = RESTING_MODE
+        #     self.__arm.planar = True
+        #     self.__arm.locked_joints = [
+        #         False] * len(self.__arm.locked_joints)
 
     def __request_inferred_action(self, mode):
         """Ask the action driver to adopt the startup pose.
@@ -513,9 +518,10 @@ class ArmRoutePlannerNode(Node):
         if mode == "ZENITH":
             self.__action_pending = ACTION_ACTIVE_ZENITH
             command = "adopt:zenith"
-        elif mode == "RESTING":
-            self.__action_pending = ACTION_ACTIVE_RESTING
-            command = "adopt:resting"
+        # RESTING DISABLED: never ask the driver to adopt a resting pose.
+        # elif mode == "RESTING":
+        #     self.__action_pending = ACTION_ACTIVE_RESTING
+        #     command = "adopt:resting"
         else:
             return
         now = time.monotonic()

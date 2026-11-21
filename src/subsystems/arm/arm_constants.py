@@ -278,7 +278,7 @@ ARM_OPERATION_MODE_LABELS = {
 A0 = 6.32        # Elevation of shoulder joint from base [in]
 A1 = 18.25         # Upper arm length [in]
 A2 = 19.5         # Fore-arm length [in]
-A3 = 12         # Gripper length [in]
+A3 = 2         # Gripper length [in]
 
 # Key joint indices after each linkage translation.
 KEY_JOINT_IDX = [1, 3, 5, 8]
@@ -668,8 +668,8 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # The single cruise speed is owned by arm_action_driver_node
 # (MOVE_SPEED_RAD_S = 25 deg/s for every joint); per-joint hardware caps come
 # from ARM_MOTOR_MAX_ANG_VEL.  Details: planz/ACTION_DRIVER_PLAN.md §6.
-ACTION_ACCEL_RAD_S2 = 0.5
-ACTION_DECEL_RAD_S2 = 0.66
+ACTION_ACCEL_RAD_S2 = 0.25
+ACTION_DECEL_RAD_S2 = 0.33
 
 
 # =============================================================================
@@ -892,9 +892,9 @@ FULL_RANGE_LIMITS = list(MECHANICAL_LIMITS)
 # Homing: mechanical bounds only - no dynamic overrides
 HOMING_LIMITS = list(MECHANICAL_LIMITS)
 
-# Planar: base locked to +/-2 deg, shoulder 0-180 deg, rest mechanical
+# Planar: base locked to +/-1 deg, shoulder 0-180 deg, rest mechanical
 PLANAR_LIMITS = [
-    (-math.radians(2), math.radians(2)),    # base restricted to +/-2 deg
+    (-math.radians(1), math.radians(1)),    # base restricted to +/-1 deg
     (0, math.pi),                           # shoulder 0-180 deg
     MECHANICAL_LIMITS[2],                   # elbow (mechanical)
     MECHANICAL_LIMITS[3],                   # wrist bend (mechanical)
@@ -1023,5 +1023,9 @@ WAYPOINT_TOL = HOMING_THRESHOLD
 WAYPOINT_STALL_LIMIT = 40               # ~2 s at DT
 # Leave headroom for waypoint-following lag: the arm stops within
 # WAYPOINT_TOL of a waypoint, so a plan that hugs the exact planar-band
-# boundary can drift outside it while closing on the next point.
-PATH_PLANAR_BASE = max(0.0, PLANAR_BASE - WAYPOINT_TOL)
+# boundary can drift outside it while closing on the next point.  Cap the
+# headroom at half the band: once the band is as narrow as WAYPOINT_TOL
+# (1 deg at 1 deg), subtracting the full tolerance would collapse the path
+# band to zero and reject every waypoint.
+PATH_PLANAR_BASE = max(
+    0.0, PLANAR_BASE - min(WAYPOINT_TOL, PLANAR_BASE / 2.0))

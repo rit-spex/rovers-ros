@@ -126,6 +126,9 @@ def test_node_defaults_live_in_the_arm_constants_module():
     assert arm_constants.WAYPOINT_STALL_LIMIT > 0
     assert (arm_constants.PATH_PLANAR_BASE
             <= arm_constants.PLANAR_BASE)
+    # Path planning needs a non-degenerate interior band even when the
+    # planar band is as narrow as the waypoint tolerance.
+    assert arm_constants.PATH_PLANAR_BASE > 0.0
 
 
 def test_spacemouse_axis_map_lives_in_the_arm_constants_module():
@@ -153,4 +156,4 @@ def test_controller_tuning_lives_in_the_arm_constants_module():
     assert arm_constants.DT == 0.05
     assert arm_constants.HOMING_TARGET is HOMING_TARGET
     assert arm_constants.MAX_ANG_VEL > 0
-    assert arm_constants.PLANAR_BASE == math.radians(2)
+    assert arm_constants.PLANAR_BASE == math.radians(1)
