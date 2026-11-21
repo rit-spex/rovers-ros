@@ -79,6 +79,7 @@ from arm_constants import (
     PHASE_ZENITH_EXITING,
     RESTING_FEEDBACK_TIMEOUT_SEC,
     RESTING_LATCH_REFRESH_SEC,
+    RESTING_PUSH_RATE,
 )
 from arm_action_driver.actions import ACTION_CONFIG_CLASSES
 from arm_action_driver.actions.base import JOINT_INDEX, _clamp
@@ -200,10 +201,12 @@ class ArmActionDriverNode(Node):
         self._zenith = self._find(ZenithConfiguration)
 
         # Resting engine state.
+        # Crouch and restore travel use the shared action speed; only the
+        # limit pushes (and their backoffs) are deliberately slow.
         self._resting_controller = self.resting.controller_class(
             crouch=self.resting.crouch_target,
             move_speed=MOVE_SPEED_RAD_S,
-            push_speed=MOVE_SPEED_RAD_S)
+            push_speed=RESTING_PUSH_RATE)
         self._resting_path_phase = None
 
         self._create_interfaces()
@@ -776,7 +779,8 @@ class ArmActionDriverNode(Node):
         path = plan_safe_path(self.model, held, target)
         if path and len(path) > 1:
             controller.set_path(
-                path[1:], [MOVE_SPEED_RAD_S * DT] * len(held))
+                path[1:],
+                [controller.move_speed * DT] * len(held))
 
     def _finish_resting_restore(self):
         self.active = ACTION_ACTIVE_IDLE

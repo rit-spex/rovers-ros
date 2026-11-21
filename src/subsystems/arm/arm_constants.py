@@ -384,8 +384,10 @@ RESTING_LIMIT_PADDING = math.radians(30.0)
 # Crouch pose the arm collapses to before the limit pushes.
 RESTING_CROUCH_TARGET = [0.0, 0.0, math.radians(135.0), 0.0, 0.0]
 
-# Slow move speeds: crouch/restore moves run at 2 deg/s, the limit pushes at
-# 1 deg/s.
+# Resting motion speeds.  Crouch/restore travel uses the action driver's
+# shared cruise speed (MOVE_SPEED_RAD_S); only the limit pushes and their
+# backoffs run slow.  These constants are the RestingController defaults
+# for direct controller use.
 RESTING_MOVE_ANG_VEL = math.radians(2.0)
 RESTING_PUSH_RATE = math.radians(1.0)
 # Watchdog for the crouch and move-out phases.  The worst case is a 270 deg
@@ -666,8 +668,8 @@ HOMING_THRESHOLD = 1 / RAD2DEG                # Convergence threshold (~1 deg)
 # The single cruise speed is owned by arm_action_driver_node
 # (MOVE_SPEED_RAD_S = 25 deg/s for every joint); per-joint hardware caps come
 # from ARM_MOTOR_MAX_ANG_VEL.  Details: planz/ACTION_DRIVER_PLAN.md §6.
-ACTION_ACCEL_RAD_S2 = 2.0
-ACTION_DECEL_RAD_S2 = 4.0
+ACTION_ACCEL_RAD_S2 = 0.5
+ACTION_DECEL_RAD_S2 = 0.66
 
 
 # =============================================================================

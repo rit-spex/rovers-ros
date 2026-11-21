@@ -361,11 +361,12 @@ publishing; the hardware position-locks the measured pose.
 The node itself is a thin shell: each action is an `ActionConfiguration`
 subclass (`arm_action_driver/actions/{homing,flip,zenith,resting}.py`)
 that declares its trigger/release commands, active enum, motion
-limits, and hold/toggle flags, and implements `trigger` / `update` /
-`release` / `abort` / `adopt` / `progress` hooks. The node routes commands,
-enforces ownership gating, and publishes status from the registry
-(`arm_action_driver/actions/__init__.py`) alone. Adding an action is
-creating a class and appending it to the registry - see
+limits, and hold/toggle flags.  The node owns the move and resting
+engines (gating, release/adopt handling, ramp stepping, progress); a
+parameter block never implements lifecycle behaviour.  The node routes
+commands, enforces ownership gating, and publishes status from the
+registry (`arm_action_driver/actions/__init__.py`) alone. Adding an
+action is creating a class and appending it to the registry - see
 `arm_action_driver/actions/base.py`.
 
 ---
@@ -807,13 +808,14 @@ simulation and hardware.
   nearest valid pose on the last Pick-and-Place side before restoring that
   side and its locks. Other mode commands, homing, and flips are refused
   until zenith is exited.
-- **Resting:** the `R` key collapses the arm for transport: slow-step to the
-  crouch `[0, 0, 135, 0, 0]` degrees along a planned path, push the shoulder
-  toward its lower stop and the elbow toward its upper stop at 1 deg/s until
-  each stalls, back each off 0.5 degrees, then remove torque from the three
-  OpenCAN motors. The next `R` restores torque at the measured pose, returns
-  to the crouch, hands off to normal homing, and ends in Pick-and-Place with
-  the operator's saved joint locks restored. R mid-sequence aborts and holds
+- **Resting:** the `R` key collapses the arm for transport: move to the
+  crouch `[0, 0, 135, 0, 0]` degrees along a planned path at the shared
+  action speed, push the shoulder toward its lower stop and the elbow toward
+  its upper stop at 1 deg/s until each stalls, back each off 0.5 degrees,
+  then remove torque from the three OpenCAN motors. The next `R` restores
+  torque at the measured pose, returns to the crouch, hands off to normal
+  homing, and ends in Pick-and-Place with the operator's saved joint locks
+  restored. R mid-sequence aborts and holds
   with torque on; an E-stop during resting latches torque off until the
   restore. While resting, other mode commands, homing, flips, joint locks,
   and teleop are rejected, and the shoulder/elbow targets are validated

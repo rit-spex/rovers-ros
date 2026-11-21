@@ -59,6 +59,31 @@ def _push_phase_controller(joint, target, start_angle):
     return controller
 
 
+def test_crouch_move_uses_the_move_speed():
+    move = math.radians(25.0)
+    controller = RestingController(
+        move_speed=move, push_speed=math.radians(1.0))
+    controller.begin_collapse()
+    _, max_step, _ = controller.update(
+        [0.0] * 5, dt=DT, feedback_fresh=True, enabled=True)
+
+    assert max_step == pytest.approx(move * DT)
+
+
+def test_push_uses_the_separate_slow_push_speed():
+    push = math.radians(1.0)
+    controller = RestingController(
+        move_speed=math.radians(25.0), push_speed=push)
+    controller.begin_collapse()
+    controller.phase = controller.PHASE_PUSH_SHOULDER
+    controller._start_push(1, RESTING_SHOULDER_PUSH, [0.0] * 5)
+
+    _, max_step, _ = controller.update(
+        [0.0] * 5, dt=DT, feedback_fresh=True, enabled=True)
+
+    assert max_step == pytest.approx(push * DT)
+
+
 def test_push_declares_stall_when_measured_stops_advancing():
     controller = _push_phase_controller(1, RESTING_SHOULDER_PUSH, 0.0)
     angles = [0.0, 0.0, 0.0, 0.0, 0.0]
