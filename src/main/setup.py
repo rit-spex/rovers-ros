@@ -9,8 +9,10 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name, ['launch/' + package_name + '_launch.xml'])
+        ('share/' + package_name,
+            ['package.xml',
+             'launch/' + package_name + '_launch.xml',
+             'launch/maker_faire_launch.xml'])
     ],
     install_requires=['setuptools'],
     zip_safe=True,

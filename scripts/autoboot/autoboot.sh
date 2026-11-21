@@ -39,6 +39,6 @@ cd "$_ws_dir" || exit 1
 source scripts/source.sh || exit 1
 
 if [ "$_maker_faire" -eq 1 ]; then
-    exec ros2 launch "$_ws_dir/scripts/autoboot/maker_faire_launch.xml"
+    exec ros2 launch main maker_faire_launch.xml
 fi
 exec ros2 launch main main_launch.xml

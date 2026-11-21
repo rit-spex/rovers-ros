@@ -19,7 +19,8 @@ normal rover stack:
 ./scripts/autoboot/install.sh --maker-faire
 ```
 
-This uses `scripts/autoboot/maker_faire_launch.xml`, an autoboot-only profile
+This uses the `main` package's `maker_faire_launch.xml`
+(`ros2 launch main maker_faire_launch.xml`), an autoboot-only profile
 that includes `main_launch.xml` and adds the simulated wrist/gripper Teensy.
 `main_launch.xml` itself is not changed, so manual launches are unaffected.
 Re-run `install.sh` without the flag to go back to the normal profile.
@@ -75,7 +76,10 @@ sudo automatically. Re-run `install.sh` to turn autoboot back on.
 | File | Purpose |
 |---|---|
 | `autoboot.sh` | Sources the workspace and launches the rover stack |
-| `maker_faire_launch.xml` | Autoboot-only profile: normal stack plus `arm_simulated_teensy_node` |
 | `autoboot.service` | systemd unit template (`@USER@`, `@HOME@`, `@ROS_WS@`, `@AUTOBOOT_ARGS@`) |
 | `install.sh` | Fills in the template and installs the unit |
 | `uninstall.sh` | Stops, disables, and removes the unit |
+
+The Maker Faire profile now ships with the `main` package
+(`src/main/launch/maker_faire_launch.xml`) and is launched as
+`ros2 launch main maker_faire_launch.xml`.
