@@ -30,6 +30,13 @@ from std_msgs.msg import Bool, Float32
 
 from .open_can_handler import OpenCanHandler
 
+# Measured angles are only published when they change, but a late subscriber
+# (the route planner or telemetry uplink starting after the arm) would then
+# never see an unchanged joint.  Refresh every finite measured angle at 1 Hz so
+# constant feedback, notably the simulated Teensy's pinned wrists, still
+# reaches every consumer and lets the planner initialize.
+FEEDBACK_REFRESH_CYCLES = 20
+
 
 class ArmHardwareNode(Node):
     """Bridge the arm ROS topics to the motor backends over CAN."""
@@ -60,6 +67,7 @@ class ArmHardwareNode(Node):
         self.__resting_at = 0.0
         self.__torque_off = False
         self.__velocity_toggle = False
+        self.__feedback_refresh_counter = 0
         self.__motors_target_angles = [float("nan")] * len(ARM_MOTOR_IDX)
         self.__motors_actual_angles = [float("nan")] * len(ARM_MOTOR_IDX)
 
@@ -537,6 +545,10 @@ class ArmHardwareNode(Node):
         cycles so they never collide with the position reads in one cycle.
         """
         self.__open_can.request_positions()
+        self.__feedback_refresh_counter = (
+            (self.__feedback_refresh_counter + 1) % FEEDBACK_REFRESH_CYCLES)
+        if self.__feedback_refresh_counter == 0:
+            self.__publish_measured_angles()
         if self.__resting:
             if (time.monotonic() - self.__resting_at
                     > RESTING_LATCH_TIMEOUT_SEC):
@@ -548,6 +560,19 @@ class ArmHardwareNode(Node):
                 self.__open_can.request_velocity(
                     ARM_MOTOR_IDX.SHOULDER if self.__velocity_toggle
                     else ARM_MOTOR_IDX.ELBOW)
+
+    def __publish_measured_angles(self):
+        """Republish the latest measured angles for late subscribers.
+
+        ``__on_new_CAN_message_received`` suppresses unchanged values, so a
+        consumer that starts after the arm would otherwise never initialize
+        from a stationary joint.
+        """
+        for motor_idx in ARM_MOTOR_IDX:
+            angle = self.__motors_actual_angles[motor_idx]
+            if math.isfinite(angle):
+                self.__angle_publishers[motor_idx].publish(
+                    Float32(data=angle))
 
     def destroy_node(self):
         """Disable the motors before shutting the node down."""

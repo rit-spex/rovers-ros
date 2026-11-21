@@ -391,7 +391,11 @@ measured pose and keeps OpenCAN torque on instead of dropping the arm. The
 enable level is re-asserted on every tick so a dropped frame cannot leave the
 motors latched off. OpenCAN positions are
 requested at `DT`, and feedback is published even while the arm is disabled so
-the planner can initialize. A solenoid strike sends one
+the planner can initialize. Unchanged angle frames are not republished, but
+every finite measured angle is refreshed at 1 Hz so a planner, telemetry
+uplink, or basestation that starts after the arm still receives all five
+joints — including the simulated Teensy's constant wrist values. A solenoid
+strike sends one
 `MOVE_SOLENOID.Enabled=1` frame; the Teensy retracts it, so there is no disable
 command. `destroy_node()` makes a best-effort attempt to disable the motors.
 
